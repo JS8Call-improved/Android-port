@@ -60,7 +60,6 @@
 #include "decodedtext.h"
 #include "Radio.hpp"
 #include "Bands.hpp"
-#include "TransceiverBase.hpp"
 #include "TransceiverFactory.hpp"
 #include "StationList.hpp"
 #include "MessageClient.hpp"
@@ -4784,7 +4783,7 @@ void MainWindow::guiUpdate()
     m_TRperiod = period; // Investigate: Does anyone need this?
 
     // Propagate any tx delay change to m_hb_loop and m_cq_loop.
-    double tx_delay_now = m_config.txDelay() + TransceiverBase::PTT_DELAY_MS/1000.0;
+    double tx_delay_now = m_config.txDelay();
     if(tx_delay_now != m_TxDelay) {
         m_TxDelay = tx_delay_now;
         qint64 tx_delay_ms = std::lround(tx_delay_now * 1000);

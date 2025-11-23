@@ -60,12 +60,6 @@ class TransceiverBase
 {
   Q_OBJECT;
 
-public:
-  /**
-   * When you press PTT, it takes at least this long to get an answer:
-   */
-  static const unsigned PTT_DELAY_MS = 100;
-
 protected:
   TransceiverBase (QObject * parent)
     : Transceiver {parent}
