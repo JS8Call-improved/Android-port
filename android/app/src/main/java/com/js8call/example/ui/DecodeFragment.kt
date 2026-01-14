@@ -31,12 +31,29 @@ class DecodeFragment : Fragment() {
     private lateinit var emptyText: TextView
     private lateinit var clearFab: FloatingActionButton
 
+    private var myGroups: Set<String> = emptySet()
+
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
         savedInstanceState: Bundle?
     ): View? {
         return inflater.inflate(R.layout.fragment_decodes, container, false)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        loadGroups()
+    }
+
+    private fun loadGroups() {
+        val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext())
+        val groupsStr = prefs.getString("my_groups", "") ?: ""
+        myGroups = groupsStr.split(",").map { it.trim().uppercase() }.filter { it.isNotEmpty() }.toSet()
+        if (::adapter.isInitialized) {
+            adapter.myGroups = myGroups
+            adapter.notifyDataSetChanged()
+        }
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
@@ -137,6 +154,7 @@ class DecodeFragment : Fragment() {
 
     private fun isCallsignPrefix(token: String): Boolean {
         if (token.isBlank()) return false
+        if (myGroups.contains(token)) return true
         if (token.startsWith("@")) return false
         if (token in setOf("CQ", "HB", "HEARTBEAT", "ALLCALL", "@ALLCALL")) return false
         val callsignRegex = Regex("^[A-Z0-9/]{3,12}$")

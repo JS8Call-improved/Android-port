@@ -16,6 +16,8 @@ import com.js8call.example.model.DecodedMessage
  */
 class DecodeListAdapter : ListAdapter<DecodedMessage, DecodeListAdapter.DecodeViewHolder>(DecodeDiffCallback()) {
 
+    var myGroups: Set<String> = emptySet()
+
     var onItemClick: ((DecodedMessage) -> Unit)? = null
     var onItemLongClick: ((DecodedMessage) -> Boolean)? = null
 
@@ -27,7 +29,7 @@ class DecodeListAdapter : ListAdapter<DecodedMessage, DecodeListAdapter.DecodeVi
 
     override fun onBindViewHolder(holder: DecodeViewHolder, position: Int) {
         val decode = getItem(position)
-        holder.bind(decode)
+        holder.bind(decode, myGroups)
 
         holder.itemView.setOnClickListener {
             onItemClick?.invoke(decode)
@@ -45,8 +47,9 @@ class DecodeListAdapter : ListAdapter<DecodedMessage, DecodeListAdapter.DecodeVi
         private val dtText: TextView = itemView.findViewById(R.id.dt_text)
         private val freqText: TextView = itemView.findViewById(R.id.freq_text)
         private val messageText: TextView = itemView.findViewById(R.id.message_text)
+        private val defaultTextColor = messageText.currentTextColor
 
-        fun bind(decode: DecodedMessage) {
+        fun bind(decode: DecodedMessage, myGroups: Set<String>) {
             // Set SNR indicator color
             val color = ContextCompat.getColor(itemView.context, decode.snrColorRes)
             snrIndicator.setBackgroundColor(color)
@@ -57,6 +60,14 @@ class DecodeListAdapter : ListAdapter<DecodedMessage, DecodeListAdapter.DecodeVi
             dtText.text = String.format("%+.1f s", decode.dt)
             freqText.text = String.format("%.1f Hz", decode.frequency)
             messageText.text = decode.text
+
+            // Highlight group messages
+            val isGroupMsg = myGroups.any { it.isNotEmpty() && decode.text.contains(it, ignoreCase = true) }
+            if (isGroupMsg) {
+                messageText.setTextColor(ContextCompat.getColor(itemView.context, R.color.highlight_group))
+            } else {
+                messageText.setTextColor(defaultTextColor)
+            }
         }
     }
 

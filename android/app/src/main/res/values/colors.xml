@@ -79,4 +79,5 @@
     <color name="snr_weak">#DD2C00</color>       <!-- Red -->
     <color name="tx_button_queued">#F9A825</color>
     <color name="tx_button_transmitting">#D32F2F</color>
+    <color name="highlight_group">#E040FB</color>
 </resources>

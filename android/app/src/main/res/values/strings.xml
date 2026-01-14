@@ -77,6 +77,8 @@
     <string name="settings_grid_update">Update grid from GPS location</string>
     <string name="settings_info">Info Message</string>
     <string name="settings_info_summary">Reply text for INFO?</string>
+    <string name="settings_groups">My Groups</string>
+    <string name="settings_groups_summary">Comma-separated list of groups to monitor (e.g. @JS8, @APRSIS)</string>
     <string name="settings_status">Status Message</string>
     <string name="settings_status_summary">Reply text for STATUS?</string>
 

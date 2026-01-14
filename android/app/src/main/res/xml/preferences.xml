@@ -28,6 +28,13 @@
             app:iconSpaceReserved="false" />
 
         <EditTextPreference
+            app:key="my_groups"
+            app:title="@string/settings_groups"
+            app:summary="@string/settings_groups_summary"
+            app:useSimpleSummaryProvider="true"
+            app:iconSpaceReserved="false" />
+
+        <EditTextPreference
             app:key="my_status"
             app:title="@string/settings_status"
             app:summary="@string/settings_status_summary"
