@@ -135,6 +135,10 @@
     <string name="settings_relay">Enable Relay</string>
     <string name="settings_relay_summary">Automatically relay messages using CALL&gt;</string>
 
+    <string name="settings_category_heartbeat">Heartbeat</string>
+    <string name="settings_heartbeat_interval">Heartbeat Interval</string>
+    <string name="settings_heartbeat_interval_summary">Time between automatic heartbeats</string>
+
     <!-- Permissions -->
     <string name="permission_audio_title">Microphone Permission</string>
     <string name="permission_audio_message">JS8Call needs microphone access to receive signals</string>

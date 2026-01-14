@@ -233,4 +233,21 @@
 
     </PreferenceCategory>
 
+    <!-- Heartbeat Category -->
+    <PreferenceCategory
+        app:title="@string/settings_category_heartbeat"
+        app:iconSpaceReserved="false">
+
+        <ListPreference
+            app:key="heartbeat_interval"
+            app:title="@string/settings_heartbeat_interval"
+            app:summary="@string/settings_heartbeat_interval_summary"
+            app:entries="@array/heartbeat_interval_entries"
+            app:entryValues="@array/heartbeat_interval_values"
+            app:defaultValue="0"
+            app:useSimpleSummaryProvider="true"
+            app:iconSpaceReserved="false" />
+
+    </PreferenceCategory>
+
 </PreferenceScreen>

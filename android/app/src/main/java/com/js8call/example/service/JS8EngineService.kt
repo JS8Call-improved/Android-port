@@ -7,6 +7,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
@@ -129,6 +130,20 @@ class JS8EngineService : Service() {
         }
     }
 
+    private val heartbeatHandler = Handler(Looper.getMainLooper())
+    private var nextHeartbeatTime = 0L
+    private val heartbeatRunnable = object : Runnable {
+        override fun run() {
+            checkHeartbeat()
+        }
+    }
+
+    private val preferenceChangeListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == PREF_HEARTBEAT_INTERVAL) {
+            scheduleHeartbeat(true)
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
@@ -138,6 +153,11 @@ class JS8EngineService : Service() {
         txHandlerThread.start()
         txHandler = Handler(txHandlerThread.looper)
         txMonitorHandler = Handler(Looper.getMainLooper())
+        
+        val prefs = PreferenceManager.getDefaultSharedPreferences(this)
+        prefs.registerOnSharedPreferenceChangeListener(preferenceChangeListener)
+        scheduleHeartbeat(true)
+        
         Log.i(TAG, "Service created")
     }
 
@@ -188,6 +208,11 @@ class JS8EngineService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         Log.i(TAG, "Service destroyed")
+        
+        val prefs = PreferenceManager.getDefaultSharedPreferences(this)
+        prefs.unregisterOnSharedPreferenceChangeListener(preferenceChangeListener)
+        heartbeatHandler.removeCallbacksAndMessages(null)
+        
         stopEngine()
         txHandlerThread.quitSafely()
     }
@@ -1256,7 +1281,164 @@ class JS8EngineService : Service() {
         Log.i(TAG, "SCO routing disabled")
     }
 
+    private fun checkHeartbeat() {
+        // This function is now just the runnable target, actual scheduling is handled by postDelayed in scheduleHeartbeat
+        sendHeartbeat()
+    }
+
+    private fun scheduleHeartbeat(first: Boolean) {
+        val prefs = PreferenceManager.getDefaultSharedPreferences(this)
+        val intervalStr = prefs.getString(PREF_HEARTBEAT_INTERVAL, "0") ?: "0"
+        val intervalMinutes = intervalStr.toIntOrNull() ?: 0
+
+        if (intervalMinutes <= 0) {
+            heartbeatHandler.removeCallbacks(heartbeatRunnable)
+            Log.i(TAG, "Heartbeat disabled")
+            return
+        }
+
+        val now = System.currentTimeMillis()
+        val frameDuration = getFrameDurationMs()
+        
+        // Base delay
+        var delay = if (first) {
+            // If first run, schedule for the next available slot (plus a small random wait to avoid instant blast?)
+            // actually, let's just wait one interval to be polite, or at least a few frames.
+            // Desktop does "first ? 0 : interval". 
+            // If we use 0, we transmit immediately on app start if enabled. 
+            // Let's use 10 seconds min for first run to allow system to settle.
+            10000L 
+        } else {
+            intervalMinutes * 60 * 1000L
+        }
+        
+        // Jitter: 25% chance to skip a frame (Desktop style)
+        if (Math.random() < 0.25) {
+            delay += frameDuration
+        }
+        
+        var targetTime = now + delay
+        
+        // Align to next frame boundary (UTC epoch)
+        // We want the trigger to happen slightly BEFORE the boundary (e.g. 2000ms)
+        // so the engine has time to pick it up for the immediate slot.
+        val remainder = targetTime % frameDuration
+        val timeToBoundary = frameDuration - remainder
+        targetTime += timeToBoundary
+        
+        // Schedule 2 seconds before the slot starts
+        targetTime -= 2000L
+        
+        // Ensure strictly future
+        if (targetTime <= now) {
+            targetTime += frameDuration
+        }
+        
+        nextHeartbeatTime = targetTime
+        
+        Log.i(TAG, "Heartbeat scheduled for ${java.util.Date(nextHeartbeatTime)} (interval=$intervalMinutes min, frame=${frameDuration/1000}s)")
+        
+        heartbeatHandler.removeCallbacks(heartbeatRunnable)
+        val waitMs = nextHeartbeatTime - now
+        heartbeatHandler.postDelayed(heartbeatRunnable, waitMs)
+    }
+
+    private fun getFrameDurationMs(): Long {
+        return when (getPreferredTxSubmode()) {
+            SUBMODE_SLOW -> 30000L
+            SUBMODE_NORMAL -> 15000L
+            SUBMODE_FAST -> 10000L
+            SUBMODE_TURBO -> 6000L
+            else -> 15000L
+        }
+    }
+
+    private fun sendHeartbeat() {
+        if (isTransmitActive()) {
+            Log.i(TAG, "Skipping heartbeat due to active transmission, rescheduling")
+            scheduleHeartbeat(false)
+            return
+        }
+
+        val prefs = PreferenceManager.getDefaultSharedPreferences(this)
+        val callsign = getConfiguredCallsign() ?: return
+        val grid = prefs.getString("grid", "")?.trim().orEmpty().uppercase()
+
+        // 500 - 1000 Hz
+        val low = 500
+        val high = 1000
+        val freq = (low + Math.random() * (high - low)).toFloat()
+        
+        // Message format: CALL: @HB HEARTBEAT GRID
+        // Note: JS8Call desktop constructs it as: CALL: @HB HEARTBEAT GRID
+        // My buildTxMessage handles adding the "CALL: " part if we pass "@HB HEARTBEAT GRID" as text and directedCall as ""?
+        // Wait, handleTransmitMessage uses:
+        // text = payloadText
+        // myCall = callsign
+        // selectedCall = directed
+        
+        // Let's use transmitMessage directly
+        
+        val message = "@HB HEARTBEAT $grid"
+        // If I pass selectedCall as empty, buildTxMessage logic:
+        // if directedCall is empty, return text.
+        // So I need to construct the full line myself?
+        // nativeTransmitMessage expects "text" (payload) and "selectedCall".
+        // The engine likely frames it.
+        // Let's look at desktop:
+        // lines.append(QString("%1: HEARTBEAT %2").arg(mycall).arg(mygrid));
+        // So "CALL: HEARTBEAT GRID"
+        
+        // But wait, the standard heartbeat format is often directed to @HB?
+        // Desktop varicode.cpp:
+        // QRegularExpression heartbeat_re(R"(^\s*(?<callsign>[@](?:ALLCALL|HB)\s+)?(?<type>CQ CQ CQ|CQ DX|CQ QRP|CQ CONTEST|CQ FIELD|CQ FD|CQ CQ|CQ|HB|HEARTBEAT(?!\s+SNR))(?:\s(?<grid>[A-R]{2}[0-9]{2}))?\b)");
+        
+        // Let's stick to what the JS8Call guide says or what works.
+        // Usually: "CALL: @HB HEARTBEAT GRID4"
+        
+        val payload = "@HB HEARTBEAT ${grid.take(4)}"
+        
+        Log.i(TAG, "Sending Heartbeat: $payload at ${freq}Hz")
+
+        val activeEngine = engine
+        if (activeEngine != null) {
+             val ok = activeEngine.transmitMessage(
+                text = payload,
+                myCall = callsign,
+                myGrid = grid,
+                selectedCall = "", // Broadcast-ish
+                submode = getPreferredTxSubmode(),
+                audioFrequencyHz = freq.toDouble(),
+                txDelaySec = 0.0,
+                forceIdentify = true, // Force ID to ensure callsign is sent
+                forceData = false
+            )
+            
+            if (ok) {
+                broadcastTxState(TX_STATE_QUEUED)
+                startTxMonitor()
+            } else {
+                Log.e(TAG, "Failed to send heartbeat")
+            }
+        }
+
+        scheduleHeartbeat(false)
+    }
+
+    private fun disableHeartbeat() {
+        val prefs = PreferenceManager.getDefaultSharedPreferences(this)
+        val current = prefs.getString(PREF_HEARTBEAT_INTERVAL, "0")
+        if (current != "0") {
+            Log.i(TAG, "Disabling heartbeat due to manual transmission")
+            prefs.edit().putString(PREF_HEARTBEAT_INTERVAL, "0").apply()
+            // The listener will trigger and stop the handler
+        }
+    }
+
     private fun handleTransmitMessage(intent: Intent) {
+        // Disable heartbeat on manual transmission
+        disableHeartbeat()
+
         val activeEngine = engine
         if (activeEngine == null) {
             broadcastError("Engine not running")
@@ -2159,6 +2341,7 @@ class JS8EngineService : Service() {
         const val EXTRA_TX_STATE = "tx_state"
         const val EXTRA_RADIO_FREQUENCY_HZ = "radio_frequency_hz"
         const val PREF_TRANSMIT_MODE = "transmit_mode"
+        const val PREF_HEARTBEAT_INTERVAL = "heartbeat_interval"
         const val RIG_MODE_USB = "USB"
         const val RIG_MODE_PKTUSB = "PKTUSB"
 

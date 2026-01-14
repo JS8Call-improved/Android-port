@@ -77,4 +77,22 @@
         <item>usb</item>
         <item>usb_data</item>
     </string-array>
+
+    <!-- Heartbeat Interval Options -->
+    <string-array name="heartbeat_interval_entries">
+        <item>Disabled</item>
+        <item>3 Minutes</item>
+        <item>10 Minutes</item>
+        <item>15 Minutes</item>
+        <item>30 Minutes</item>
+        <item>60 Minutes</item>
+    </string-array>
+    <string-array name="heartbeat_interval_values">
+        <item>0</item>
+        <item>3</item>
+        <item>10</item>
+        <item>15</item>
+        <item>30</item>
+        <item>60</item>
+    </string-array>
 </resources>
