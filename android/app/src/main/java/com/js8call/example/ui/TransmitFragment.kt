@@ -238,12 +238,8 @@ class TransmitFragment : Fragment() {
     }
 
     private fun handleTxState(state: String?) {
-        when (state) {
-            JS8EngineService.TX_STATE_QUEUED -> viewModel.setQueued()
-            JS8EngineService.TX_STATE_STARTED -> viewModel.startTransmitting()
-            JS8EngineService.TX_STATE_FINISHED -> viewModel.transmissionComplete()
-            JS8EngineService.TX_STATE_FAILED -> viewModel.transmissionFailed()
-        }
+        // TX state updates are handled centrally by MainActivity
+        // This receiver is kept for UI updates that observe the ViewModel
     }
 
     private fun observeViewModel() {
@@ -337,20 +333,13 @@ class TransmitFragment : Fragment() {
             TxMode.HEARTBEAT -> "HB" to null
         }
 
-        // Queue the message
+        // Queue the message - MainActivity will handle sending to service
         viewModel.queueMessage(payloadText, directed)
 
-        // Trigger native TX via the engine service
-        val txIntent = Intent(requireContext(), JS8EngineService::class.java).apply {
-            action = JS8EngineService.ACTION_TRANSMIT_MESSAGE
-            putExtra(JS8EngineService.EXTRA_TX_TEXT, payloadText)
-            putExtra(JS8EngineService.EXTRA_TX_SUBMODE, selectedSubmode)
-            putExtra(JS8EngineService.EXTRA_TX_FREQ_HZ, currentTxOffset.toDouble())
-            if (directed != null) {
-                putExtra(JS8EngineService.EXTRA_TX_DIRECTED, directed)
-            }
-        }
-        requireContext().startService(txIntent)
+        // Broadcast to trigger queue processing (MainActivity handles this)
+        LocalBroadcastManager.getInstance(requireContext()).sendBroadcast(
+            Intent(com.js8call.example.MainActivity.ACTION_PROCESS_TX_QUEUE)
+        )
 
         // Show confirmation
         val message = if (directed != null) {

@@ -32,8 +32,9 @@ class TransmitViewModel(application: Application) : AndroidViewModel(application
 
     /**
      * Queue a message for transmission.
+     * @param clearComposed If true, clears the composed message field (for user-initiated sends)
      */
-    fun queueMessage(text: String, directed: String? = null, priority: Int = 0) {
+    fun queueMessage(text: String, directed: String? = null, priority: Int = 0, clearComposed: Boolean = true) {
         if (text.isBlank()) return
 
         val message = TransmitMessage(
@@ -48,8 +49,10 @@ class TransmitViewModel(application: Application) : AndroidViewModel(application
         _queue.value = txQueue.toList()
         _txState.value = TransmitState.QUEUED
 
-        // Clear composed message after queuing
-        _composedMessage.value = ""
+        // Clear composed message after queuing (only for user-initiated sends)
+        if (clearComposed) {
+            _composedMessage.value = ""
+        }
     }
 
     /**

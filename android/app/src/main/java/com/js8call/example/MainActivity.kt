@@ -22,13 +22,17 @@ import com.google.android.material.snackbar.Snackbar
 import com.js8call.example.model.EngineState
 import com.js8call.example.service.JS8EngineService
 import com.js8call.example.ui.DecodeViewModel
+import com.js8call.example.ui.MessagesViewModel
 import com.js8call.example.ui.MonitorViewModel
+import com.js8call.example.ui.TransmitViewModel
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var bottomNav: BottomNavigationView
     private lateinit var decodeViewModel: DecodeViewModel
     private lateinit var monitorViewModel: MonitorViewModel
+    private lateinit var messagesViewModel: MessagesViewModel
+    private lateinit var transmitViewModel: TransmitViewModel
 
     private val decodeReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -44,6 +48,48 @@ class MainActivity : AppCompatActivity() {
                     val mode = intent.getIntExtra(JS8EngineService.EXTRA_MODE, 0)
                     decodeViewModel.addDecode(utc, snr, dt, freq, text, type, quality, mode)
                     monitorViewModel.updateSnr(snr)
+                }
+                JS8EngineService.ACTION_MESSAGE_RECEIVED -> {
+                    val from = intent.getStringExtra(JS8EngineService.EXTRA_MESSAGE_FROM) ?: return
+                    val msgText = intent.getStringExtra(JS8EngineService.EXTRA_MESSAGE_TEXT) ?: return
+                    val snr = intent.getIntExtra(JS8EngineService.EXTRA_MESSAGE_SNR, 0)
+                    val freq = intent.getFloatExtra(JS8EngineService.EXTRA_MESSAGE_FREQ, 0f)
+                    val relayPath = intent.getStringExtra(JS8EngineService.EXTRA_MESSAGE_RELAY_PATH)
+                    val conversationId = intent.getStringExtra(JS8EngineService.EXTRA_MESSAGE_CONVERSATION_ID) ?: from
+                    messagesViewModel.insertIncomingMessage(conversationId, from, msgText, snr, freq, relayPath)
+                }
+                JS8EngineService.ACTION_QUEUE_TX -> {
+                    val text = intent.getStringExtra(JS8EngineService.EXTRA_QUEUE_TX_TEXT) ?: return
+                    val directed = intent.getStringExtra(JS8EngineService.EXTRA_QUEUE_TX_DIRECTED)
+                    val priority = intent.getIntExtra(JS8EngineService.EXTRA_QUEUE_TX_PRIORITY, 0)
+                    transmitViewModel.queueMessage(text, directed, priority, clearComposed = false)
+                    // Trigger queue processing
+                    processNextTxIfIdle()
+                }
+                JS8EngineService.ACTION_TX_STATE -> {
+                    val state = intent.getStringExtra(JS8EngineService.EXTRA_TX_STATE)
+                    when (state) {
+                        JS8EngineService.TX_STATE_FINISHED, JS8EngineService.TX_STATE_FAILED -> {
+                            // Update ViewModel state first
+                            if (state == JS8EngineService.TX_STATE_FINISHED) {
+                                transmitViewModel.transmissionComplete()
+                            } else {
+                                transmitViewModel.transmissionFailed()
+                            }
+                            // Process next item in queue after TX completes
+                            processNextTxIfIdle()
+                        }
+                        JS8EngineService.TX_STATE_QUEUED -> {
+                            transmitViewModel.setQueued()
+                        }
+                        JS8EngineService.TX_STATE_STARTED -> {
+                            transmitViewModel.startTransmitting()
+                        }
+                    }
+                }
+                ACTION_PROCESS_TX_QUEUE -> {
+                    android.util.Log.d("MainActivity", "Received ACTION_PROCESS_TX_QUEUE")
+                    processNextTxIfIdle()
                 }
             }
         }
@@ -94,6 +140,7 @@ class MainActivity : AppCompatActivity() {
         private const val REQUEST_BLUETOOTH_CONNECT = 3
         private const val REQUEST_LOCATION = 2
         private const val PREF_KEEP_SCREEN_ON = "keep_screen_on"
+        const val ACTION_PROCESS_TX_QUEUE = "com.js8call.example.ACTION_PROCESS_TX_QUEUE"
     }
 
     private val prefsListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
@@ -116,7 +163,20 @@ class MainActivity : AppCompatActivity() {
 
         decodeViewModel = ViewModelProvider(this)[DecodeViewModel::class.java]
         monitorViewModel = ViewModelProvider(this)[MonitorViewModel::class.java]
+        messagesViewModel = ViewModelProvider(this)[MessagesViewModel::class.java]
+        transmitViewModel = ViewModelProvider(this)[TransmitViewModel::class.java]
         decodeViewModel.loadPersistedDecodesIfEnabled()
+
+        // Observe unread count for badge on Messages tab
+        messagesViewModel.totalUnreadCount.observe(this) { count ->
+            val badge = bottomNav.getOrCreateBadge(R.id.navigation_messages)
+            if (count > 0) {
+                badge.isVisible = true
+                badge.number = count
+            } else {
+                badge.isVisible = false
+            }
+        }
 
         // Check permissions
         checkPermissions()
@@ -132,6 +192,10 @@ class MainActivity : AppCompatActivity() {
         applyKeepScreenOn(prefs.getBoolean(PREF_KEEP_SCREEN_ON, false))
         val filter = IntentFilter().apply {
             addAction(JS8EngineService.ACTION_DECODE)
+            addAction(JS8EngineService.ACTION_MESSAGE_RECEIVED)
+            addAction(JS8EngineService.ACTION_QUEUE_TX)
+            addAction(JS8EngineService.ACTION_TX_STATE)
+            addAction(ACTION_PROCESS_TX_QUEUE)
         }
         LocalBroadcastManager.getInstance(this)
             .registerReceiver(decodeReceiver, filter)
@@ -156,6 +220,36 @@ class MainActivity : AppCompatActivity() {
             .unregisterReceiver(monitorReceiver)
         decodeViewModel.persistDecodesOnStop()
         super.onStop()
+    }
+
+    /**
+     * Process the next message in the TX queue if not currently transmitting.
+     */
+    private fun processNextTxIfIdle() {
+        // Don't send if already transmitting
+        val state = transmitViewModel.txState.value
+        android.util.Log.d("MainActivity", "processNextTxIfIdle: state=$state")
+        if (state == com.js8call.example.model.TransmitState.TRANSMITTING) {
+            android.util.Log.d("MainActivity", "processNextTxIfIdle: already transmitting, skipping")
+            return
+        }
+        
+        val nextMessage = transmitViewModel.getNextMessage()
+        android.util.Log.d("MainActivity", "processNextTxIfIdle: nextMessage=$nextMessage")
+        if (nextMessage == null) {
+            android.util.Log.d("MainActivity", "processNextTxIfIdle: no message in queue")
+            return
+        }
+        
+        // Send to service for transmission
+        android.util.Log.d("MainActivity", "processNextTxIfIdle: sending to service: text='${nextMessage.text}' directed=${nextMessage.directed}")
+        val txIntent = Intent(this, JS8EngineService::class.java).apply {
+            action = JS8EngineService.ACTION_TRANSMIT_MESSAGE
+            putExtra(JS8EngineService.EXTRA_TX_TEXT, nextMessage.text)
+            nextMessage.directed?.let { putExtra(JS8EngineService.EXTRA_TX_DIRECTED, it) }
+            putExtra(JS8EngineService.EXTRA_TX_FREQ_HZ, transmitViewModel.getTxOffset().toDouble())
+        }
+        startService(txIntent)
     }
 
     private fun checkPermissions() {

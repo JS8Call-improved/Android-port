@@ -30,9 +30,9 @@ android {
             }
         }
 
-        // Specify ABIs to build (default: all)
+        // Specify ABIs to build (arm64 only for faster debug builds)
         ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+            abiFilters += listOf("arm64-v8a")
         }
     }
 

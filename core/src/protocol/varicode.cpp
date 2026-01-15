@@ -4,6 +4,13 @@
 #include <array>
 #include <cctype>
 #include <cmath>
+
+#ifdef __ANDROID__
+#include <android/log.h>
+#define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, "varicode", __VA_ARGS__)
+#else
+#define LOGD(...) do {} while(0)
+#endif
 #include <cstring>
 #include <functional>
 #include <numeric>
@@ -1074,8 +1081,23 @@ std::vector<std::string> unpack_directed_message(std::string const& text, std::u
   return out;
 }
 
+// Helper function to convert string to uppercase for JSC encoding
+// JSC dictionary only contains uppercase letters
+static std::string to_upper(std::string const& s) {
+  std::string result;
+  result.reserve(s.size());
+  for (char c : s) {
+    result += static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+  }
+  return result;
+}
+
 std::string pack_data_message(std::string const& text, int* n) {
   // Legacy data frames use a 2-bit prefix: [data=1][compressed=1] + payload.
+  // JSC dictionary only contains uppercase, so convert input first
+  std::string upperText = to_upper(text);
+  LOGD("pack_data_message: input='%s' upperText='%s'", text.c_str(), upperText.c_str());
+  
   constexpr int frameSize = 72;
   std::vector<bool> frameBits;
   frameBits.reserve(frameSize);
@@ -1083,7 +1105,7 @@ std::string pack_data_message(std::string const& text, int* n) {
   frameBits.push_back(true);  // compressed (JSC)
 
   int chars_used = 0;
-  for (auto const& pair : jsc::compress(text)) {
+  for (auto const& pair : jsc::compress(upperText)) {
     auto const& bits = pair.first;
     auto chars = static_cast<int>(pair.second);
     if (static_cast<int>(frameBits.size() + bits.size()) < frameSize) {
@@ -1103,6 +1125,7 @@ std::string pack_data_message(std::string const& text, int* n) {
   auto rem = static_cast<std::uint8_t>(bits_to_int(std::vector<bool>(frameBits.begin() + 64, frameBits.end())));
   auto frame = pack72bits(static_cast<std::uint64_t>(value), rem);
 
+  LOGD("pack_data_message: frame='%s' chars_used=%d", frame.c_str(), chars_used);
   if (n) *n = chars_used;
   return frame;
 }
@@ -1137,29 +1160,47 @@ std::string unpack_data_message(std::string const& text) {
 
 std::string pack_fast_data_message(std::string const& text, int* n) {
   // Compress using JSC into a 72-bit frame with pad scheme: first pad bit 0, remaining pad bits 1.
+  // JSC dictionary only contains uppercase, so convert input first
+  std::string upperText = to_upper(text);
+  LOGD("pack_fast_data_message: input text='%s' upperText='%s'", text.c_str(), upperText.c_str());
+
   constexpr int frameSize = 72;
   std::vector<bool> frameBits;
   int chars_used = 0;
 
-  for (auto const& pair : jsc::compress(text)) {
+  auto compressed = jsc::compress(upperText);
+  LOGD("pack_fast_data_message: jsc::compress returned %zu codeword pairs", compressed.size());
+
+  for (std::size_t i = 0; i < compressed.size(); ++i) {
+    auto const& pair = compressed[i];
     auto const& bits = pair.first;
     auto chars = static_cast<int>(pair.second);
+    LOGD("pack_fast_data_message: pair[%zu] bits=%zu chars=%d frameBits.size=%zu", 
+         i, bits.size(), chars, frameBits.size());
     if (static_cast<int>(frameBits.size() + bits.size()) < frameSize) {
       frameBits.insert(frameBits.end(), bits.begin(), bits.end());
       chars_used += chars;
+      LOGD("pack_fast_data_message: added, frameBits.size now=%zu chars_used=%d", frameBits.size(), chars_used);
       continue;
     }
+    LOGD("pack_fast_data_message: breaking, would exceed frameSize");
     break;
   }
+
+  LOGD("pack_fast_data_message: before padding frameBits.size=%zu chars_used=%d", frameBits.size(), chars_used);
 
   int pad = frameSize - static_cast<int>(frameBits.size());
   for (int i = 0; i < pad; ++i) {
     frameBits.push_back(i == 0 ? false : true);
   }
 
+  LOGD("pack_fast_data_message: after padding frameBits.size=%zu pad=%d", frameBits.size(), pad);
+
   auto value = bits_to_int(std::vector<bool>(frameBits.begin(), frameBits.begin() + 64));
   auto rem = static_cast<std::uint8_t>(bits_to_int(std::vector<bool>(frameBits.begin() + 64, frameBits.begin() + 72)));
   auto frame = pack72bits(static_cast<std::uint64_t>(value), rem);
+
+  LOGD("pack_fast_data_message: frame='%s' chars_used=%d", frame.c_str(), chars_used);
 
   if (n) *n = chars_used;
   return frame;
@@ -1236,29 +1277,38 @@ std::vector<std::pair<std::string, int>> build_message_frames(std::string const&
       std::string dirCmd, dirTo, dirNum;
       bool dirToCompound = false;
       auto dirFrame = pack_directed_message(line, mycall, &dirTo, &dirToCompound, &dirCmd, &dirNum, &nlen);
+      LOGD("build_message_frames: line='%s' mycall='%s' dirTo='%s' dirCmd='%s' nlen=%d", 
+           line.c_str(), mycall.c_str(), dirTo.c_str(), dirCmd.c_str(), nlen);
 
       if (forceIdentify && lineFrames.empty() && selectedCall.empty() && dirTo.empty() && l == 0 && o == 0 && line.find(mycall) == std::string::npos) {
         line = mycall + ": " + line;
+        LOGD("build_message_frames: prepended mycall, line now='%s'", line.c_str());
       }
 
       int m = 0;
       bool fastDataFrame = submode != 0;
       auto datFrame = fastDataFrame ? pack_fast_data_message(line, &m) : pack_data_message(line, &m);
+      LOGD("build_message_frames: l=%d o=%d nlen=%d m=%d hasDirected=%d hasData=%d", l, o, nlen, m, hasDirected, hasData);
 
       if (!hasDirected && !hasData && l > 0) {
         useBcn = true;
         frame = bcnFrame;
-      } else if (!hasDirected && !hasData && o > 0) {
-        useCmp = true;
-        frame = cmpFrame;
+        LOGD("build_message_frames: using BCN frame");
       } else if (!hasDirected && !hasData && nlen > 0) {
+        // Check directed BEFORE compound - directed messages like "CALL CMD" are more specific
         useDir = true;
         hasDirected = true;
         frame = dirFrame;
+        LOGD("build_message_frames: using DIR frame='%s'", frame.c_str());
+      } else if (!hasDirected && !hasData && o > 0) {
+        useCmp = true;
+        frame = cmpFrame;
+        LOGD("build_message_frames: using CMP frame");
       } else if (m > 0) {
         useDat = true;
         hasData = true;
         frame = datFrame;
+        LOGD("build_message_frames: using DAT frame='%s' m=%d", frame.c_str(), m);
       }
 
       if (useBcn) {

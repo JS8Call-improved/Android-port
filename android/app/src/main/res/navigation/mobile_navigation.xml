@@ -15,6 +15,24 @@
         android:label="@string/nav_decodes" />
 
     <fragment
+        android:id="@+id/navigation_messages"
+        android:name="com.js8call.example.ui.MessagesFragment"
+        android:label="@string/nav_messages">
+        <action
+            android:id="@+id/action_messages_to_conversation"
+            app:destination="@id/navigation_conversation" />
+    </fragment>
+
+    <fragment
+        android:id="@+id/navigation_conversation"
+        android:name="com.js8call.example.ui.ConversationFragment"
+        android:label="{callsign}">
+        <argument
+            android:name="callsign"
+            app:argType="string" />
+    </fragment>
+
+    <fragment
         android:id="@+id/navigation_transmit"
         android:name="com.js8call.example.ui.TransmitFragment"
         android:label="@string/nav_transmit" />

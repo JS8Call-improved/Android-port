@@ -5,6 +5,7 @@
     <!-- Bottom navigation -->
     <string name="nav_monitor">Monitor</string>
     <string name="nav_decodes">Decodes</string>
+    <string name="nav_messages">Messages</string>
     <string name="nav_transmit">Transmit</string>
     <string name="nav_settings">Settings</string>
 
@@ -188,4 +189,28 @@
     <string name="format_dt">%+.1f s</string>
     <string name="format_time">%1$02d:%2$02d</string>
     <string name="format_decode">%1$04d  %2$+3d dB  %3$+5.1f s  %4$7.1f Hz  %5$s</string>
+
+    <!-- Messages screen -->
+    <string name="messages_title">Messages</string>
+    <string name="messages_empty">No conversations yet</string>
+    <string name="messages_empty_hint">Direct messages (MSG) will appear here</string>
+    <string name="messages_compose_hint">Type message...</string>
+    <string name="messages_send">Send</string>
+    <string name="messages_new">New Message</string>
+    <string name="messages_delete_conversation">Delete Conversation</string>
+    <string name="messages_delete_confirm">Delete all messages with %s?</string>
+    <string name="messages_deleted">Conversation deleted</string>
+    <string name="messages_unread">%d unread</string>
+    <string name="messages_sending">Sending...</string>
+    <string name="messages_sent">Sent</string>
+    <string name="messages_acked">Acknowledged</string>
+    <string name="messages_failed">Failed to send</string>
+    <string name="messages_today">Today</string>
+    <string name="messages_yesterday">Yesterday</string>
+
+    <!-- Message notifications -->
+    <string name="notification_message_channel_name">Messages</string>
+    <string name="notification_message_channel_desc">JS8 directed message notifications</string>
+    <string name="notification_new_message_title">New message from %s</string>
+    <string name="notification_new_message_group">%d new messages</string>
 </resources>

@@ -80,4 +80,24 @@
     <color name="tx_button_queued">#F9A825</color>
     <color name="tx_button_transmitting">#D32F2F</color>
     <color name="highlight_group">#E040FB</color>
+
+    <!-- Message bubble colors -->
+    <color name="bubble_incoming">#E8E8E8</color>
+    <color name="bubble_incoming_dark">#3A3A3A</color>
+    <color name="bubble_outgoing">#006494</color>
+    <color name="bubble_outgoing_dark">#8DCDFF</color>
+    <color name="bubble_text_incoming">#1A1C1E</color>
+    <color name="bubble_text_incoming_dark">#E2E2E5</color>
+    <color name="bubble_text_outgoing">#FFFFFF</color>
+    <color name="bubble_text_outgoing_dark">#00344F</color>
+
+    <!-- Message status colors -->
+    <color name="message_pending">#9E9E9E</color>
+    <color name="message_sent">#757575</color>
+    <color name="message_acked">#4CAF50</color>
+    <color name="message_failed">#F44336</color>
+
+    <!-- Unread badge -->
+    <color name="unread_badge">#F44336</color>
+    <color name="unread_badge_text">#FFFFFF</color>
 </resources>

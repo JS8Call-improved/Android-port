@@ -11,6 +11,11 @@
         android:title="@string/nav_decodes" />
 
     <item
+        android:id="@+id/navigation_messages"
+        android:icon="@android:drawable/ic_dialog_email"
+        android:title="@string/nav_messages" />
+
+    <item
         android:id="@+id/navigation_transmit"
         android:icon="@android:drawable/ic_menu_send"
         android:title="@string/nav_transmit" />

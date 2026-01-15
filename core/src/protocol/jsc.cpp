@@ -11,6 +11,9 @@
 
 #ifdef __ANDROID__
 #include <android/log.h>
+#define JSC_LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, "JSC", __VA_ARGS__)
+#else
+#define JSC_LOGD(...) do {} while(0)
 #endif
 
 namespace js8core::protocol::jsc {
@@ -36,6 +39,8 @@ std::vector<CodewordPair> compress(std::string const& text) {
   constexpr std::uint32_t s = 7;
   constexpr std::uint32_t c = (1u << b) - s;
 
+  JSC_LOGD("compress: input text='%s' len=%zu", text.c_str(), text.size());
+
   std::string space = " ";
   std::vector<std::string> words;
   std::size_t start = 0;
@@ -47,10 +52,14 @@ std::vector<CodewordPair> compress(std::string const& text) {
     start = pos + 1;
   }
 
+  JSC_LOGD("compress: split into %zu words", words.size());
+
   for (std::size_t i = 0; i < words.size(); ++i) {
     auto w = words[i];
     bool isLastWord = (i == words.size() - 1);
     bool isSpaceCharacter = false;
+
+    JSC_LOGD("compress: processing word[%zu]='%s' isLastWord=%d", i, w.c_str(), isLastWord);
 
     if (w.empty() && !isLastWord) {
       w = space;
@@ -60,16 +69,23 @@ std::vector<CodewordPair> compress(std::string const& text) {
     while (!w.empty()) {
       bool ok = false;
       auto index = lookup(w, &ok);
-      if (!ok) break;
+      JSC_LOGD("compress: lookup w='%s' ok=%d index=%u", w.c_str(), ok, index);
+      if (!ok) {
+        JSC_LOGD("compress: lookup failed for '%s', breaking", w.c_str());
+        break;
+      }
       auto t = JSC_MAP[index];
+      JSC_LOGD("compress: JSC_MAP[%u] size=%d str='%.*s'", index, t.size, t.size, t.str);
       w = w.substr(t.size);
       bool isLast = w.empty();
       bool shouldAppendSpace = isLast && !isSpaceCharacter && !isLastWord;
-      out.emplace_back(codeword(index, shouldAppendSpace, b, s, c),
-                       static_cast<std::uint32_t>(t.size + (shouldAppendSpace ? 1 : 0)));
+      auto cw = codeword(index, shouldAppendSpace, b, s, c);
+      JSC_LOGD("compress: codeword bits=%zu shouldAppendSpace=%d", cw.size(), shouldAppendSpace);
+      out.emplace_back(cw, static_cast<std::uint32_t>(t.size + (shouldAppendSpace ? 1 : 0)));
     }
   }
 
+  JSC_LOGD("compress: output %zu codeword pairs", out.size());
   return out;
 }
 
