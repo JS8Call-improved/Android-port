@@ -470,6 +470,8 @@ class MonitorFragment : Fragment() {
                     requireContext().startService(intent)
 
                     Snackbar.make(requireView(), "Setting frequency to ${frequencyEntries[position]}", Snackbar.LENGTH_SHORT).show()
+                } else if (rigControlEnabled && rigType == "rts_ptt") {
+                    android.util.Log.d("MonitorFragment", "RTS PTT mode does not support frequency control")
                 } else {
                     android.util.Log.d("MonitorFragment", "Rig control not enabled or not supported type, skipping frequency change")
                 }

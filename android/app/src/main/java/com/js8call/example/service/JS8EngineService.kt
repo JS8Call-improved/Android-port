@@ -48,6 +48,8 @@ class JS8EngineService : Service() {
     private var rigControlMode: String = "none"
     private var hamlibRigControl: HamlibRigControl? = null
     private var hamlibRigConnected: Boolean = false
+    private var rtsPttConnected: Boolean = false
+    private var rtsPttTransport: SerialTransport? = null
     private var usbSerialBridge: UsbSerialBridge? = null
     private var bluetoothSerialBridge: BluetoothSerialBridge? = null
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -380,13 +382,18 @@ class JS8EngineService : Service() {
         if (!rigControlEnabled || rigType == "none") {
             Log.i(TAG, "Rig control not enabled")
             rigControlMode = "none"
+            rtsPttConnected = false
+            rtsPttTransport = null
             return
         }
 
         rigControlMode = rigType ?: "none"
+        rtsPttConnected = false
+        rtsPttTransport = null
         when (rigType) {
             "network" -> initializeNetworkRigControl()
             "hamlib_usb" -> initializeHamlibUsbControl()
+            "rts_ptt" -> initializeRtsPttControl()
             else -> Log.w(TAG, "Unknown rig type: $rigType")
         }
     }
@@ -463,19 +470,183 @@ class JS8EngineService : Service() {
         }
     }
 
-    private fun openHamlibSerialUsb(rigModel: Int, selection: SerialSelection) {
+    private fun initializeRtsPttControl() {
+        Log.i(TAG, "Initializing RTS PTT control")
+        rtsPttConnected = false
+        rtsPttTransport = null
+
         val prefs = PreferenceManager.getDefaultSharedPreferences(this)
-        val baudRate = prefs.getString("rig_serial_baud", "9600")?.toIntOrNull() ?: 9600
-        val dataBits = prefs.getString("rig_serial_data_bits", "8")?.toIntOrNull() ?: 8
-        val stopBits = prefs.getString("rig_serial_stop_bits", "1")?.toIntOrNull() ?: 1
-        val parity = prefs.getString("rig_serial_parity", "none") ?: "none"
-        val parityValue = when (parity.lowercase(Locale.US)) {
-            "odd" -> 1
-            "even" -> 2
-            "mark" -> 3
-            "space" -> 4
-            else -> 0
+        val selectedPort = prefs.getString("rig_hamlib_usb_port", "auto")?.trim().orEmpty()
+
+        val selection = resolveSerialSelection(selectedPort, prefs)
+        if (selection == null) {
+            Log.w(TAG, "Invalid serial port selection: $selectedPort")
+            broadcastError("Invalid serial port selection for RTS PTT control.")
+            rigCtlErrorShown = true
+            return
         }
+
+        when (selection.transport) {
+            SerialTransport.USB -> openRtsSerialUsb(selection)
+            SerialTransport.BLUETOOTH -> openRtsSerialBluetooth(selection)
+        }
+    }
+
+    private fun openRtsSerialUsb(selection: SerialSelection) {
+        val params = readSerialParams()
+
+        usbSerialBridge?.registerNative()
+
+        var deviceId = selection.usbDeviceId
+        var portIndex = selection.portIndex
+        if (deviceId == null) {
+            val ports = try {
+                UsbSerialPortCatalog.listPorts(this)
+            } catch (_: Throwable) {
+                emptyList()
+            }
+            val firstPort = ports.firstOrNull()
+            if (firstPort != null) {
+                deviceId = firstPort.deviceId
+                portIndex = firstPort.portIndex
+                Log.i(TAG, "Auto-selected USB serial port for RTS PTT: ${firstPort.label}")
+            }
+        }
+
+        val usbDevice = if (deviceId != null) {
+            UsbPermissionHelper.findUsbDeviceById(this, deviceId)
+        } else {
+            null
+        }
+
+        if (usbDevice == null) {
+            if (selection.path == "auto") {
+                val btPorts = try {
+                    BluetoothSerialPortCatalog.listPorts(this)
+                } catch (_: Throwable) {
+                    emptyList()
+                }
+                val btPort = btPorts.firstOrNull()
+                if (btPort != null) {
+                    val btSelection = SerialSelection(
+                        transport = SerialTransport.BLUETOOTH,
+                        path = "android-bt:${btPort.address}:${btPort.portIndex}",
+                        usbDeviceId = null,
+                        btAddress = btPort.address,
+                        portIndex = btPort.portIndex
+                    )
+                    Log.i(TAG, "Auto-selected Bluetooth serial port for RTS PTT: ${btPort.label}")
+                    openRtsSerialBluetooth(btSelection)
+                    return
+                }
+            }
+            Log.w(TAG, "No USB serial device found for RTS PTT")
+            broadcastError("No USB serial device found for RTS PTT control.")
+            rigCtlErrorShown = true
+            return
+        }
+
+        Log.i(TAG, "RTS PTT USB device selected: ${usbDevice.deviceName} (id=${usbDevice.deviceId}) port=$portIndex")
+
+        if (!UsbPermissionHelper.hasPermission(this, usbDevice)) {
+            Log.i(TAG, "Requesting USB permission for RTS PTT device...")
+            UsbPermissionHelper.requestPermission(this, usbDevice) { granted ->
+                if (granted) {
+                    Log.i(TAG, "USB permission granted for RTS PTT device")
+                    openRtsSerialUsbInternal(usbDevice.deviceId, portIndex, params)
+                } else {
+                    Log.w(TAG, "USB permission denied for RTS PTT device")
+                    broadcastError("USB permission denied. Please grant USB access in Settings.")
+                    rigCtlErrorShown = true
+                }
+            }
+        } else {
+            Log.i(TAG, "USB permission already granted for RTS PTT device")
+            openRtsSerialUsbInternal(usbDevice.deviceId, portIndex, params)
+        }
+    }
+
+    private fun openRtsSerialUsbInternal(deviceId: Int, portIndex: Int, params: SerialParams) {
+        Thread {
+            val ok = usbSerialBridge?.open(
+                deviceId,
+                portIndex,
+                params.baudRate,
+                params.dataBits,
+                params.stopBits,
+                params.parityValue
+            ) == true
+
+            mainHandler.post {
+                rtsPttConnected = ok
+                rigCtlErrorShown = false
+                if (ok) {
+                    rtsPttTransport = SerialTransport.USB
+                    usbSerialBridge?.setRts(false)
+                    Log.i(TAG, "RTS PTT USB serial opened device=$deviceId port=$portIndex")
+                } else {
+                    Log.w(TAG, "RTS PTT USB serial open failed for device=$deviceId port=$portIndex")
+                    broadcastError("Failed to open USB serial port for RTS PTT control.")
+                    rigCtlErrorShown = true
+                }
+            }
+        }.start()
+    }
+
+    private fun openRtsSerialBluetooth(selection: SerialSelection) {
+        val params = readSerialParams()
+
+        bluetoothSerialBridge?.registerNative()
+
+        val address = selection.btAddress
+        if (address == null) {
+            Log.w(TAG, "Bluetooth address missing for RTS PTT")
+            broadcastError("No Bluetooth serial device selected for RTS PTT control.")
+            rigCtlErrorShown = true
+            return
+        }
+
+        if (BluetoothSerialPortCatalog.findBondedDevice(this, address) == null) {
+            Log.w(TAG, "Bluetooth device not paired or unavailable: $address")
+            broadcastError("Bluetooth serial device not available. Check pairing and settings.")
+            rigCtlErrorShown = true
+            return
+        }
+
+        Thread {
+            val ok = bluetoothSerialBridge?.open(
+                address,
+                selection.portIndex,
+                params.baudRate,
+                params.dataBits,
+                params.stopBits,
+                params.parityValue
+            ) == true
+
+            mainHandler.post {
+                rtsPttConnected = ok
+                rigCtlErrorShown = false
+                if (ok) {
+                    rtsPttTransport = SerialTransport.BLUETOOTH
+                    bluetoothSerialBridge?.setRts(false)
+                    Log.i(TAG, "RTS PTT Bluetooth serial opened addr=$address port=${selection.portIndex}")
+                } else {
+                    val detail = bluetoothSerialBridge?.getLastError().orEmpty()
+                    if (detail.isNotBlank()) {
+                        Log.w(TAG, "RTS PTT Bluetooth open failed for addr=$address port=${selection.portIndex}: $detail")
+                        broadcastError("Failed to open Bluetooth serial port for RTS PTT control: $detail")
+                    } else {
+                        Log.w(TAG, "RTS PTT Bluetooth open failed for addr=$address port=${selection.portIndex}")
+                        broadcastError("Failed to open Bluetooth serial port for RTS PTT control.")
+                    }
+                    rigCtlErrorShown = true
+                }
+            }
+        }.start()
+    }
+
+    private fun openHamlibSerialUsb(rigModel: Int, selection: SerialSelection) {
+        val params = readSerialParams()
 
         usbSerialBridge?.registerNative()
 
@@ -535,8 +706,7 @@ class JS8EngineService : Service() {
             UsbPermissionHelper.requestPermission(this, usbDevice) { granted ->
                 if (granted) {
                     Log.i(TAG, "USB permission granted for Hamlib device")
-                    openHamlibSerialUsbInternal(rigModel, usbDevice.deviceId, portIndex, baudRate,
-                        dataBits, stopBits, parity, parityValue)
+                    openHamlibSerialUsbInternal(rigModel, usbDevice.deviceId, portIndex, params)
                 } else {
                     Log.w(TAG, "USB permission denied for Hamlib device")
                     broadcastError("USB permission denied. Please grant USB access in Settings.")
@@ -545,8 +715,7 @@ class JS8EngineService : Service() {
             }
         } else {
             Log.i(TAG, "USB permission already granted for Hamlib device")
-            openHamlibSerialUsbInternal(rigModel, usbDevice.deviceId, portIndex, baudRate,
-                dataBits, stopBits, parity, parityValue)
+            openHamlibSerialUsbInternal(rigModel, usbDevice.deviceId, portIndex, params)
         }
     }
 
@@ -554,20 +723,16 @@ class JS8EngineService : Service() {
         rigModel: Int,
         deviceId: Int,
         portIndex: Int,
-        baudRate: Int,
-        dataBits: Int,
-        stopBits: Int,
-        parity: String,
-        parityValue: Int
+        params: SerialParams
     ) {
         Thread {
             val preopenOk = usbSerialBridge?.open(
                 deviceId,
                 portIndex,
-                baudRate,
-                dataBits,
-                stopBits,
-                parityValue
+                params.baudRate,
+                params.dataBits,
+                params.stopBits,
+                params.parityValue
             ) == true
 
             if (!preopenOk) {
@@ -586,10 +751,10 @@ class JS8EngineService : Service() {
             val ok = hamlibRigControl?.openSerialPath(
                 rigModel,
                 serialPath,
-                baudRate,
-                dataBits,
-                stopBits,
-                parity
+                params.baudRate,
+                params.dataBits,
+                params.stopBits,
+                params.parity
             ) == true
 
             mainHandler.post {
@@ -613,18 +778,7 @@ class JS8EngineService : Service() {
     }
 
     private fun openHamlibSerialBluetooth(rigModel: Int, selection: SerialSelection) {
-        val prefs = PreferenceManager.getDefaultSharedPreferences(this)
-        val baudRate = prefs.getString("rig_serial_baud", "9600")?.toIntOrNull() ?: 9600
-        val dataBits = prefs.getString("rig_serial_data_bits", "8")?.toIntOrNull() ?: 8
-        val stopBits = prefs.getString("rig_serial_stop_bits", "1")?.toIntOrNull() ?: 1
-        val parity = prefs.getString("rig_serial_parity", "none") ?: "none"
-        val parityValue = when (parity.lowercase(Locale.US)) {
-            "odd" -> 1
-            "even" -> 2
-            "mark" -> 3
-            "space" -> 4
-            else -> 0
-        }
+        val params = readSerialParams()
 
         bluetoothSerialBridge?.registerNative()
 
@@ -647,10 +801,10 @@ class JS8EngineService : Service() {
             val preopenOk = bluetoothSerialBridge?.open(
                 address,
                 selection.portIndex,
-                baudRate,
-                dataBits,
-                stopBits,
-                parityValue
+                params.baudRate,
+                params.dataBits,
+                params.stopBits,
+                params.parityValue
             ) == true
 
             if (!preopenOk) {
@@ -675,10 +829,10 @@ class JS8EngineService : Service() {
             val ok = hamlibRigControl?.openSerialPath(
                 rigModel,
                 serialPath,
-                baudRate,
-                dataBits,
-                stopBits,
-                parity
+                params.baudRate,
+                params.dataBits,
+                params.stopBits,
+                params.parity
             ) == true
 
             mainHandler.post {
@@ -699,6 +853,30 @@ class JS8EngineService : Service() {
                 }
             }
         }.start()
+    }
+
+    private data class SerialParams(
+        val baudRate: Int,
+        val dataBits: Int,
+        val stopBits: Int,
+        val parity: String,
+        val parityValue: Int
+    )
+
+    private fun readSerialParams(): SerialParams {
+        val prefs = PreferenceManager.getDefaultSharedPreferences(this)
+        val baudRate = prefs.getString("rig_serial_baud", "9600")?.toIntOrNull() ?: 9600
+        val dataBits = prefs.getString("rig_serial_data_bits", "8")?.toIntOrNull() ?: 8
+        val stopBits = prefs.getString("rig_serial_stop_bits", "1")?.toIntOrNull() ?: 1
+        val parity = prefs.getString("rig_serial_parity", "none") ?: "none"
+        val parityValue = when (parity.lowercase(Locale.US)) {
+            "odd" -> 1
+            "even" -> 2
+            "mark" -> 3
+            "space" -> 4
+            else -> 0
+        }
+        return SerialParams(baudRate, dataBits, stopBits, parity, parityValue)
     }
 
     private fun resolveSerialSelection(
@@ -798,9 +976,12 @@ class JS8EngineService : Service() {
             rigCtlConnected = false
             rigCtlErrorShown = false
             hamlibRigConnected = false
+            rtsPttConnected = false
+            rtsPttTransport = null
             rigControlMode = "none"
             hamlibRigControl?.close()
             usbSerialBridge?.unregisterNative()
+            usbSerialBridge?.close()
             bluetoothSerialBridge?.close()
             bluetoothSerialBridge?.unregisterNative()
 
@@ -1525,6 +1706,7 @@ class JS8EngineService : Service() {
     private fun sendRigModeCommand(mode: String, passband: Int = 0): Boolean {
         return when (rigControlMode) {
             "hamlib_usb" -> hamlibRigControl?.setMode(mode, passband) == true
+            "rts_ptt" -> false
             // Network rig control mode setting not requested yet
             else -> false
         }
@@ -2484,6 +2666,7 @@ class JS8EngineService : Service() {
         return when (rigControlMode) {
             "network" -> rigCtlConnected
             "hamlib_usb" -> hamlibRigConnected
+            "rts_ptt" -> rtsPttConnected
             else -> false
         }
     }
@@ -2492,8 +2675,22 @@ class JS8EngineService : Service() {
         return when (rigControlMode) {
             "network" -> rigCtlClient?.setPtt(enabled) == true
             "hamlib_usb" -> hamlibRigControl?.setPtt(enabled) == true
+            "rts_ptt" -> setRtsPtt(enabled)
             else -> false
         }
+    }
+
+    private fun setRtsPtt(enabled: Boolean): Boolean {
+        val transport = rtsPttTransport
+        val result = when (transport) {
+            SerialTransport.USB -> usbSerialBridge?.setRts(enabled) == true
+            SerialTransport.BLUETOOTH -> bluetoothSerialBridge?.setRts(enabled) == true
+            else -> false
+        }
+        if (!result) {
+            Log.w(TAG, "RTS PTT toggle failed (transport=$transport)")
+        }
+        return result
     }
 
     private fun setFrequency(frequencyHz: Long) {
@@ -2507,6 +2704,7 @@ class JS8EngineService : Service() {
             val success = when (rigControlMode) {
                 "network" -> rigCtlClient?.setFrequency(frequencyHz) == true
                 "hamlib_usb" -> hamlibRigControl?.setFrequency(frequencyHz) == true
+                "rts_ptt" -> false
                 else -> false
             }
 
@@ -2514,17 +2712,17 @@ class JS8EngineService : Service() {
                 if (success) {
                     Log.i(TAG, "Frequency set to $frequencyHz Hz")
                 } else {
-                    val detail = if (rigControlMode == "hamlib_usb") {
-                        hamlibRigControl?.getLastError().orEmpty()
-                    } else {
-                        ""
+                    val detail = when (rigControlMode) {
+                        "hamlib_usb" -> hamlibRigControl?.getLastError().orEmpty()
+                        "rts_ptt" -> "RTS PTT does not support frequency control"
+                        else -> ""
                     }
                     if (detail.isNotBlank()) {
                         Log.w(TAG, "Failed to set frequency to $frequencyHz Hz: $detail")
                     } else {
                         Log.w(TAG, "Failed to set frequency to $frequencyHz Hz")
                     }
-                    if (!rigCtlErrorShown) {
+                    if (!rigCtlErrorShown && rigControlMode != "rts_ptt") {
                         if (detail.isNotBlank()) {
                             broadcastError("Rig control failed: $detail")
                         } else {
