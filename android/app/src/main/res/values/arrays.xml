@@ -23,6 +23,7 @@
         <item>12m - 24.922 MHz</item>
         <item>10m - 28.078 MHz</item>
         <item>6m - 50.318 MHz</item>
+        <item>2m - 144.178 MHz</item>
     </string-array>
     <string-array name="js8_frequency_values">
         <item>3578000</item>
@@ -34,6 +35,7 @@
         <item>24922000</item>
         <item>28078000</item>
         <item>50318000</item>
+        <item>144178000</item>
     </string-array>
 
     <!-- Serial parameter options (Hamlib USB) -->
