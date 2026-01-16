@@ -62,6 +62,13 @@
         app:title="@string/settings_category_radio"
         app:iconSpaceReserved="false">
 
+        <EditTextPreference
+            app:key="custom_frequency_mhz"
+            app:title="@string/settings_custom_frequency"
+            app:summary="@string/settings_custom_frequency_summary"
+            android:inputType="numberDecimal"
+            app:iconSpaceReserved="false" />
+
         <SwitchPreferenceCompat
             app:key="rig_control_enabled"
             app:title="@string/settings_rig_control"

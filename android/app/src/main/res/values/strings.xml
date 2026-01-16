@@ -90,6 +90,9 @@
 
     <string name="settings_rig_control">Rig Control</string>
     <string name="settings_rig_control_summary">Enable CAT control</string>
+    <string name="settings_custom_frequency">Custom Frequency (MHz)</string>
+    <string name="settings_custom_frequency_summary">Enter a custom JS8 frequency in MHz</string>
+    <string name="settings_custom_frequency_summary_format">Custom frequency: %1$s MHz</string>
     <string name="settings_transmit_mode">Transmit Mode</string>
     <string name="settings_transmit_mode_summary">Set rig mode for JS8 transmissions</string>
     <string name="settings_rig_type">Rig Type</string>

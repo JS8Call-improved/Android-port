@@ -424,8 +424,24 @@ class MonitorFragment : Fragment() {
 
     private fun setupFrequencySpinner() {
         // Get frequency arrays from resources
-        val frequencyEntries = resources.getStringArray(R.array.js8_frequency_entries)
-        val frequencyValues = resources.getStringArray(R.array.js8_frequency_values)
+        val baseEntries = resources.getStringArray(R.array.js8_frequency_entries)
+        val baseValues = resources.getStringArray(R.array.js8_frequency_values)
+
+        // Load saved frequency preference
+        val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext())
+        val customFrequencyMhz = prefs.getString("custom_frequency_mhz", "")?.trim().orEmpty()
+
+        val frequencyEntries = baseEntries.toMutableList()
+        val frequencyValues = baseValues.toMutableList()
+
+        val customFrequencyHz = customFrequencyMhz.toDoubleOrNull()?.let { mhz ->
+            if (mhz > 0) (mhz * 1_000_000.0).toLong() else null
+        }
+
+        if (customFrequencyHz != null) {
+            frequencyEntries.add("Custom - ${customFrequencyMhz}MHz")
+            frequencyValues.add(customFrequencyHz.toString())
+        }
 
         // Create adapter
         val adapter = ArrayAdapter(
@@ -436,10 +452,11 @@ class MonitorFragment : Fragment() {
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         frequencySpinner.adapter = adapter
 
-        // Load saved frequency preference
-        val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext())
-        val savedFrequency = prefs.getString("last_frequency", frequencyValues[3]) // Default to 20m (14.078 MHz)
-        val savedIndex = frequencyValues.indexOf(savedFrequency).takeIf { it >= 0 } ?: 3
+        val defaultFrequency = baseValues.getOrNull(3) ?: "14078000"
+        val savedFrequency = prefs.getString("last_frequency", defaultFrequency) ?: defaultFrequency
+        val savedIndex = frequencyValues.indexOf(savedFrequency).takeIf { it >= 0 }
+            ?: frequencyValues.indexOf(defaultFrequency).takeIf { it >= 0 }
+            ?: 0
 
         // Set initial selection
         isUpdatingFrequencySpinner = true

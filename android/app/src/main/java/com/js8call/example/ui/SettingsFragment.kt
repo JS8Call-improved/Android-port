@@ -9,6 +9,7 @@ import android.location.LocationManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.text.InputType
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.preference.EditTextPreference
@@ -52,6 +53,34 @@ class SettingsFragment : PreferenceFragmentCompat() {
                 "unknown"
             }
             statusPref?.text = "JS8Android-$versionName"
+        }
+
+        val customFrequencyPref = findPreference<EditTextPreference>("custom_frequency_mhz")
+        customFrequencyPref?.setOnBindEditTextListener { editText ->
+            editText.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+        }
+        customFrequencyPref?.setOnPreferenceChangeListener { preference, newValue ->
+            val rawValue = newValue?.toString().orEmpty().trim()
+            val normalizedValue = normalizeFrequencyMhz(rawValue)
+            preference.summary = if (normalizedValue.isBlank()) {
+                getString(R.string.settings_custom_frequency_summary)
+            } else {
+                getString(R.string.settings_custom_frequency_summary_format, normalizedValue)
+            }
+            preference.sharedPreferences
+                ?.edit()
+                ?.putString(preference.key, normalizedValue)
+                ?.apply()
+            false
+        }
+        val existingCustom = customFrequencyPref?.text.orEmpty().trim()
+        if (customFrequencyPref != null) {
+            val normalizedExisting = normalizeFrequencyMhz(existingCustom)
+            customFrequencyPref.summary = if (normalizedExisting.isBlank()) {
+                getString(R.string.settings_custom_frequency_summary)
+            } else {
+                getString(R.string.settings_custom_frequency_summary_format, normalizedExisting)
+            }
         }
 
         val rigModelPref = findPreference<ListPreference>("rig_hamlib_model")
@@ -365,6 +394,17 @@ class SettingsFragment : PreferenceFragmentCompat() {
             editor.putString("rig_usb_port_index", "0")
         }
         editor.apply()
+    }
+
+    private fun normalizeFrequencyMhz(value: String): String {
+        val trimmed = value.trim()
+        val parsed = trimmed.toDoubleOrNull() ?: return ""
+        if (parsed <= 0) return ""
+        return if (parsed % 1.0 == 0.0) {
+            parsed.toLong().toString()
+        } else {
+            String.format(Locale.US, "%.3f", parsed).trimEnd('0').trimEnd('.')
+        }
     }
 
     private companion object {
