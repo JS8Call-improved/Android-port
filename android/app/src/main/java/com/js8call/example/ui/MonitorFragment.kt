@@ -148,6 +148,7 @@ class MonitorFragment : Fragment() {
 
             // Update TX offset
             txOffsetValue.text = "${status.txOffsetHz.toInt()} Hz"
+            waterfallView.txOffsetHz = status.txOffsetHz
 
             // Show error if present
             status.errorMessage?.let { error ->
