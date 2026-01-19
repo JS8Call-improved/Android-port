@@ -1991,7 +1991,7 @@ namespace
                             compute_sync(0, 2),
                             compute_sync(0, 1),
                             compute_sync(1, 2)
-                        }); sync_value > max_value)
+                        }); std::isfinite(sync_value) && sync_value > max_value)
                     {
                         max_value = sync_value;
                         max_index = j;
@@ -2601,11 +2601,12 @@ std::size_t legacy_decode(DecodeState const& state,
     };
 
     // Keep decoder instances in static storage to avoid heavy stack allocations.
-    static DecodeMode<ModeA> decA;
-    static DecodeMode<ModeB> decB;
-    static DecodeMode<ModeC> decC;
-    static DecodeMode<ModeE> decE;
-    static DecodeMode<ModeI> decI;
+    // Thread-local to prevent cross-thread state corruption.
+    static thread_local DecodeMode<ModeA> decA;
+    static thread_local DecodeMode<ModeB> decB;
+    static thread_local DecodeMode<ModeC> decC;
+    static thread_local DecodeMode<ModeE> decE;
+    static thread_local DecodeMode<ModeI> decI;
 
     std::array<DecodeEntry, 5> entries{{
         DecodeEntry{DecoderRef{std::ref(decI)}, 1 << 4, state.params.kposI, state.params.kszI},
