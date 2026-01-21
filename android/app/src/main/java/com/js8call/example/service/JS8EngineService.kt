@@ -1135,7 +1135,7 @@ class JS8EngineService : Service() {
         }
 
         if (output == null && inputName != null) {
-            outputs.firstOrNull { device ->
+            output = outputs.firstOrNull { device ->
                 device.productName?.toString() == inputName &&
                     (inputFamily.isEmpty() || deviceFamily(device.type) == inputFamily)
             }
