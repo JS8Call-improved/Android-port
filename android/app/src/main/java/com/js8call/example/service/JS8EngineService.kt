@@ -30,7 +30,11 @@ import com.js8call.core.UsbSerialBridge
 import com.js8call.core.UsbSerialPortCatalog
 import com.js8call.example.MainActivity
 import com.js8call.example.R
+import com.js8call.example.BuildConfig
+import com.js8call.example.network.PskReporterClient
+import java.util.Calendar
 import java.util.Locale
+import java.util.TimeZone
 
 /**
  * Foreground service for running the JS8 engine in the background.
@@ -83,6 +87,7 @@ class JS8EngineService : Service() {
     private val relayLock = Any()
     private val relayTargetRegex = Regex("^\\s*([A-Z0-9/]+)([> ])", RegexOption.IGNORE_CASE)
     private val relayPathRegex = Regex("\\s(?:\\*DE\\*|VIA)\\s([A-Z0-9/]+)", RegexOption.IGNORE_CASE)
+    private val gridRegex = Regex("\\b[A-R]{2}[0-9]{2}([A-X]{2})?\\b", RegexOption.IGNORE_CASE)
     private val txMonitorRunnable = object : Runnable {
         override fun run() {
             val activeEngine = engine
@@ -140,9 +145,21 @@ class JS8EngineService : Service() {
         }
     }
 
+    private var pskReporterClient: PskReporterClient? = null
+    private var pskReporterEnabled = false
+    private var currentDialHz: Long = 0
+    private var currentCallsign: String = ""
+    private var currentGrid: String = ""
+
     private val preferenceChangeListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == PREF_HEARTBEAT_INTERVAL) {
             scheduleHeartbeat(true)
+        }
+        if (key == PREF_PSK_REPORTER || key == "callsign" || key == "grid") {
+            updatePskReporterState()
+        }
+        if (key == "last_frequency") {
+            updateDialFromPrefs()
         }
     }
 
@@ -159,7 +176,8 @@ class JS8EngineService : Service() {
         val prefs = PreferenceManager.getDefaultSharedPreferences(this)
         prefs.registerOnSharedPreferenceChangeListener(preferenceChangeListener)
         scheduleHeartbeat(true)
-        
+        initPskReporter()
+
         Log.i(TAG, "Service created")
     }
 
@@ -172,6 +190,8 @@ class JS8EngineService : Service() {
                     selectedAudioDeviceId = intent.getIntExtra(EXTRA_AUDIO_DEVICE_ID, -1)
                     Log.i(TAG, "Start requested with device ID: $selectedAudioDeviceId")
                 }
+                updateDialFromPrefs()
+                updatePskReporterState()
                 startForegroundService()
                 startEngine()
             }
@@ -188,6 +208,9 @@ class JS8EngineService : Service() {
             ACTION_SET_FREQUENCY -> {
                 val frequencyHz = intent.getLongExtra(EXTRA_FREQUENCY_HZ, 0L)
                 Log.i(TAG, "Setting frequency to $frequencyHz Hz")
+                if (frequencyHz > 0) {
+                    currentDialHz = frequencyHz
+                }
                 setFrequency(frequencyHz)
             }
             ACTION_SET_TX_OFFSET -> {
@@ -291,6 +314,7 @@ class JS8EngineService : Service() {
                         handleRelayFrame(text, snr, mode, freq, type)
                         maybeHandleIncomingMessage(text, snr, freq, type)
                         maybeHandleAutoReply(text, snr, mode)
+                        maybeReportToPskReporter(utc, snr, freq, text)
                     }
                 }
 
@@ -990,6 +1014,9 @@ class JS8EngineService : Service() {
                     networkClientToDisconnect.disconnect()
                 }.start()
             }
+
+            pskReporterClient?.stop(flush = true)
+            pskReporterEnabled = false
 
             engine?.stop()
             engine?.close()
@@ -2243,6 +2270,81 @@ class JS8EngineService : Service() {
         broadcastError(getString(R.string.error_callsign_required))
     }
 
+    private fun initPskReporter() {
+        if (pskReporterClient != null) return
+        val programInfo = "JS8Android-${BuildConfig.VERSION_NAME}"
+        pskReporterClient = PskReporterClient(programInfo)
+        updatePskReporterState()
+    }
+
+    private fun updatePskReporterState() {
+        val prefs = PreferenceManager.getDefaultSharedPreferences(this)
+        val enabled = prefs.getBoolean(PREF_PSK_REPORTER, false)
+        val callsign = prefs.getString("callsign", "")?.trim().orEmpty().uppercase()
+        val grid = prefs.getString("grid", "")?.trim().orEmpty().uppercase()
+        currentCallsign = callsign
+        currentGrid = grid
+        if (!enabled || callsign.isBlank() || grid.isBlank()) {
+            pskReporterClient?.stop(flush = false)
+            pskReporterEnabled = false
+            return
+        }
+        pskReporterClient?.start()
+        pskReporterClient?.setLocalStation(callsign, grid, "")
+        pskReporterEnabled = true
+    }
+
+    private fun updateDialFromPrefs() {
+        val prefs = PreferenceManager.getDefaultSharedPreferences(this)
+        val dial = prefs.getString("last_frequency", "")?.trim().orEmpty()
+        currentDialHz = dial.toLongOrNull() ?: currentDialHz
+    }
+
+    private fun maybeReportToPskReporter(utc: Int, snr: Int, freq: Float, text: String) {
+        if (!pskReporterEnabled) return
+        if (currentDialHz <= 0) return
+        val call = extractHeardCallsign(text) ?: return
+        if (currentCallsign.isNotBlank() && isSelfCallsign(currentCallsign, call)) return
+        val grid = extractGrid(text).orEmpty()
+        val rfHz = currentDialHz + freq.toInt()
+        if (rfHz <= 0) return
+        val timestamp = decodeUtcToEpochSeconds(utc)
+        pskReporterClient?.addSpot(call, grid, snr, rfHz, "JS8", timestamp)
+    }
+
+    private fun extractGrid(text: String): String? {
+        val match = gridRegex.find(text) ?: return null
+        return match.value.uppercase(Locale.US)
+    }
+
+    private fun decodeUtcToEpochSeconds(utc: Int): Long {
+        val hours = utc / 10000
+        val minutes = (utc / 100) % 100
+        val seconds = utc % 100
+        val nowMillis = System.currentTimeMillis()
+        val nowUtc = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+            timeInMillis = nowMillis
+        }
+        val candidate = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+            set(Calendar.YEAR, nowUtc.get(Calendar.YEAR))
+            set(Calendar.MONTH, nowUtc.get(Calendar.MONTH))
+            set(Calendar.DAY_OF_MONTH, nowUtc.get(Calendar.DAY_OF_MONTH))
+            set(Calendar.HOUR_OF_DAY, hours)
+            set(Calendar.MINUTE, minutes)
+            set(Calendar.SECOND, seconds)
+            set(Calendar.MILLISECOND, 0)
+        }
+        var candidateMillis = candidate.timeInMillis
+        val diff = candidateMillis - nowMillis
+        val twelveHoursMs = 12L * 60L * 60L * 1000L
+        if (diff > twelveHoursMs) {
+            candidateMillis -= 24L * 60L * 60L * 1000L
+        } else if (diff < -twelveHoursMs) {
+            candidateMillis += 24L * 60L * 60L * 1000L
+        }
+        return candidateMillis / 1000L
+    }
+
     private fun isTransmitActive(): Boolean {
         return txSessionActive || txAudioActive
     }
@@ -2742,6 +2844,7 @@ class JS8EngineService : Service() {
         private const val PREF_TX_SUBMODE = "tx_submode"
         private const val PREF_MY_INFO = "my_info"
         private const val PREF_MY_STATUS = "my_status"
+        private const val PREF_PSK_REPORTER = "psk_reporter"
         private const val HEARD_LIMIT = 4
         private const val HEARD_WINDOW_MS = 15 * 60 * 1000L
         private val HEARD_EXCLUDE_TOKENS = setOf("CQ", "HB", "HEARTBEAT", "ALLCALL", "@ALLCALL")
