@@ -39,9 +39,11 @@ class WaterfallRenderer {
             if (spectrum != null && canDraw()) {
                 pendingSpectrum = null
                 drawSpectrum(spectrum)
-            }
-            if (isDrawing) {
-                drawHandler.postDelayed(this, drawIntervalMs)
+                if (isDrawing) {
+                    drawHandler.postDelayed(this, drawIntervalMs)
+                }
+            } else {
+                isDrawing = false
             }
         }
     }
@@ -113,6 +115,11 @@ class WaterfallRenderer {
 
         waterfallCanvas?.drawColor(Color.BLACK)
         invalidateCallback?.invoke()
+    }
+
+    fun stopDrawing() {
+        isDrawing = false
+        drawHandler.removeCallbacks(drawRunnable)
     }
 
     fun release() {

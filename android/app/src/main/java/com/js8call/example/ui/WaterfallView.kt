@@ -138,5 +138,6 @@ class WaterfallView @JvmOverloads constructor(
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
         renderer?.setInvalidateCallback(null)
+        renderer?.stopDrawing()
     }
 }
