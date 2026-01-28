@@ -16,7 +16,7 @@ android {
         minSdk = 26
         targetSdk = 34
         versionCode = 2
-        versionName = "1.0-BETA5"
+        versionName = "1.0-RC1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -54,18 +54,20 @@ android {
                 "proguard-rules.pro"
             )
             val releaseSigning = signingConfigs.findByName("release")
-            if (releaseSigning == null ||
-                releaseSigning.storeFile == null ||
-                releaseSigning.storePassword.isNullOrBlank() ||
-                releaseSigning.keyAlias.isNullOrBlank() ||
-                releaseSigning.keyPassword.isNullOrBlank()
+            if (releaseSigning != null &&
+                releaseSigning.storeFile != null &&
+                !releaseSigning.storePassword.isNullOrBlank() &&
+                !releaseSigning.keyAlias.isNullOrBlank() &&
+                !releaseSigning.keyPassword.isNullOrBlank()
             ) {
-                throw GradleException(
-                    "Release signing is not configured. Set KEYSTORE_PATH, KEYSTORE_PASSWORD, " +
-                        "KEY_ALIAS, KEY_PASSWORD (or JS8_* equivalents), or provide keystore.properties."
+                signingConfig = releaseSigning
+            } else {
+                logger.warn(
+                    "Release signing is not configured. Building an unsigned release APK. " +
+                        "Set KEYSTORE_PATH, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD " +
+                        "(or JS8_* equivalents), or provide keystore.properties."
                 )
             }
-            signingConfig = releaseSigning
         }
     }
 
