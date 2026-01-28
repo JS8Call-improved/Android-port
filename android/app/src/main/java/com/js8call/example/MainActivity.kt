@@ -219,6 +219,9 @@ class MainActivity : AppCompatActivity() {
         LocalBroadcastManager.getInstance(this)
             .unregisterReceiver(monitorReceiver)
         decodeViewModel.persistDecodesOnStop()
+        if (isFinishing && !isChangingConfigurations) {
+            stopEngineService()
+        }
         super.onStop()
     }
 
@@ -378,5 +381,12 @@ class MainActivity : AppCompatActivity() {
         } else {
             window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
+    }
+
+    private fun stopEngineService() {
+        val intent = Intent(this, JS8EngineService::class.java).apply {
+            action = JS8EngineService.ACTION_STOP
+        }
+        startService(intent)
     }
 }

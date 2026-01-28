@@ -242,6 +242,13 @@ class JS8EngineService : Service() {
         txHandlerThread.quitSafely()
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        Log.i(TAG, "Task removed; stopping engine")
+        stopEngine()
+        stopSelf()
+        super.onTaskRemoved(rootIntent)
+    }
+
     private fun startForegroundService() {
         val notification = createNotification()
         startForeground(NOTIFICATION_ID, notification)
