@@ -123,7 +123,6 @@ class UsbSerialBridge(private val context: Context) {
 
             val resolvedPortIndex = when {
                 portIndex >= 0 && portIndex < driver.ports.size -> portIndex
-                driver.ports.size > 1 -> 1
                 else -> 0
             }
 
