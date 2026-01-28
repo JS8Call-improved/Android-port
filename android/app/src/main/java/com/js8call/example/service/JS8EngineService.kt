@@ -994,6 +994,10 @@ class JS8EngineService : Service() {
             stopTxMonitor()
             disableScoRouting()
 
+            if (isRigControlConnected()) {
+                setRigPtt(false)
+            }
+
             // Disconnect rig control on background thread
             val networkClientToDisconnect = rigCtlClient
             rigCtlClient = null
