@@ -18,7 +18,7 @@ class RigCtlClient(
     @Synchronized
     fun ensureConnected(timeoutMs: Int = 3000): Boolean {
         val active = socket
-        if (active != null && active.isConnected && !active.isClosed) {
+        if (active != null && active.isConnected && !active.isClosed && reader != null && writer != null) {
             return true
         }
         return connect(timeoutMs)
@@ -66,10 +66,18 @@ class RigCtlClient(
         if (!ensureConnected()) return null
         return try {
             val line = command.trimEnd()
-            writer?.write(line)
-            writer?.write("\n")
-            writer?.flush()
-            reader?.readLine()
+            val out = writer ?: run {
+                disconnect()
+                return null
+            }
+            val input = reader ?: run {
+                disconnect()
+                return null
+            }
+            out.write(line)
+            out.write("\n")
+            out.flush()
+            input.readLine()
         } catch (_: Exception) {
             disconnect()
             null
