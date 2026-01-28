@@ -24,7 +24,10 @@ android {
     signingConfigs {
         create("release") {
             val keystorePropsFile = rootProject.file("keystore.properties")
-            val envStoreFile = System.getenv("JS8_KEYSTORE_FILE")
+            val envStoreFile = System.getenv("KEYSTORE_PATH") ?: System.getenv("JS8_KEYSTORE_FILE")
+            val envStorePassword = System.getenv("KEYSTORE_PASSWORD") ?: System.getenv("JS8_KEYSTORE_PASSWORD")
+            val envKeyAlias = System.getenv("KEY_ALIAS") ?: System.getenv("JS8_KEY_ALIAS")
+            val envKeyPassword = System.getenv("KEY_PASSWORD") ?: System.getenv("JS8_KEY_PASSWORD")
 
             if (keystorePropsFile.exists()) {
                 val props = Properties().apply {
@@ -36,9 +39,9 @@ android {
                 props.getProperty("keyPassword")?.let { keyPassword = it }
             } else if (!envStoreFile.isNullOrBlank()) {
                 storeFile = rootProject.file(envStoreFile)
-                System.getenv("JS8_KEYSTORE_PASSWORD")?.let { storePassword = it }
-                System.getenv("JS8_KEY_ALIAS")?.let { keyAlias = it }
-                System.getenv("JS8_KEY_PASSWORD")?.let { keyPassword = it }
+                envStorePassword?.let { storePassword = it }
+                envKeyAlias?.let { keyAlias = it }
+                envKeyPassword?.let { keyPassword = it }
             }
         }
     }
@@ -51,14 +54,18 @@ android {
                 "proguard-rules.pro"
             )
             val releaseSigning = signingConfigs.findByName("release")
-            if (releaseSigning != null &&
-                releaseSigning.storeFile != null &&
-                !releaseSigning.storePassword.isNullOrBlank() &&
-                !releaseSigning.keyAlias.isNullOrBlank() &&
-                !releaseSigning.keyPassword.isNullOrBlank()
+            if (releaseSigning == null ||
+                releaseSigning.storeFile == null ||
+                releaseSigning.storePassword.isNullOrBlank() ||
+                releaseSigning.keyAlias.isNullOrBlank() ||
+                releaseSigning.keyPassword.isNullOrBlank()
             ) {
-                signingConfig = releaseSigning
+                throw GradleException(
+                    "Release signing is not configured. Set KEYSTORE_PATH, KEYSTORE_PASSWORD, " +
+                        "KEY_ALIAS, KEY_PASSWORD (or JS8_* equivalents), or provide keystore.properties."
+                )
             }
+            signingConfig = releaseSigning
         }
     }
 
