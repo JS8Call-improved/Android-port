@@ -1335,11 +1335,17 @@ class JS8EngineService : Service() {
             broadcastAudioDevice(deviceName)
             updateOutputDeviceForInput(deviceId)
             broadcastEngineState(STATE_RUNNING)
+            broadcastProcessTxQueue()
             scheduleScoSilenceCheck()
         } else {
             Log.e(TAG, "Failed to start audio capture")
             broadcastError("Failed to start audio capture")
         }
+    }
+
+    private fun broadcastProcessTxQueue() {
+        val intent = Intent(MainActivity.ACTION_PROCESS_TX_QUEUE)
+        LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
     }
 
     private fun isScoActive(deviceId: Int): Boolean {

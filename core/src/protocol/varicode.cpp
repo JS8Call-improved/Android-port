@@ -870,10 +870,6 @@ std::string pack_compound_message(std::string const& text, int* n) {
   bool validGrid = !grid.empty() && std::regex_match(grid, kGridPattern);
   auto cmd_it = std::find_if(kDirectedCmds.begin(), kDirectedCmds.end(), [&](auto const& dc) { return dc.key == cmd; });
   bool validCmd = (cmd_it != kDirectedCmds.end()) && is_command_allowed(cmd);
-  if (!validGrid && !validCmd) {
-    if (n) *n = 0;
-    return {};
-  }
 
   std::uint8_t type = static_cast<std::uint8_t>(FrameType::FrameCompound);
   std::uint16_t extra = static_cast<std::uint16_t>(nmaxgrid);
@@ -980,6 +976,9 @@ std::string pack_directed_message(std::string const& text, std::string const& my
 
   std::string from = mycall;
   bool portable_from = false;
+  if (is_compound_callsign(from)) {
+    from = "<....>";
+  }
   auto packed_from = pack_callsign(from, &portable_from);
 
   auto to = match[1].str();

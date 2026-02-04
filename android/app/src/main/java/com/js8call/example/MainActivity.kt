@@ -107,6 +107,9 @@ class MainActivity : AppCompatActivity() {
                         else -> EngineState.ERROR
                     }
                     monitorViewModel.updateState(state)
+                    if (state == EngineState.RUNNING) {
+                        processNextTxIfIdle()
+                    }
                 }
                 JS8EngineService.ACTION_SPECTRUM -> {
                     val bins = intent.getFloatArrayExtra(JS8EngineService.EXTRA_BINS)
