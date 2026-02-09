@@ -15,6 +15,7 @@ import androidx.core.content.ContextCompat
 import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
 import androidx.preference.PreferenceFragmentCompat
+import androidx.preference.SwitchPreferenceCompat
 import com.google.android.material.snackbar.Snackbar
 import com.js8call.core.BluetoothSerialPortCatalog
 import com.js8call.core.HamlibRigCatalog
@@ -31,6 +32,8 @@ class SettingsFragment : PreferenceFragmentCompat() {
     private var pendingLocationListener: LocationListener? = null
     private var pendingLocationTimeout: Runnable? = null
     private var gridPreference: GridSquarePreference? = null
+    private var pendingStoragePermissionEnable = false
+    private var logPreference: SwitchPreferenceCompat? = null
 
     private val locationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -38,6 +41,25 @@ class SettingsFragment : PreferenceFragmentCompat() {
                 requestGridLocation()
             } else {
                 showGridError(R.string.permission_location_denied)
+            }
+        }
+
+    private val storagePermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (granted) {
+                if (pendingStoragePermissionEnable) {
+                    pendingStoragePermissionEnable = false
+                    val pref = logPreference
+                    val key = pref?.key ?: "log_messages_to_file"
+                    pref?.isChecked = true
+                    pref?.sharedPreferences
+                        ?.edit()
+                        ?.putBoolean(key, true)
+                        ?.apply()
+                }
+            } else {
+                pendingStoragePermissionEnable = false
+                view?.let { Snackbar.make(it, R.string.permission_storage_denied, Snackbar.LENGTH_LONG).show() }
             }
         }
 
@@ -164,6 +186,23 @@ class SettingsFragment : PreferenceFragmentCompat() {
 
         gridPreference = findPreference("grid")
         gridPreference?.onUpdateClickListener = { onGridUpdateRequested() }
+
+        logPreference = findPreference("log_messages_to_file")
+        logPreference?.setOnPreferenceChangeListener { _, newValue ->
+            val enable = newValue as? Boolean ?: false
+            if (enable && android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) {
+                val granted = ContextCompat.checkSelfPermission(
+                    requireContext(),
+                    Manifest.permission.WRITE_EXTERNAL_STORAGE
+                ) == PackageManager.PERMISSION_GRANTED
+                if (!granted) {
+                    pendingStoragePermissionEnable = true
+                    storagePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                    return@setOnPreferenceChangeListener false
+                }
+            }
+            true
+        }
     }
 
     override fun onStop() {

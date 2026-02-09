@@ -29,6 +29,7 @@ import com.js8call.core.JS8Engine
 import com.js8call.core.UsbSerialBridge
 import com.js8call.core.UsbSerialPortCatalog
 import com.js8call.example.MainActivity
+import com.js8call.example.MessageLogWriter
 import com.js8call.example.R
 import com.js8call.example.BuildConfig
 import com.js8call.example.network.PskReporterClient
@@ -80,6 +81,10 @@ class JS8EngineService : Service() {
     )
     private var callsignWarningShown = false
     private var lastTxMessage: String = ""
+    private var lastTxDirected: String = ""
+    private var lastTxSubmode: Int = SUBMODE_NORMAL
+    private var lastTxFrequencyHz: Double = DEFAULT_AUDIO_FREQUENCY_HZ
+    private var messageLogger: MessageLogWriter? = null
     private val heartbeatRegex = Regex("^\\s*([^:]+):\\s+@HB\\s+HEARTBEAT\\b", RegexOption.IGNORE_CASE)
     private val heardCallsigns = mutableMapOf<String, Long>()
     private val heardLock = Any()
@@ -114,6 +119,7 @@ class JS8EngineService : Service() {
             }
             if (audioActive && !txMonitorWasAudioActive) {
                 txMonitorWasAudioActive = true
+                logTxStarted()
                 // Enable PTT when audio TX starts
                 if (isRigControlConnected()) {
                     Thread {
@@ -161,6 +167,9 @@ class JS8EngineService : Service() {
         if (key == "last_frequency") {
             updateDialFromPrefs()
         }
+        if (key == PREF_LOG_MESSAGES) {
+            updateMessageLogging()
+        }
     }
 
     override fun onCreate() {
@@ -175,6 +184,8 @@ class JS8EngineService : Service() {
         
         val prefs = PreferenceManager.getDefaultSharedPreferences(this)
         prefs.registerOnSharedPreferenceChangeListener(preferenceChangeListener)
+        messageLogger = MessageLogWriter(applicationContext)
+        updateMessageLogging()
         scheduleHeartbeat(true)
         initPskReporter()
 
@@ -237,7 +248,8 @@ class JS8EngineService : Service() {
         val prefs = PreferenceManager.getDefaultSharedPreferences(this)
         prefs.unregisterOnSharedPreferenceChangeListener(preferenceChangeListener)
         heartbeatHandler.removeCallbacksAndMessages(null)
-        
+        messageLogger?.shutdown()
+
         stopEngine()
         txHandlerThread.quitSafely()
     }
@@ -313,6 +325,7 @@ class JS8EngineService : Service() {
                     text: String, type: Int, quality: Float, mode: Int
                 ) {
                     Log.d(TAG, "Decoded: $text (SNR: $snr dB)")
+                    logRxDecode(text, snr, freq, mode)
 
                     // Broadcast on main thread
                     mainHandler.post {
@@ -1628,12 +1641,13 @@ class JS8EngineService : Service() {
 
         val activeEngine = engine
         if (activeEngine != null) {
+            val submode = getPreferredTxSubmode()
              val ok = activeEngine.transmitMessage(
                 text = payload,
                 myCall = callsign,
                 myGrid = grid,
                 selectedCall = "", // Broadcast-ish
-                submode = getPreferredTxSubmode(),
+                submode = submode,
                 audioFrequencyHz = freq.toDouble(),
                 txDelaySec = 0.0,
                 forceIdentify = true, // Force ID to ensure callsign is sent
@@ -1641,6 +1655,7 @@ class JS8EngineService : Service() {
             )
             
             if (ok) {
+                updateLastTxMessage(payload, "", submode, freq.toDouble())
                 broadcastTxState(TX_STATE_QUEUED)
                 startTxMonitor()
             } else {
@@ -1723,7 +1738,7 @@ class JS8EngineService : Service() {
 
         if (ok) {
             Log.i(TAG, "TX request accepted")
-            updateLastTxMessage(payloadText, directed)
+            updateLastTxMessage(payloadText, directed, submode, audioFrequencyHz)
             broadcastTxState(TX_STATE_QUEUED)
             startTxMonitor()
         } else {
@@ -2402,6 +2417,25 @@ class JS8EngineService : Service() {
         }
     }
 
+    private fun updateMessageLogging() {
+        val prefs = PreferenceManager.getDefaultSharedPreferences(this)
+        val enabled = prefs.getBoolean(PREF_LOG_MESSAGES, false)
+        messageLogger?.setEnabled(enabled)
+    }
+
+    private fun logRxDecode(text: String, snr: Int, freq: Float, mode: Int) {
+        val logger = messageLogger ?: return
+        logger.logRx(text, snr, freq, mode, extractHeardCallsign(text))
+    }
+
+    private fun logTxStarted() {
+        val logger = messageLogger ?: return
+        val message = lastTxMessage.trim()
+        if (message.isBlank()) return
+        val directed = lastTxDirected.trim().ifEmpty { null }
+        logger.logTx(message, directed, lastTxFrequencyHz, lastTxSubmode)
+    }
+
     private fun findMatchingRelayBufferKey(freq: Float): Int? {
         synchronized(relayLock) {
             for ((key, _) in relayBuffers) {
@@ -2643,7 +2677,7 @@ class JS8EngineService : Service() {
         )
 
         if (ok) {
-            updateLastTxMessage(payload, "")
+            updateLastTxMessage(payload, "", submode, currentTxOffsetHz.toDouble())
             broadcastTxState(TX_STATE_QUEUED)
             startTxMonitor()
         }
@@ -2684,7 +2718,7 @@ class JS8EngineService : Service() {
 
         if (ok) {
             Log.i(TAG, "Autoreply queued: to=$directedCall text='$payloadText'")
-            updateLastTxMessage(payloadText, directedCall)
+            updateLastTxMessage(payloadText, directedCall, submode, currentTxOffsetHz.toDouble())
             broadcastTxState(TX_STATE_QUEUED)
             startTxMonitor()
         } else {
@@ -2743,10 +2777,18 @@ class JS8EngineService : Service() {
         return token
     }
 
-    private fun updateLastTxMessage(text: String, directedCall: String) {
+    private fun updateLastTxMessage(
+        text: String,
+        directedCall: String,
+        submode: Int,
+        frequencyHz: Double
+    ) {
         val built = buildTxMessage(text, directedCall)
         if (built.isNotBlank()) {
             lastTxMessage = built
+            lastTxDirected = directedCall.trim().uppercase()
+            lastTxSubmode = submode
+            lastTxFrequencyHz = frequencyHz
         }
     }
 
@@ -2941,6 +2983,7 @@ class JS8EngineService : Service() {
         const val EXTRA_QUEUE_TX_PRIORITY = "queue_tx_priority"
         const val PREF_TRANSMIT_MODE = "transmit_mode"
         const val PREF_HEARTBEAT_INTERVAL = "heartbeat_interval"
+        const val PREF_LOG_MESSAGES = "log_messages_to_file"
         const val RIG_MODE_USB = "USB"
         const val RIG_MODE_PKTUSB = "PKTUSB"
 

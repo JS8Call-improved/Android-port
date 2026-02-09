@@ -235,6 +235,13 @@
             app:defaultValue="false"
             app:iconSpaceReserved="false" />
 
+        <SwitchPreferenceCompat
+            app:key="log_messages_to_file"
+            app:title="@string/settings_log_messages"
+            app:summary="@string/settings_log_messages_summary"
+            app:defaultValue="false"
+            app:iconSpaceReserved="false" />
+
     </PreferenceCategory>
 
     <!-- Heartbeat Category -->

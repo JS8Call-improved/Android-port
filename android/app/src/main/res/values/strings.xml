@@ -135,6 +135,8 @@
     <string name="settings_keep_screen_on_summary">Prevent screen from dimming</string>
     <string name="settings_persist_decodes">Persist Decoded Messages</string>
     <string name="settings_persist_decodes_summary">Keep decoded messages across app restarts</string>
+    <string name="settings_log_messages">Log Messages to File</string>
+    <string name="settings_log_messages_summary">Write TX/RX logs to Downloads/JS8CallLogs/js8call-log.txt</string>
     <string name="settings_autoreply">Enable Autoreply</string>
     <string name="settings_autoreply_summary">Automatically respond to heartbeats with SNR</string>
     <string name="settings_relay">Enable Relay</string>
@@ -151,6 +153,7 @@
     <string name="permission_location_title">Location Permission</string>
     <string name="permission_location_message">Used to automatically determine grid square</string>
     <string name="permission_location_denied">Location permission denied. Enable in Settings.</string>
+    <string name="permission_storage_denied">Storage permission denied. Log file disabled.</string>
 
     <!-- Errors -->
     <string name="error_engine_start">Failed to start engine</string>
