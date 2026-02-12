@@ -50,6 +50,7 @@ class TransmitFragment : Fragment() {
     private var modeOptions: List<ModeOption> = emptyList()
     private lateinit var queueAdapter: TransmitQueueAdapter
     private var currentTxOffset: Float = 1500f
+    private var isApplyingDirected: Boolean = false
 
     private val preferenceListener =
         SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
@@ -121,6 +122,17 @@ class TransmitFragment : Fragment() {
         updateModeOptions()
     }
 
+    override fun onResume() {
+        super.onResume()
+        val directed = viewModel.directedTo.value.orEmpty()
+        if (directed.isNotBlank() && directedEditText.text?.toString().orEmpty().isBlank()) {
+            isApplyingDirected = true
+            directedEditText.setText(directed)
+            directedEditText.setSelection(directed.length)
+            isApplyingDirected = false
+        }
+    }
+
     override fun onStop() {
         PreferenceManager.getDefaultSharedPreferences(requireContext())
             .unregisterOnSharedPreferenceChangeListener(preferenceListener)
@@ -143,6 +155,7 @@ class TransmitFragment : Fragment() {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             override fun afterTextChanged(s: Editable?) {
+                if (isApplyingDirected) return
                 viewModel.setDirectedTo(s?.toString() ?: "")
             }
         })
@@ -253,7 +266,10 @@ class TransmitFragment : Fragment() {
         viewModel.directedTo.observe(viewLifecycleOwner) { callsign ->
             val current = directedEditText.text?.toString().orEmpty()
             if (callsign.isNotBlank() && callsign != current) {
+                isApplyingDirected = true
                 directedEditText.setText(callsign)
+                directedEditText.setSelection(callsign.length)
+                isApplyingDirected = false
             }
         }
 
