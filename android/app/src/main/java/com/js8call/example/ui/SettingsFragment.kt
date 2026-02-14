@@ -442,7 +442,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
         return if (parsed % 1.0 == 0.0) {
             parsed.toLong().toString()
         } else {
-            String.format(Locale.US, "%.3f", parsed).trimEnd('0').trimEnd('.')
+            String.format(Locale.US, "%.4f", parsed).trimEnd('0').trimEnd('.')
         }
     }
 
