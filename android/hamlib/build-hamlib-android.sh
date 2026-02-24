@@ -48,9 +48,9 @@ for patch in "${PATCH_DIR}"/*.patch; do
     continue
   fi
 
-  if git apply --check "${patch}" >/dev/null 2>&1; then
-    git apply "${patch}"
-  elif git apply --reverse --check "${patch}" >/dev/null 2>&1; then
+  if git apply --check --ignore-space-change --unidiff-zero --recount "${patch}" >/dev/null 2>&1; then
+    git apply --ignore-space-change --unidiff-zero --recount "${patch}"
+  elif git apply --reverse --check --ignore-space-change --unidiff-zero --recount "${patch}" >/dev/null 2>&1; then
     echo "Hamlib patch already applied: $(basename "${patch}")"
   else
     echo "Hamlib source tree is dirty or patch failed: ${patch}" >&2

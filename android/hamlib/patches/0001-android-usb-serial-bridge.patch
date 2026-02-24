@@ -2,15 +2,11 @@ diff --git a/src/Makefile.am b/src/Makefile.am
 index 766fd95b9..100530c1f 100644
 --- a/src/Makefile.am
 +++ b/src/Makefile.am
-@@ -4,7 +4,7 @@ BUILT_SOURCES = hamlibdatetime.h
- 
+@@ -5,3 +5,3 @@
  DISTCLEANFILES = hamlibdatetime.h
  
 -RIGSRC = hamlibdatetime.h rig.c serial.c serial.h misc.c misc.h register.c register.h event.c \
 +RIGSRC = hamlibdatetime.h rig.c serial.c serial.h android_serial_bridge.c android_serial_bridge.h misc.c misc.h register.c register.h event.c \
- 	event.h cal.c cal.h conf.c tones.c tones.h rotator.c locator.c rot_reg.c \
- 	rot_conf.c rot_conf.h rot_settings.c rot_ext.c iofunc.c iofunc.h ext.c \
- 	mem.c settings.c parallel.c parallel.h usb_port.c usb_port.h debug.c \
 diff --git a/src/android_serial_bridge.c b/src/android_serial_bridge.c
 new file mode 100644
 index 000000000..000000000

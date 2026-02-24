@@ -32,7 +32,7 @@ This writes static Hamlib libraries under `android/libs/hamlib/<abi>/`.
 
 ## Build Debug APK
 
-From the repo root:
+From the repo android folder:
 
 ```bash
 JAVA_HOME=/opt/homebrew/opt/openjdk ANDROID_HOME=~/Library/Android/sdk ./gradlew :app:assembleDebug
