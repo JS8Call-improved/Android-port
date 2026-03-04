@@ -2314,6 +2314,7 @@ class JS8EngineService : Service() {
         val enabled = prefs.getBoolean(PREF_PSK_REPORTER, false)
         val callsign = prefs.getString("callsign", "")?.trim().orEmpty().uppercase()
         val grid = prefs.getString("grid", "")?.trim().orEmpty().uppercase()
+        Log.d(TAG, "PSKReporter state: enabled=$enabled callsign='$callsign' grid='$grid'")
         currentCallsign = callsign
         currentGrid = grid
         if (!enabled || callsign.isBlank() || grid.isBlank()) {
@@ -2334,13 +2335,27 @@ class JS8EngineService : Service() {
 
     private fun maybeReportToPskReporter(utc: Int, snr: Int, freq: Float, text: String) {
         if (!pskReporterEnabled) return
-        if (currentDialHz <= 0) return
-        val call = extractHeardCallsign(text) ?: return
-        if (currentCallsign.isNotBlank() && isSelfCallsign(currentCallsign, call)) return
+        if (currentDialHz <= 0) {
+            Log.d(TAG, "PSKReporter skip: dialHz=$currentDialHz")
+            return
+        }
+        val call = extractHeardCallsign(text)
+        if (call == null) {
+            Log.d(TAG, "PSKReporter skip: no callsign in '$text'")
+            return
+        }
+        if (currentCallsign.isNotBlank() && isSelfCallsign(currentCallsign, call)) {
+            Log.d(TAG, "PSKReporter skip: self call=$call")
+            return
+        }
         val grid = extractGrid(text).orEmpty()
         val rfHz = currentDialHz + freq.toInt()
-        if (rfHz <= 0) return
+        if (rfHz <= 0) {
+            Log.d(TAG, "PSKReporter skip: rfHz=$rfHz dialHz=$currentDialHz freq=$freq")
+            return
+        }
         val timestamp = decodeUtcToEpochSeconds(utc)
+        Log.d(TAG, "PSKReporter spot: call=$call grid=$grid snr=$snr rfHz=$rfHz ts=$timestamp")
         pskReporterClient?.addSpot(call, grid, snr, rfHz, "JS8", timestamp)
     }
 
@@ -2384,10 +2399,7 @@ class JS8EngineService : Service() {
     private fun isSelfCallsign(myCall: String, from: String): Boolean {
         val mine = myCall.trim().uppercase()
         val theirs = from.trim().uppercase()
-        if (mine == theirs) return true
-        val mineParts = mine.split("/")
-        val theirParts = theirs.split("/")
-        return mineParts.any { it.isNotBlank() && theirParts.contains(it) }
+        return mine == theirs
     }
 
     private fun isGroupTarget(target: String): Boolean {
