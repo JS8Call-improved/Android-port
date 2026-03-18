@@ -114,8 +114,8 @@ enum class FrameType : std::uint8_t {
 };
 
 constexpr std::uint16_t nbasegrid = 180 * 180;
-constexpr std::uint16_t nmaxgrid = nbasegrid;
-constexpr std::uint16_t nusergrid = static_cast<std::uint16_t>(nmaxgrid + 1);
+constexpr std::uint16_t nusergrid = static_cast<std::uint16_t>(nbasegrid + 10);
+constexpr std::uint16_t nmaxgrid = static_cast<std::uint16_t>((1 << 15) - 1);
 
 // Simplified regexes to keep compilation working; behavior parity can be tuned later.
 const std::regex kGridPattern(R"(^[A-R]{2}[0-9]{2}([A-X]{2})?$)", std::regex::icase);
@@ -124,7 +124,9 @@ const std::regex kHeartbeatRe(
     R"(^\s*(?:[@](?:ALLCALL|HB)\s+)?(CQ CQ CQ|CQ DX|CQ QRP|CQ CONTEST|CQ FIELD|CQ FD|CQ CQ|CQ|HB ALT|HB|HEARTBEAT(?!\s+SNR))(?:\s+([A-R]{2}[0-9]{2}))?.*$)",
     std::regex::icase);
 // Capture groups: 1=callsign, 2=grid, 3=cmd, 4=num
-const std::regex kCompoundRe(R"(^\s*[`]([A-Z0-9@/]+)(?:\s+([A-Z0-9]{4,6}))?(\s+[A-Z0-9 ?/+]+)?(\s*-?\d{0,3})?\s*$)", std::regex::icase);
+const std::regex kCompoundRe(
+    R"(^\s*[`]([A-Z0-9@/]+)(?:\s+([A-R]{2}[0-9]{2}(?:[A-X]{2})?))?(\s?(?:AGN[?]|QSL[?]|HW CPY[?]|MSG TO[:]|SNR[?]|INFO[?]|GRID[?]|STATUS[?]|QUERY MSGS[?]|HEARING[?]|(?:(?:STATUS|HEARING|QUERY CALL|QUERY MSGS|QUERY|CMD|MSG|NACK|ACK|73|YES|NO|HEARTBEAT SNR|SNR|QSL|RR|SK|FB|INFO|GRID|DIT DIT)(?=[ ]|$))|[?> ]))?(\s*[+-]?\d{1,3})?\s*$)",
+    std::regex::icase);
 // Capture groups: 1=to, 2=cmd, 3=num
 const std::regex kDirectedRe(
     R"(^\s*([A-Z0-9@/]+):?(\s?(?:AGN[?]|QSL[?]|HW CPY[?]|MSG TO[:]|SNR[?]|INFO[?]|GRID[?]|STATUS[?]|QUERY MSGS[?]|HEARING[?]|(?:(?:STATUS|HEARING|QUERY CALL|QUERY MSGS|QUERY|CMD|MSG|NACK|ACK|73|YES|NO|HEARTBEAT SNR|SNR|QSL|RR|SK|FB|INFO|GRID|DIT DIT)(?=[ ]|$))|[?> ]))?(\s*[+-]?\d{1,3})?)",

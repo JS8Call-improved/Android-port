@@ -200,12 +200,15 @@ class DecodeViewModel(application: Application) : AndroidViewModel(application) 
      * Assemble a complete message from buffered frames.
      */
     private fun assembleMessage(buffer: MessageBuffer): DecodedMessage {
+        val frameTexts = buffer.frames.map { it.text }.toMutableList()
+        normalizeCompoundDirectedHelpers(buffer.frames, frameTexts)
+
         val assembledText = buildString {
-            buffer.frames.forEachIndexed { index, frame ->
-                if (index > 0 && shouldInsertSpace(this, frame)) {
+            frameTexts.forEachIndexed { index, frameText ->
+                if (index > 0 && shouldInsertSpace(this, frameText)) {
                     append(' ')
                 }
-                append(frame.text)
+                append(frameText)
             }
         }
 
@@ -225,10 +228,59 @@ class DecodeViewModel(application: Application) : AndroidViewModel(application) 
         )
     }
 
-    private fun shouldInsertSpace(builder: StringBuilder, nextFrame: DecodedMessage): Boolean {
+    private fun normalizeCompoundDirectedHelpers(
+        frames: List<DecodedMessage>,
+        frameTexts: MutableList<String>
+    ) {
+        if (frameTexts.size < 2 || frames.size < 2) return
+
+        val firstFrame = frames[0]
+        val secondFrame = frames[1]
+        if (isDataFrame(firstFrame.type) || isDataFrame(secondFrame.type)) return
+        if (!firstFrame.isFirstFrame() || firstFrame.isLastFrame()) return
+        if (secondFrame.isFirstFrame()) return
+
+        val first = frameTexts[0].trim()
+        val second = frameTexts[1].trim()
+        if (!isCompoundDeHelperFrame(first) || !isDirectedCompoundHeader(second)) return
+
+        val fromCall = first.substringBefore(' ').trim()
+        if (fromCall.isNotEmpty()) {
+            frameTexts[0] = fromCall
+        }
+    }
+
+    private fun isCompoundDeHelperFrame(text: String): Boolean {
+        val parts = text.trim().split(Regex("\\s+"))
+        if (parts.size != 2) return false
+        val call = parts[0].uppercase()
+        val grid = parts[1].uppercase()
+        return isCallsignLike(call) && gridRegex.matches(grid)
+    }
+
+    private fun isCallsignLike(token: String): Boolean {
+        val upper = token.trim().uppercase()
+        if (upper.length !in 3..12) return false
+        if (!callsignRegex.matches(upper)) return false
+        if (!upper.any { it.isLetter() } || !upper.any { it.isDigit() }) return false
+        return true
+    }
+
+    private fun isDirectedCompoundHeader(text: String): Boolean {
+        val tokens = text.trim().split(Regex("\\s+"))
+        if (tokens.isEmpty()) return false
+        if (!isCallsignLike(tokens[0])) return false
+        if (tokens.size == 1) return true
+
+        val tail = tokens.drop(1).joinToString(" ").uppercase()
+        return directedCommandTailRegex.matches(tail)
+    }
+
+    private fun isDataFrame(type: Int): Boolean = (type and 0x4) != 0
+
+    private fun shouldInsertSpace(builder: StringBuilder, nextText: String): Boolean {
         if (builder.isEmpty()) return false
-        if (nextFrame.text.isEmpty()) return false
-        val nextText = nextFrame.text
+        if (nextText.isEmpty()) return false
         var prevIndex = builder.length - 1
         while (prevIndex >= 0 && builder[prevIndex].isWhitespace()) {
             prevIndex--
@@ -370,5 +422,10 @@ class DecodeViewModel(application: Application) : AndroidViewModel(application) 
         private const val TAG = "DecodeViewModel"
         private const val PREF_PERSIST_DECODES = "persist_decodes"
         private const val PERSISTED_DECODE_FILE = "decoded_messages.json"
+        private val gridRegex = Regex("^[A-R]{2}[0-9]{2}([A-X]{2})?$")
+        private val callsignRegex = Regex("^[A-Z0-9/]+$")
+        private val directedCommandTailRegex = Regex(
+            "^(?:AGN\\?|QSL\\?|HW CPY\\?|MSG TO:|SNR\\?|INFO\\?|GRID\\?|STATUS\\?|QUERY MSGS\\?|HEARING\\?|STATUS|HEARING|QUERY CALL|QUERY MSGS|QUERY|CMD|MSG|NACK|ACK|73|YES|NO|HEARTBEAT SNR|SNR|QSL|RR|SK|FB|INFO|GRID|DIT DIT|>|\\?)(?:\\s+[+-]?\\d{1,3})?$"
+        )
     }
 }

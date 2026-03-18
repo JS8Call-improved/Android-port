@@ -5,6 +5,16 @@
 #include "js8core/protocol/varicode.hpp"
 
 int main() {
+  int failures = 0;
+  auto check = [&](bool condition, std::string const& description) {
+    if (!condition) {
+      std::cerr << "FAIL: " << description << "\n";
+      ++failures;
+      return;
+    }
+    std::cout << "OK: " << description << "\n";
+  };
+
   std::vector<std::string> samples = {
       "CQ CQ CQ",
       "HB EM73",
@@ -22,16 +32,72 @@ int main() {
     auto hb = js8core::protocol::varicode::pack_heartbeat_message(s, "KN4CRD", &n);
     if (!hb.empty()) {
       auto unpacked = js8core::protocol::varicode::unpack_heartbeat_message(hb, &t, nullptr, &bits3);
-      std::cout << "HB roundtrip for '" << s << "': " << (unpacked.empty() ? "fail" : "ok") << "\n";
+      check(!unpacked.empty(), "heartbeat roundtrip for '" + s + "'");
     }
     auto cmp = js8core::protocol::varicode::pack_compound_message("`" + s, &n);
     if (!cmp.empty()) {
       auto unpacked = js8core::protocol::varicode::unpack_compound_message(cmp, &t, &num, &bits3);
-      std::cout << "Compound roundtrip for '" << s << "': " << (unpacked.empty() ? "fail" : "ok") << "\n";
+      check(!unpacked.empty(), "compound roundtrip for '" + s + "'");
     }
     auto fast = js8core::protocol::varicode::pack_fast_data_message(s, &n);
     auto fast_dec = js8core::protocol::varicode::unpack_fast_data_message(fast);
-    std::cout << "Fast-data roundtrip for '" << s << "': " << (fast_dec == s ? "ok" : "fail") << "\n";
+    check(fast_dec == s, "fast-data roundtrip for '" + s + "'");
+  }
+
+  {
+    // Regression: command-only compound helper frame must not decode as a fake grid (e.g. RA90).
+    std::uint8_t type = 0;
+    std::uint16_t extra = 0;
+    std::uint8_t bits3 = 0;
+    int n = 0;
+
+    auto helper = js8core::protocol::varicode::pack_compound_message("`MO1QF ", &n);
+    check(!helper.empty(), "pack compound helper '`MO1QF '");
+
+    auto unpacked = js8core::protocol::varicode::unpack_compound_message(helper, &type, &extra, &bits3);
+    check(!unpacked.empty(), "unpack compound helper '`MO1QF '");
+    check(extra > 180 * 180, "compound helper extra uses command range");
+
+    std::string rendered;
+    for (auto part : unpacked) {
+      while (!part.empty() && part.front() == ' ') part.erase(part.begin());
+      if (part.empty()) continue;
+      if (!rendered.empty()) rendered += " ";
+      rendered += part;
+    }
+    check(rendered.find("RA90") == std::string::npos, "compound helper does not render RA90");
+  }
+
+  {
+    // Regression: compound sender directed free-text should decode without RA90 artifact.
+    auto frames = js8core::protocol::varicode::build_message_frames(
+        "2W0OXE/5", "IO81", "MO1QF", "TEST", false, false, 0, nullptr);
+    check(frames.size() >= 2, "compound sender directed free-text produces multiple frames");
+
+    bool saw_ra90 = false;
+    for (auto const& frame : frames) {
+      std::uint8_t type = 0;
+      std::uint16_t extra = 0;
+      std::uint8_t bits3 = 0;
+      auto unpacked = js8core::protocol::varicode::unpack_compound_message(frame.first, &type, &extra, &bits3);
+      if (unpacked.empty()) continue;
+      std::string rendered;
+      for (auto part : unpacked) {
+        while (!part.empty() && part.front() == ' ') part.erase(part.begin());
+        if (part.empty()) continue;
+        if (!rendered.empty()) rendered += " ";
+        rendered += part;
+      }
+      if (rendered.find("RA90") != std::string::npos) {
+        saw_ra90 = true;
+      }
+    }
+    check(!saw_ra90, "compound sender directed decode has no RA90 artifact");
+  }
+
+  if (failures != 0) {
+    std::cerr << "varicode_roundtrip failures: " << failures << "\n";
+    return 1;
   }
   return 0;
 }

@@ -187,7 +187,7 @@ class PskReporterClient(
             if (addedSpots.isEmpty()) {
                 if (!flush) return
                 if (txData.size <= txHeaderSize) {
-                    finalizeAndSend(baseMessage, header.lengthOffset, header.exportTimeOffset, udpSocket)
+                    finalizeAndSend(baseMessage, header.lengthOffset, header.exportTimeOffset, header.sequenceOffset, udpSocket, 0)
                     return
                 }
             }
@@ -204,13 +204,13 @@ class PskReporterClient(
             }
 
             if (txData.size > txHeaderSize) {
-                val txDataLength = txData.size
                 txData.padTo4()
+                val txDataLength = txData.size
                 txData.setShort(txLengthOffset, txDataLength)
                 baseMessage.writeBytes(txData.toByteArray())
             }
 
-            finalizeAndSend(baseMessage, header.lengthOffset, header.exportTimeOffset, udpSocket)
+            finalizeAndSend(baseMessage, header.lengthOffset, header.exportTimeOffset, header.sequenceOffset, udpSocket, addedSpots.size)
 
             if (!flush && synchronized(lock) { spots.isEmpty() }) return
             if (!flush && ++flushCounter % FLUSH_INTERVAL == 0) {
@@ -227,7 +227,8 @@ class PskReporterClient(
         message.writeShort(0)
         val exportTimeOffset = message.position
         message.writeInt(0)
-        message.writeInt(++sequenceNumber)
+        val sequenceOffset = message.position
+        message.writeInt(0)
         message.writeInt(observationId)
 
         if (sendDescriptors > 0) {
@@ -240,18 +241,24 @@ class PskReporterClient(
 
         val receiver = buildReceiverRecord()
         message.writeBytes(receiver)
-        return MessageHeader(message, lengthOffset, exportTimeOffset)
+        return MessageHeader(message, lengthOffset, exportTimeOffset, sequenceOffset)
     }
 
     private fun finalizeAndSend(
         message: PacketWriter,
         lengthOffset: Int,
         exportTimeOffset: Int,
-        udpSocket: DatagramSocket
+        sequenceOffset: Int,
+        udpSocket: DatagramSocket,
+        reportCount: Int
     ) {
-        val length = message.size
         message.padTo4()
+        val length = message.size
         message.setShort(lengthOffset, length)
+        if (reportCount > 0) {
+            sequenceNumber += reportCount
+        }
+        message.setInt(sequenceOffset, sequenceNumber)
         val exportTime = (System.currentTimeMillis() / 1000).toInt()
         message.setInt(exportTimeOffset, exportTime)
         val payload = message.toByteArray()
@@ -291,9 +298,8 @@ class PskReporterClient(
         writer.writeInt(ENTERPRISE_NUMBER)
         writer.writeShort(150)
         writer.writeShort(4)
-        val length = writer.size
         writer.padTo4()
-        writer.setShort(lengthOffset, length)
+        writer.setShort(lengthOffset, writer.size)
         return writer.toByteArray()
     }
 
@@ -317,9 +323,8 @@ class PskReporterClient(
         writer.writeShort(0x8000 + 9)
         writer.writeShort(0xFFFF)
         writer.writeInt(ENTERPRISE_NUMBER)
-        val length = writer.size
         writer.padTo4()
-        writer.setShort(lengthOffset, length)
+        writer.setShort(lengthOffset, writer.size)
         return writer.toByteArray()
     }
 
@@ -332,9 +337,8 @@ class PskReporterClient(
         writeUtfString(writer, rxGrid)
         writeUtfString(writer, programId)
         writeUtfString(writer, rxAntenna)
-        val length = writer.size
         writer.padTo4()
-        writer.setShort(lengthOffset, length)
+        writer.setShort(lengthOffset, writer.size)
         return writer.toByteArray()
     }
 
@@ -476,7 +480,8 @@ class PskReporterClient(
     private data class MessageHeader(
         val writer: PacketWriter,
         val lengthOffset: Int,
-        val exportTimeOffset: Int
+        val exportTimeOffset: Int,
+        val sequenceOffset: Int
     )
 
     companion object {
