@@ -242,12 +242,29 @@ class DecodeViewModel(application: Application) : AndroidViewModel(application) 
 
         val first = frameTexts[0].trim()
         val second = frameTexts[1].trim()
-        if (!isCompoundDeHelperFrame(first) || !isDirectedCompoundHeader(second)) return
+        if (!isCompoundDeHelperFrame(first)) return
 
         val fromCall = first.substringBefore(' ').trim()
-        if (fromCall.isNotEmpty()) {
-            frameTexts[0] = fromCall
+        if (fromCall.isEmpty()) return
+
+        val rewrittenDirected = rewriteDirectedPlaceholder(second, fromCall)
+        if (rewrittenDirected != null) {
+            frameTexts[0] = ""
+            frameTexts[1] = rewrittenDirected
+            return
         }
+
+        if (isDirectedCompoundHeader(second)) {
+            frameTexts[0] = ""
+            frameTexts[1] = "$fromCall: $second"
+        }
+    }
+
+    private fun rewriteDirectedPlaceholder(text: String, fromCall: String): String? {
+        val match = directedPlaceholderRegex.matchEntire(text.trim()) ?: return null
+        val tail = match.groupValues.getOrElse(1) { "" }.trim()
+        if (tail.isEmpty()) return null
+        return "$fromCall: $tail"
     }
 
     private fun isCompoundDeHelperFrame(text: String): Boolean {
@@ -427,5 +444,6 @@ class DecodeViewModel(application: Application) : AndroidViewModel(application) 
         private val directedCommandTailRegex = Regex(
             "^(?:AGN\\?|QSL\\?|HW CPY\\?|MSG TO:|SNR\\?|INFO\\?|GRID\\?|STATUS\\?|QUERY MSGS\\?|HEARING\\?|STATUS|HEARING|QUERY CALL|QUERY MSGS|QUERY|CMD|MSG|NACK|ACK|73|YES|NO|HEARTBEAT SNR|SNR|QSL|RR|SK|FB|INFO|GRID|DIT DIT|>|\\?)(?:\\s+[+-]?\\d{1,3})?$"
         )
+        private val directedPlaceholderRegex = Regex("^<\\.{4}>:\\s*(.+)$")
     }
 }

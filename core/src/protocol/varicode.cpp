@@ -1322,15 +1322,22 @@ std::vector<std::pair<std::string, int>> build_message_frames(std::string const&
       }
       if (useDir) {
         bool shouldUseStandardFrame = true;
+
         if (mycallCompound || dirToCompound) {
           auto deCompoundMessage = "`" + mycall + " " + mygrid;
           auto deCompoundFrame = pack_compound_message(deCompoundMessage, nullptr);
           if (!deCompoundFrame.empty()) lineFrames.push_back({deCompoundFrame, 0});
+        }
+
+        if (mycallCompound || dirToCompound) {
           auto dirCompoundMessage = "`" + dirTo + dirCmd + dirNum;
           auto dirCompoundFrame = pack_compound_message(dirCompoundMessage, nullptr);
-          if (!dirCompoundFrame.empty()) lineFrames.push_back({dirCompoundFrame, 0});
-          shouldUseStandardFrame = false;
+          if (!dirCompoundFrame.empty()) {
+            lineFrames.push_back({dirCompoundFrame, 0});
+            shouldUseStandardFrame = false;
+          }
         }
+
         if (shouldUseStandardFrame) {
           lineFrames.push_back({frame, 0});
         }

@@ -69,18 +69,29 @@ int main() {
   }
 
   {
-    // Regression: compound sender directed free-text should decode without RA90 artifact.
+    // Regression: compound sender should use a compound-directed frame (no <....> over the air).
     auto frames = js8core::protocol::varicode::build_message_frames(
         "2W0OXE/5", "IO81", "MO1QF", "TEST", false, false, 0, nullptr);
     check(frames.size() >= 2, "compound sender directed free-text produces multiple frames");
 
     bool saw_ra90 = false;
+    bool saw_directed = false;
+    bool saw_compound_directed = false;
     for (auto const& frame : frames) {
+      std::uint8_t directed_type = 0;
+      auto directed = js8core::protocol::varicode::unpack_directed_message(frame.first, &directed_type);
+      if (!directed.empty()) {
+        saw_directed = true;
+      }
+
       std::uint8_t type = 0;
       std::uint16_t extra = 0;
       std::uint8_t bits3 = 0;
       auto unpacked = js8core::protocol::varicode::unpack_compound_message(frame.first, &type, &extra, &bits3);
       if (unpacked.empty()) continue;
+      if (type == 2) {
+        saw_compound_directed = true;
+      }
       std::string rendered;
       for (auto part : unpacked) {
         while (!part.empty() && part.front() == ' ') part.erase(part.begin());
@@ -92,7 +103,63 @@ int main() {
         saw_ra90 = true;
       }
     }
+    check(saw_compound_directed, "compound sender to normal recipient uses compound-directed frame");
+    check(!saw_directed, "compound sender to normal recipient does not emit standard directed frame");
     check(!saw_ra90, "compound sender directed decode has no RA90 artifact");
+  }
+
+  {
+    // Regression: compound recipient should use a compound-directed frame.
+    auto frames = js8core::protocol::varicode::build_message_frames(
+        "2W0OXE", "IO81", "MO1QF/5", "TEST", false, false, 0, nullptr);
+    check(frames.size() >= 2, "compound recipient directed free-text produces multiple frames");
+
+    bool saw_directed = false;
+    bool saw_compound_directed = false;
+    for (auto const& frame : frames) {
+      std::uint8_t directed_type = 0;
+      auto directed = js8core::protocol::varicode::unpack_directed_message(frame.first, &directed_type);
+      if (!directed.empty()) {
+        saw_directed = true;
+      }
+
+      std::uint8_t type = 0;
+      std::uint16_t extra = 0;
+      std::uint8_t bits3 = 0;
+      auto unpacked = js8core::protocol::varicode::unpack_compound_message(frame.first, &type, &extra, &bits3);
+      if (!unpacked.empty() && type == 2) {
+        saw_compound_directed = true;
+      }
+    }
+    check(saw_compound_directed, "compound recipient uses compound-directed frame");
+    check(!saw_directed, "compound recipient does not emit standard directed frame");
+  }
+
+  {
+    // Regression: compound sender and recipient should use a compound-directed frame.
+    auto frames = js8core::protocol::varicode::build_message_frames(
+        "2W0OXE/5", "IO81", "MO1QF/5", "TEST", false, false, 0, nullptr);
+    check(frames.size() >= 2, "compound sender and recipient produce multiple frames");
+
+    bool saw_directed = false;
+    bool saw_compound_directed = false;
+    for (auto const& frame : frames) {
+      std::uint8_t directed_type = 0;
+      auto directed = js8core::protocol::varicode::unpack_directed_message(frame.first, &directed_type);
+      if (!directed.empty()) {
+        saw_directed = true;
+      }
+
+      std::uint8_t type = 0;
+      std::uint16_t extra = 0;
+      std::uint8_t bits3 = 0;
+      auto unpacked = js8core::protocol::varicode::unpack_compound_message(frame.first, &type, &extra, &bits3);
+      if (!unpacked.empty() && type == 2) {
+        saw_compound_directed = true;
+      }
+    }
+    check(saw_compound_directed, "compound sender and recipient use compound-directed frame");
+    check(!saw_directed, "compound sender and recipient do not emit standard directed frame");
   }
 
   if (failures != 0) {
