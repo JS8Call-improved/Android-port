@@ -17,6 +17,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
@@ -26,6 +27,7 @@ import com.js8call.core.BluetoothSerialPortCatalog
 import com.js8call.core.HamlibRigControl
 import com.js8call.core.JS8AudioHelper
 import com.js8call.core.JS8Engine
+import com.js8call.core.TruSdxDirectSerial
 import com.js8call.core.UsbSerialBridge
 import com.js8call.core.UsbSerialPortCatalog
 import com.js8call.example.MainActivity
@@ -36,6 +38,8 @@ import com.js8call.example.network.PskReporterClient
 import java.util.Calendar
 import java.util.Locale
 import java.util.TimeZone
+import java.util.concurrent.LinkedBlockingDeque
+import java.util.concurrent.TimeUnit
 
 /**
  * Foreground service for running the JS8 engine in the background.
@@ -54,9 +58,34 @@ class JS8EngineService : Service() {
     private var hamlibRigControl: HamlibRigControl? = null
     private var hamlibRigConnected: Boolean = false
     private var rtsPttConnected: Boolean = false
+    private var trusdxConnected: Boolean = false
     private var rtsPttTransport: SerialTransport? = null
     private var usbSerialBridge: UsbSerialBridge? = null
     private var bluetoothSerialBridge: BluetoothSerialBridge? = null
+    private var trusdxDirectSerial: TruSdxDirectSerial? = null
+    private var trusdxSerialSession: TruSdxSerialSession? = null
+    @Volatile private var trusdxInitInProgress: Boolean = false
+    @Volatile private var trusdxParserResyncs: Long = 0
+    @Volatile private var trusdxRxFrames: Long = 0
+    @Volatile private var trusdxRxSamples: Long = 0
+    @Volatile private var trusdxTxFrames: Long = 0
+    @Volatile private var trusdxTxSamples: Long = 0
+    @Volatile private var trusdxTxDrops: Long = 0
+    @Volatile private var trusdxTxSilentFrames: Long = 0
+    @Volatile private var trusdxRxUnderruns: Long = 0
+    @Volatile private var trusdxRxSubmitDrops: Long = 0
+    @Volatile private var trusdxLastRxAudioNs: Long = 0L
+    @Volatile private var trusdxLastRxRearmNs: Long = 0L
+    @Volatile private var trusdxWatchdogToken: Int = 0
+    @Volatile private var spectrumEventCount: Long = 0
+    @Volatile private var trusdxRxRateWindowStartNs: Long = 0L
+    @Volatile private var trusdxRxRateWindowSamples: Long = 0L
+    @Volatile private var trusdxRxFrameDrops: Long = 0L
+    @Volatile private var trusdxRxKeepaliveToken: Int = 0
+    @Volatile private var trusdxRxKeepaliveCount: Long = 0L
+    private val trusdxRxFrameQueue = LinkedBlockingDeque<ByteArray>(TRUSDX_RX_FRAME_QUEUE_MAX)
+    @Volatile private var trusdxRxWorkerRunning = false
+    @Volatile private var trusdxRxWorkerThread: Thread? = null
     private val mainHandler = Handler(Looper.getMainLooper())
     private val txHandlerThread = HandlerThread("Js8Tx")
     private lateinit var txHandler: Handler
@@ -68,6 +97,7 @@ class JS8EngineService : Service() {
     private var txMonitorWasAudioActive = false
     @Volatile private var txSessionActive = false
     @Volatile private var txAudioActive = false
+    @Volatile private var trusdxTxIntentActive = false
     private var scoRoutingActive = false
     private var previousAudioMode = AudioManager.MODE_NORMAL
     private var scoRestartAttempts = 0
@@ -107,6 +137,7 @@ class JS8EngineService : Service() {
             if (!sessionActive) {
                 txMonitorActive = false
                 txMonitorWasAudioActive = false
+                trusdxTxIntentActive = false
                 // Release PTT when TX finishes
                 if (isRigControlConnected()) {
                     Thread {
@@ -177,7 +208,37 @@ class JS8EngineService : Service() {
         createNotificationChannel()
         usbSerialBridge = UsbSerialBridge(applicationContext)
         bluetoothSerialBridge = BluetoothSerialBridge(applicationContext)
+        trusdxDirectSerial = TruSdxDirectSerial(applicationContext)
         hamlibRigControl = HamlibRigControl()
+        trusdxSerialSession = trusdxDirectSerial?.let { direct ->
+            TruSdxSerialSession(
+                direct,
+                object : TruSdxSerialSession.Listener {
+                    override fun onCatMessage(message: String) {
+                        if (isTruSdxDiagnosticsEnabled()) {
+                            Log.v(TAG, "TruSDX CAT <= $message")
+                        }
+                    }
+
+                    override fun onAudioFrame(samplesU8: ByteArray) {
+                        handleTruSdxAudioFrame(samplesU8)
+                    }
+
+                    override fun onParserResync(reason: String) {
+                        trusdxParserResyncs += 1
+                        if (isTruSdxDiagnosticsEnabled()) {
+                            Log.w(TAG, "TruSDX parser resync ($reason), count=$trusdxParserResyncs")
+                        }
+                    }
+
+                    override fun onIoError(message: String) {
+                        Log.w(TAG, "TruSDX I/O error: $message")
+                        trusdxConnected = false
+                        broadcastError("TruSDX serial link lost")
+                    }
+                }
+            )
+        }
         txHandlerThread.start()
         txHandler = Handler(txHandlerThread.looper)
         txMonitorHandler = Handler(Looper.getMainLooper())
@@ -318,6 +379,16 @@ class JS8EngineService : Service() {
         try {
             initializeRigControl()
 
+            if (rigControlMode == "trusdx_serial") {
+                val ready = waitForTruSdxReady(TRUSDX_STARTUP_WAIT_MS)
+                if (!ready) {
+                    Log.w(TAG, "TruSDX serial not ready before engine start")
+                    broadcastError("TruSDX serial link not ready")
+                    broadcastEngineState(STATE_ERROR)
+                    return
+                }
+            }
+
             // Create callback handler that marshals to main thread
             val callbackHandler = object : JS8Engine.CallbackHandler {
                 override fun onDecoded(
@@ -342,6 +413,10 @@ class JS8EngineService : Service() {
                     bins: FloatArray, binHz: Float,
                     powerDb: Float, peakDb: Float
                 ) {
+                    spectrumEventCount += 1
+                    if (rigControlMode == "trusdx_serial" && spectrumEventCount % 20L == 0L) {
+                        Log.i(TAG, "Spectrum events: count=$spectrumEventCount bins=${bins.size} binHz=$binHz power=$powerDb peak=$peakDb")
+                    }
                     // Broadcast spectrum data (main thread)
                     mainHandler.post {
                         broadcastSpectrum(bins, binHz, powerDb, peakDb)
@@ -380,30 +455,50 @@ class JS8EngineService : Service() {
                     }
                     Log.d(TAG, "[$levelStr] $message")
                 }
+
+                override fun onTxAudio(samples: ShortArray, sampleRateHz: Int) {
+                    handleTruSdxTxAudio(samples, sampleRateHz)
+                }
             }
 
             // Create engine
             engine = JS8Engine.create(
                 sampleRateHz = 12000,
                 submodes = 0x1F, // Enable A/B/C/E/I by default
-                callbackHandler = callbackHandler
+                callbackHandler = callbackHandler,
+                enableTxAudioTap = rigControlMode == "trusdx_serial"
             )
 
             // Start engine
             if (engine?.start() == true) {
                 Log.i(TAG, "Engine started successfully")
+                spectrumEventCount = 0
 
                 applyTxBoostSetting()
 
-                // Start audio capture with selected device (if any)
-                scoRestartAttempts = 0
-                scoSourceIndex = 0
-                scoSilenceCheckToken++
-                scoStartToken++
-                if (isScoInputDevice(selectedAudioDeviceId)) {
-                    startAudioCaptureWithScoWait(engine!!, selectedAudioDeviceId)
+                if (rigControlMode == "trusdx_serial") {
+                    Log.i(TAG, "TruSDX mode active: skipping microphone capture")
+                    val label = if (selectedAudioDeviceId == TRUSDX_AUDIO_SPEAKER_ID) {
+                        "TruSDX Speaker"
+                    } else {
+                        "TruSDX Serial"
+                    }
+                    broadcastAudioDevice(label)
+                    broadcastEngineState(STATE_RUNNING)
+                    broadcastProcessTxQueue()
+                    startTruSdxRxWorker()
+                    scheduleTruSdxRxKeepAlive()
                 } else {
-                    startAudioCapture(engine!!, selectedAudioDeviceId)
+                    // Start audio capture with selected device (if any)
+                    scoRestartAttempts = 0
+                    scoSourceIndex = 0
+                    scoSilenceCheckToken++
+                    scoStartToken++
+                    if (isScoInputDevice(selectedAudioDeviceId)) {
+                        startAudioCaptureWithScoWait(engine!!, selectedAudioDeviceId)
+                    } else {
+                        startAudioCapture(engine!!, selectedAudioDeviceId)
+                    }
                 }
             } else {
                 Log.e(TAG, "Failed to start engine")
@@ -427,19 +522,158 @@ class JS8EngineService : Service() {
             Log.i(TAG, "Rig control not enabled")
             rigControlMode = "none"
             rtsPttConnected = false
+            trusdxConnected = false
             rtsPttTransport = null
             return
         }
 
         rigControlMode = rigType ?: "none"
         rtsPttConnected = false
+        trusdxConnected = false
         rtsPttTransport = null
         when (rigType) {
             "network" -> initializeNetworkRigControl()
             "hamlib_usb" -> initializeHamlibUsbControl()
             "rts_ptt" -> initializeRtsPttControl()
+            "trusdx_serial" -> initializeTruSdxControl()
             else -> Log.w(TAG, "Unknown rig type: $rigType")
         }
+    }
+
+    private fun initializeTruSdxControl() {
+        Log.i(TAG, "Initializing TruSDX serial control")
+        trusdxInitInProgress = true
+        trusdxConnected = false
+        trusdxParserResyncs = 0
+        trusdxRxFrames = 0
+        trusdxRxSamples = 0
+        trusdxTxFrames = 0
+        trusdxTxSamples = 0
+        trusdxTxDrops = 0
+        trusdxTxSilentFrames = 0
+        trusdxRxUnderruns = 0
+        trusdxRxSubmitDrops = 0
+        trusdxLastRxAudioNs = 0L
+        trusdxLastRxRearmNs = 0L
+        trusdxTxIntentActive = false
+        trusdxRxRateWindowStartNs = 0L
+        trusdxRxRateWindowSamples = 0L
+        trusdxRxFrameDrops = 0L
+        trusdxRxKeepaliveToken++
+        trusdxRxKeepaliveCount = 0L
+        clearTruSdxRxFrameQueue()
+
+        val prefs = PreferenceManager.getDefaultSharedPreferences(this)
+        val selectedPort = prefs.getString("rig_hamlib_usb_port", "auto")?.trim().orEmpty()
+        val selection = resolveSerialSelection(selectedPort, prefs)
+        if (selection == null) {
+            Log.w(TAG, "Invalid serial port selection: $selectedPort")
+            broadcastError("Invalid serial port selection for TruSDX control.")
+            rigCtlErrorShown = true
+            trusdxInitInProgress = false
+            return
+        }
+
+        if (selection.transport != SerialTransport.USB) {
+            Log.w(TAG, "TruSDX only supports USB serial transport")
+            broadcastError("TruSDX mode supports USB serial only.")
+            rigCtlErrorShown = true
+            trusdxInitInProgress = false
+            return
+        }
+
+        openTruSdxSerialUsb(selection)
+    }
+
+    private fun openTruSdxSerialUsb(selection: SerialSelection) {
+        var deviceId = selection.usbDeviceId
+        var portIndex = selection.portIndex
+        if (deviceId == null) {
+            val ports = try {
+                UsbSerialPortCatalog.listPorts(this)
+            } catch (_: Throwable) {
+                emptyList()
+            }
+            val firstPort = ports.firstOrNull()
+            if (firstPort != null) {
+                deviceId = firstPort.deviceId
+                portIndex = firstPort.portIndex
+                Log.i(TAG, "Auto-selected USB serial port for TruSDX: ${firstPort.label}")
+            }
+        }
+
+        val usbDevice = if (deviceId != null) {
+            UsbPermissionHelper.findUsbDeviceById(this, deviceId)
+        } else {
+            null
+        }
+
+        if (usbDevice == null) {
+            Log.w(TAG, "No USB serial device found for TruSDX")
+            broadcastError("No USB serial device found for TruSDX control.")
+            rigCtlErrorShown = true
+            trusdxInitInProgress = false
+            return
+        }
+
+        Log.i(TAG, "TruSDX USB device selected: ${usbDevice.deviceName} (id=${usbDevice.deviceId}) port=$portIndex")
+
+        if (!UsbPermissionHelper.hasPermission(this, usbDevice)) {
+            Log.i(TAG, "Requesting USB permission for TruSDX device...")
+            UsbPermissionHelper.requestPermission(this, usbDevice) { granted ->
+                if (granted) {
+                    Log.i(TAG, "USB permission granted for TruSDX device")
+                    openTruSdxSerialUsbInternal(usbDevice.deviceId, portIndex)
+                } else {
+                    Log.w(TAG, "USB permission denied for TruSDX device")
+                    broadcastError("USB permission denied. Please grant USB access in Settings.")
+                    rigCtlErrorShown = true
+                    trusdxInitInProgress = false
+                }
+            }
+        } else {
+            Log.i(TAG, "USB permission already granted for TruSDX device")
+            openTruSdxSerialUsbInternal(usbDevice.deviceId, portIndex)
+        }
+    }
+
+    private fun openTruSdxSerialUsbInternal(deviceId: Int, portIndex: Int) {
+        Thread {
+            val session = trusdxSerialSession
+            val opened = session?.start(deviceId, portIndex) == true
+            if (opened) {
+                session?.setSpeakerEnabled(selectedAudioDeviceId == TRUSDX_AUDIO_SPEAKER_ID)
+            }
+            val initialized = opened && session?.initializeRigState() == true
+            trusdxConnected = initialized
+            rigCtlErrorShown = !initialized
+            trusdxInitInProgress = false
+            mainHandler.post {
+                if (initialized) {
+                    Log.i(TAG, "TruSDX serial control ready device=$deviceId port=$portIndex")
+                } else {
+                    session?.stop()
+                    trusdxConnected = false
+                    Log.w(TAG, "Failed to initialize TruSDX serial control")
+                    broadcastError("Failed to initialize TruSDX serial control.")
+                    rigCtlErrorShown = true
+                }
+            }
+        }.start()
+    }
+
+    private fun waitForTruSdxReady(timeoutMs: Long): Boolean {
+        val deadline = SystemClock.elapsedRealtime() + timeoutMs
+        while (SystemClock.elapsedRealtime() < deadline) {
+            if (trusdxConnected) {
+                return true
+            }
+            if (!trusdxInitInProgress) {
+                return false
+            }
+            SystemClock.sleep(25)
+        }
+        return trusdxConnected
     }
 
     private fun applyTxBoostSetting() {
@@ -1025,9 +1259,25 @@ class JS8EngineService : Service() {
             rigCtlErrorShown = false
             hamlibRigConnected = false
             rtsPttConnected = false
+            trusdxConnected = false
+            trusdxWatchdogToken++
+            trusdxTxIntentActive = false
+            stopTruSdxRxWorker()
+            clearTruSdxRxFrameQueue()
+            trusdxRxKeepaliveToken++
+            trusdxRxKeepaliveCount = 0L
             rtsPttTransport = null
             rigControlMode = "none"
             hamlibRigControl?.close()
+            trusdxSerialSession?.stop()
+            if (isTruSdxDiagnosticsEnabled() &&
+                (trusdxRxFrames > 0 || trusdxTxFrames > 0 || trusdxParserResyncs > 0 || trusdxTxDrops > 0 || trusdxRxUnderruns > 0 || trusdxRxFrameDrops > 0)
+            ) {
+                Log.i(
+                    TAG,
+                    "TruSDX diagnostics: rxFrames=$trusdxRxFrames rxSamples=$trusdxRxSamples rxFrameDrops=$trusdxRxFrameDrops rxSubmitDrops=$trusdxRxSubmitDrops rxUnderruns=$trusdxRxUnderruns txFrames=$trusdxTxFrames txSamples=$trusdxTxSamples txSilent=$trusdxTxSilentFrames txDrops=$trusdxTxDrops parserResyncs=$trusdxParserResyncs"
+                )
+            }
             usbSerialBridge?.unregisterNative()
             usbSerialBridge?.close()
             bluetoothSerialBridge?.close()
@@ -1252,6 +1502,18 @@ class JS8EngineService : Service() {
             }
             // Store the selected device ID
             selectedAudioDeviceId = deviceId
+
+            if (rigControlMode == "trusdx_serial") {
+                val speakerEnabled = deviceId == TRUSDX_AUDIO_SPEAKER_ID
+                val ok = trusdxSerialSession?.setSpeakerEnabled(speakerEnabled) == true
+                if (!ok) {
+                    broadcastError("Failed to update TruSDX speaker mode")
+                }
+                val label = if (speakerEnabled) "TruSDX Speaker" else "TruSDX Serial"
+                broadcastAudioDevice(label)
+                return
+            }
+
             scoRestartAttempts = 0
             scoSourceIndex = 0
             scoSilenceCheckToken++
@@ -1354,6 +1616,210 @@ class JS8EngineService : Service() {
             Log.e(TAG, "Failed to start audio capture")
             broadcastError("Failed to start audio capture")
         }
+    }
+
+    private fun handleTruSdxAudioFrame(samplesU8: ByteArray) {
+        if (rigControlMode != "trusdx_serial") return
+        if (samplesU8.isEmpty()) return
+
+        trusdxRxFrames += 1
+        trusdxRxSamples += samplesU8.size.toLong()
+        trusdxLastRxAudioNs = System.nanoTime()
+        trusdxRxRateWindowSamples += samplesU8.size.toLong()
+        enqueueTruSdxRxFrame(samplesU8)
+
+        if (trusdxRxFrames <= 10) {
+            val queued = trusdxRxFrameQueue.size
+            Log.i(TAG, "TruSDX RX frame #$trusdxRxFrames size=${samplesU8.size} queued=$queued")
+        }
+        if (isTruSdxDiagnosticsEnabled()) {
+            val now = trusdxLastRxAudioNs
+            if (trusdxRxRateWindowStartNs == 0L) {
+                trusdxRxRateWindowStartNs = now
+            } else {
+                val windowNs = now - trusdxRxRateWindowStartNs
+                if (windowNs >= 1_000_000_000L) {
+                    val rate = (trusdxRxRateWindowSamples * 1_000_000_000L) / windowNs
+                    Log.i(TAG, "TruSDX RX stream: frames=$trusdxRxFrames samples=$trusdxRxSamples chunk=${samplesU8.size} rate=${rate}B/s")
+                    trusdxRxRateWindowStartNs = now
+                    trusdxRxRateWindowSamples = 0L
+                }
+            }
+        }
+    }
+
+    private fun scheduleTruSdxRxKeepAlive() {
+        val token = ++trusdxRxKeepaliveToken
+        mainHandler.postDelayed(object : Runnable {
+            override fun run() {
+                if (token != trusdxRxKeepaliveToken) return
+                if (rigControlMode != "trusdx_serial") return
+                if (!trusdxConnected) {
+                    mainHandler.postDelayed(this, TRUSDX_RX_KEEPALIVE_INTERVAL_MS)
+                    return
+                }
+                if (!trusdxTxIntentActive && !isTransmitActive()) {
+                    val ok = trusdxSerialSession?.sendRxKeepAlive() == true
+                    trusdxRxKeepaliveCount += 1
+                    if (!ok) {
+                        Log.w(TAG, "TruSDX RX keepalive failed")
+                    } else if (isTruSdxDiagnosticsEnabled() && trusdxRxKeepaliveCount % 50L == 0L) {
+                        Log.i(TAG, "TruSDX RX keepalive count=$trusdxRxKeepaliveCount")
+                    }
+                }
+                mainHandler.postDelayed(this, TRUSDX_RX_KEEPALIVE_INTERVAL_MS)
+            }
+        }, TRUSDX_RX_KEEPALIVE_INTERVAL_MS)
+    }
+
+    private fun enqueueTruSdxRxFrame(frame: ByteArray) {
+        if (!trusdxRxFrameQueue.offerLast(frame)) {
+            trusdxRxFrameQueue.pollFirst()
+            trusdxRxFrameDrops += 1
+            trusdxRxFrameQueue.offerLast(frame)
+        }
+    }
+
+    private fun clearTruSdxRxFrameQueue() {
+        trusdxRxFrameQueue.clear()
+    }
+
+    private fun startTruSdxRxWorker() {
+        if (trusdxRxWorkerRunning) return
+        trusdxRxWorkerRunning = true
+        trusdxRxWorkerThread = Thread({
+            while (trusdxRxWorkerRunning) {
+                val frame = try {
+                    trusdxRxFrameQueue.pollFirst(100L, TimeUnit.MILLISECONDS)
+                } catch (_: InterruptedException) {
+                    null
+                } ?: continue
+
+                val activeEngine = engine ?: continue
+                val pcm = ShortArray(frame.size)
+                var i = 0
+                while (i < frame.size) {
+                    pcm[i] = (frame[i].toInt() shl 8).toShort()
+                    i++
+                }
+
+                val ok = activeEngine.submitAudioRaw(
+                    samples = pcm,
+                    numSamples = pcm.size,
+                    inputSampleRateHz = TRUSDX_RX_SAMPLE_RATE_HZ,
+                    timestampNs = System.nanoTime()
+                )
+                if (!ok) {
+                    trusdxRxSubmitDrops += 1
+                    if (trusdxRxSubmitDrops <= 10L) {
+                        Log.w(TAG, "TruSDX submit drop #$trusdxRxSubmitDrops chunk=${pcm.size}")
+                    }
+                    if (isTruSdxDiagnosticsEnabled()) {
+                        Log.w(TAG, "TruSDX audio submit failed for chunk size=${pcm.size}")
+                    }
+                }
+            }
+        }, "TruSdxRxWorker")
+        trusdxRxWorkerThread?.isDaemon = true
+        trusdxRxWorkerThread?.start()
+    }
+
+    private fun stopTruSdxRxWorker() {
+        trusdxRxWorkerRunning = false
+        val thread = trusdxRxWorkerThread
+        trusdxRxWorkerThread = null
+        thread?.interrupt()
+        if (thread != null && thread.isAlive) {
+            try {
+                thread.join(300)
+            } catch (_: InterruptedException) {
+            }
+        }
+    }
+
+    private fun scheduleTruSdxRxWatchdog() {
+        val token = ++trusdxWatchdogToken
+        mainHandler.postDelayed(object : Runnable {
+            override fun run() {
+                if (token != trusdxWatchdogToken) return
+                if (rigControlMode != "trusdx_serial") return
+                if (engine == null) return
+
+                val now = System.nanoTime()
+                val last = trusdxLastRxAudioNs
+                val stalled = last == 0L || (now - last) > TRUSDX_RX_STALL_REARM_NS
+                val rearmDue = trusdxLastRxRearmNs == 0L || (now - trusdxLastRxRearmNs) > TRUSDX_RX_REARM_COOLDOWN_NS
+                if (stalled && trusdxConnected && rearmDue) {
+                    val ok = trusdxSerialSession?.ensureRxStreaming() == true
+                    trusdxLastRxRearmNs = now
+                    Log.i(TAG, "TruSDX RX watchdog rearm: ok=$ok lastRxNs=$last")
+                }
+
+                mainHandler.postDelayed(this, TRUSDX_RX_WATCHDOG_INTERVAL_MS)
+            }
+        }, TRUSDX_RX_WATCHDOG_INTERVAL_MS)
+    }
+
+    private fun handleTruSdxTxAudio(samplesPcm16: ShortArray, sampleRateHz: Int) {
+        if (rigControlMode != "trusdx_serial") return
+        if (samplesPcm16.isEmpty()) return
+        val serialTxActive = trusdxSerialSession?.isTxActive() == true
+        var sumSquares = 0.0
+        for (s in samplesPcm16) {
+            val v = s.toDouble()
+            sumSquares += v * v
+        }
+        val inRms = kotlin.math.sqrt(sumSquares / samplesPcm16.size)
+        val txSamples = if (sampleRateHz == TRUSDX_TX_SAMPLE_RATE_HZ) {
+            samplesPcm16
+        } else {
+            resamplePcmLinear(samplesPcm16, sampleRateHz, TRUSDX_TX_SAMPLE_RATE_HZ)
+        }
+        if (txSamples.isEmpty()) return
+
+        val ok = trusdxSerialSession?.sendTxAudio(txSamples) == true
+        if (!ok) {
+            trusdxTxDrops += 1
+            return
+        }
+
+        if (!serialTxActive) {
+            return
+        }
+
+        trusdxTxFrames += 1
+        trusdxTxSamples += txSamples.size.toLong()
+        if (inRms < 1.0) {
+            trusdxTxSilentFrames += 1
+        }
+        if (isTruSdxDiagnosticsEnabled() && (trusdxTxFrames % 200L == 0L)) {
+            Log.i(TAG, "TruSDX TX frame #$trusdxTxFrames inRate=$sampleRateHz outSamples=${txSamples.size} inRms=${"%.1f".format(Locale.US, inRms)} silentFrames=$trusdxTxSilentFrames drops=$trusdxTxDrops")
+        }
+    }
+
+    private fun resamplePcmLinear(samples: ShortArray, inputRateHz: Int, outputRateHz: Int): ShortArray {
+        if (samples.isEmpty()) return ShortArray(0)
+        if (inputRateHz <= 0 || outputRateHz <= 0) return samples
+        if (inputRateHz == outputRateHz) return samples
+
+        val ratio = outputRateHz.toDouble() / inputRateHz.toDouble()
+        val outSize = kotlin.math.max(1, kotlin.math.round(samples.size * ratio).toInt())
+        val out = ShortArray(outSize)
+        val step = inputRateHz.toDouble() / outputRateHz.toDouble()
+        var pos = 0.0
+        var i = 0
+        while (i < outSize) {
+            val idx = pos.toInt().coerceIn(0, samples.size - 1)
+            val next = (idx + 1).coerceAtMost(samples.size - 1)
+            val frac = pos - idx.toDouble()
+            val a = samples[idx].toInt()
+            val b = samples[next].toInt()
+            val value = (a + ((b - a) * frac)).toInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
+            out[i] = value.toShort()
+            pos += step
+            i++
+        }
+        return out
     }
 
     private fun broadcastProcessTxQueue() {
@@ -1750,6 +2216,10 @@ class JS8EngineService : Service() {
 
     private fun setTransmitMode(): Boolean {
         val prefs = PreferenceManager.getDefaultSharedPreferences(this)
+        if (rigControlMode == "trusdx_serial") {
+            Log.d(TAG, "Setting transmit mode for TruSDX: USB")
+            return sendRigModeCommand(RIG_MODE_USB, 0)
+        }
         val txMode = prefs.getString(PREF_TRANSMIT_MODE, "none") ?: "none"
         
         Log.d(TAG, "Setting transmit mode: $txMode")
@@ -1765,6 +2235,7 @@ class JS8EngineService : Service() {
     private fun sendRigModeCommand(mode: String, passband: Int = 0): Boolean {
         return when (rigControlMode) {
             "hamlib_usb" -> hamlibRigControl?.setMode(mode, passband) == true
+            "trusdx_serial" -> trusdxSerialSession?.setUsbMode() == true
             "rts_ptt" -> false
             // Network rig control mode setting not requested yet
             else -> false
@@ -1857,12 +2328,16 @@ class JS8EngineService : Service() {
         txMonitorHandler.removeCallbacks(txMonitorRunnable)
         txMonitorActive = true
         txMonitorWasAudioActive = false
+        if (rigControlMode == "trusdx_serial") {
+            trusdxTxIntentActive = true
+        }
         txMonitorHandler.postDelayed(txMonitorRunnable, TX_MONITOR_INTERVAL_MS)
     }
 
     private fun stopTxMonitor() {
         if (!txMonitorActive) return
         txMonitorActive = false
+        trusdxTxIntentActive = false
         txMonitorHandler.removeCallbacks(txMonitorRunnable)
     }
 
@@ -2269,6 +2744,11 @@ class JS8EngineService : Service() {
     private fun isAutoreplyEnabled(): Boolean {
         val prefs = PreferenceManager.getDefaultSharedPreferences(this)
         return prefs.getBoolean(PREF_AUTOREPLY_ENABLED, false)
+    }
+
+    private fun isTruSdxDiagnosticsEnabled(): Boolean {
+        val prefs = PreferenceManager.getDefaultSharedPreferences(this)
+        return prefs.getBoolean(PREF_TRUSDX_DIAGNOSTICS_ENABLED, false)
     }
 
     private fun isRelayEnabled(): Boolean {
@@ -2840,6 +3320,7 @@ class JS8EngineService : Service() {
             "network" -> rigCtlConnected
             "hamlib_usb" -> hamlibRigConnected
             "rts_ptt" -> rtsPttConnected
+            "trusdx_serial" -> trusdxConnected
             else -> false
         }
     }
@@ -2849,6 +3330,7 @@ class JS8EngineService : Service() {
             "network" -> rigCtlClient?.setPtt(enabled) == true
             "hamlib_usb" -> hamlibRigControl?.setPtt(enabled) == true
             "rts_ptt" -> setRtsPtt(enabled)
+            "trusdx_serial" -> trusdxSerialSession?.setPtt(enabled) == true
             else -> false
         }
     }
@@ -2878,6 +3360,7 @@ class JS8EngineService : Service() {
                 "network" -> rigCtlClient?.setFrequency(frequencyHz) == true
                 "hamlib_usb" -> hamlibRigControl?.setFrequency(frequencyHz) == true
                 "rts_ptt" -> false
+                "trusdx_serial" -> trusdxSerialSession?.setFrequency(frequencyHz) == true
                 else -> false
             }
 
@@ -2888,6 +3371,7 @@ class JS8EngineService : Service() {
                     val detail = when (rigControlMode) {
                         "hamlib_usb" -> hamlibRigControl?.getLastError().orEmpty()
                         "rts_ptt" -> "RTS PTT does not support frequency control"
+                        "trusdx_serial" -> "TruSDX serial CAT command failed"
                         else -> ""
                     }
                     if (detail.isNotBlank()) {
@@ -2916,6 +3400,7 @@ class JS8EngineService : Service() {
         private const val PREF_MY_INFO = "my_info"
         private const val PREF_MY_STATUS = "my_status"
         private const val PREF_PSK_REPORTER = "psk_reporter"
+        private const val PREF_TRUSDX_DIAGNOSTICS_ENABLED = "trusdx_diagnostics_enabled"
         private const val HEARD_LIMIT = 4
         private const val HEARD_WINDOW_MS = 15 * 60 * 1000L
         private val HEARD_EXCLUDE_TOKENS = setOf("CQ", "HB", "HEARTBEAT", "ALLCALL", "@ALLCALL")
@@ -3005,6 +3490,16 @@ class JS8EngineService : Service() {
         const val TX_STATE_FAILED = "failed"
 
         const val DEFAULT_AUDIO_FREQUENCY_HZ = 1500.0
+        const val TRUSDX_RX_SAMPLE_RATE_HZ = 7820
+        const val TRUSDX_TX_SAMPLE_RATE_HZ = 11525
+        const val TRUSDX_AUDIO_SERIAL_ID = -2001
+        const val TRUSDX_AUDIO_SPEAKER_ID = -2002
+        private const val TRUSDX_RX_FRAME_QUEUE_MAX = 512
+        private const val TRUSDX_RX_WATCHDOG_INTERVAL_MS = 1200L
+        private const val TRUSDX_RX_STALL_REARM_NS = 2_000_000_000L
+        private const val TRUSDX_RX_REARM_COOLDOWN_NS = 2_500_000_000L
+        private const val TRUSDX_STARTUP_WAIT_MS = 6000L
+        private const val TRUSDX_RX_KEEPALIVE_INTERVAL_MS = 80L
         private const val TX_MONITOR_INTERVAL_MS = 250L
         private const val SCO_START_WAIT_INTERVAL_MS = 200L
         private const val SCO_START_MAX_ATTEMPTS = 10

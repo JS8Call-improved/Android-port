@@ -123,6 +123,11 @@ class MonitorFragment : Fragment() {
         userInitiatedAudioSelection = false
     }
 
+    override fun onResume() {
+        super.onResume()
+        refreshAudioDevices()
+    }
+
     override fun onDestroyView() {
         super.onDestroyView()
     }
@@ -197,8 +202,12 @@ class MonitorFragment : Fragment() {
     }
 
     private fun startMonitoring() {
+        val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext())
+        val rigType = prefs.getString("rig_type", "none")
+        val skipMicPermission = rigType == "trusdx_serial"
+
         // Check permission
-        if (!hasAudioPermission()) {
+        if (!skipMicPermission && !hasAudioPermission()) {
             requestAudioPermission()
             return
         }
@@ -213,7 +222,15 @@ class MonitorFragment : Fragment() {
             if (availableDevices.isNotEmpty()) {
                 val selectedPos = audioDeviceSpinner.selectedItemPosition
                 if (selectedPos >= 0 && selectedPos < availableDevices.size) {
-                    val selectedDevice = availableDevices[selectedPos]
+                    var selectedDevice = availableDevices[selectedPos]
+                    if (rigType == "trusdx_serial" &&
+                        selectedDevice.id != JS8EngineService.TRUSDX_AUDIO_SERIAL_ID &&
+                        selectedDevice.id != JS8EngineService.TRUSDX_AUDIO_SPEAKER_ID
+                    ) {
+                        selectedDevice = availableDevices.firstOrNull {
+                            it.id == JS8EngineService.TRUSDX_AUDIO_SERIAL_ID
+                        } ?: selectedDevice
+                    }
                     putExtra(JS8EngineService.EXTRA_AUDIO_DEVICE_ID, selectedDevice.id)
                     android.util.Log.d("MonitorFragment",
                         "Starting with device: ${selectedDevice.name} (ID: ${selectedDevice.id})")
@@ -324,6 +341,24 @@ class MonitorFragment : Fragment() {
     }
 
     private fun refreshAudioDevices() {
+        val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext())
+        val rigType = prefs.getString("rig_type", "none")
+        if (rigType == "trusdx_serial") {
+            availableDevices.clear()
+            availableDevices.add(AudioDeviceItem(JS8EngineService.TRUSDX_AUDIO_SERIAL_ID, "TruSDX Serial"))
+            availableDevices.add(AudioDeviceItem(JS8EngineService.TRUSDX_AUDIO_SPEAKER_ID, "TruSDX Speaker"))
+            audioDeviceAdapter?.notifyDataSetChanged()
+
+            val savedDeviceId = prefs.getInt(PREF_LAST_AUDIO_DEVICE_ID, JS8EngineService.TRUSDX_AUDIO_SERIAL_ID)
+            val selectedIndex = availableDevices.indexOfFirst { it.id == savedDeviceId }
+                .takeIf { it >= 0 } ?: 0
+            isUpdatingSpinner = true
+            audioDeviceSpinner.setSelection(selectedIndex)
+            isUpdatingSpinner = false
+            lastSelectedAudioDeviceId = availableDevices[selectedIndex].id
+            return
+        }
+
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
             // Fallback for older versions
             availableDevices.clear()
@@ -366,7 +401,6 @@ class MonitorFragment : Fragment() {
         audioDeviceAdapter?.notifyDataSetChanged()
 
         if (availableDevices.isNotEmpty()) {
-            val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext())
             val savedDeviceId = prefs.getInt(PREF_LAST_AUDIO_DEVICE_ID, -1)
             val selectedIndex = availableDevices.indexOfFirst { it.id == savedDeviceId }
                 .takeIf { it >= 0 } ?: 0
@@ -479,7 +513,7 @@ class MonitorFragment : Fragment() {
                 val rigControlEnabled = prefs.getBoolean("rig_control_enabled", false)
                 val rigType = prefs.getString("rig_type", "none")
 
-                if (rigControlEnabled && (rigType == "network" || rigType == "hamlib_usb")) {
+                if (rigControlEnabled && (rigType == "network" || rigType == "hamlib_usb" || rigType == "trusdx_serial")) {
                     // Send frequency change to service
                     val intent = Intent(requireContext(), JS8EngineService::class.java).apply {
                         action = JS8EngineService.ACTION_SET_FREQUENCY

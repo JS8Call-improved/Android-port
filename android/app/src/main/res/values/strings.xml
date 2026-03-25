@@ -113,6 +113,7 @@
     <string name="settings_hamlib_usb_port_none">No serial devices found</string>
     <string name="settings_hamlib_usb_port_previous">Previous selection (%1$s)</string>
     <string name="settings_rts_ptt">Serial (RTS PTT)</string>
+    <string name="settings_trusdx_serial">TruSDX Serial (USB)</string>
     <string name="settings_hamlib_usb_device_id">USB Device ID</string>
     <string name="settings_hamlib_usb_device_id_summary">Android device ID (leave blank for first device)</string>
     <string name="settings_hamlib_usb_port_index">USB Port Index</string>

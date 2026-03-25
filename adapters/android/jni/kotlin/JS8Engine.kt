@@ -26,9 +26,10 @@ class JS8Engine private constructor(
         fun create(
             sampleRateHz: Int = 12000,
             submodes: Int = 0x1F, // default to A/B/C/E/I like desktop
-            callbackHandler: CallbackHandler
+            callbackHandler: CallbackHandler,
+            enableTxAudioTap: Boolean = false
         ): JS8Engine {
-            val handle = nativeCreate(callbackHandler, sampleRateHz, submodes)
+            val handle = nativeCreate(callbackHandler, sampleRateHz, submodes, enableTxAudioTap)
             if (handle == 0L) {
                 throw RuntimeException("Failed to create native JS8 engine")
             }
@@ -39,7 +40,8 @@ class JS8Engine private constructor(
         private external fun nativeCreate(
             callbackHandler: CallbackHandler,
             sampleRateHz: Int,
-            submodes: Int
+            submodes: Int,
+            enableTxAudioTap: Boolean
         ): Long
     }
 
@@ -342,5 +344,10 @@ class JS8Engine private constructor(
          * @param level 0=Trace, 1=Debug, 2=Info, 3=Warn, 4=Error
          */
         fun onLog(level: Int, message: String)
+
+        /**
+         * Called with TX audio PCM samples when enabled.
+         */
+        fun onTxAudio(samples: ShortArray, sampleRateHz: Int) {}
     }
 }

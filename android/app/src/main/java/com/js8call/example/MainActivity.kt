@@ -31,6 +31,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var bottomNav: BottomNavigationView
     private lateinit var decodeViewModel: DecodeViewModel
     private lateinit var monitorViewModel: MonitorViewModel
+    private var spectrumBroadcastCount: Long = 0
     private lateinit var messagesViewModel: MessagesViewModel
     private lateinit var transmitViewModel: TransmitViewModel
 
@@ -117,6 +118,13 @@ class MainActivity : AppCompatActivity() {
                     val powerDb = intent.getFloatExtra(JS8EngineService.EXTRA_POWER_DB, 0f)
                     val peakDb = intent.getFloatExtra(JS8EngineService.EXTRA_PEAK_DB, 0f)
                     if (bins != null) {
+                        spectrumBroadcastCount += 1
+                        if (spectrumBroadcastCount % 20L == 0L) {
+                            android.util.Log.i(
+                                "JS8MainActivity",
+                                "Spectrum broadcasts: count=$spectrumBroadcastCount bins=${bins.size} binHz=$binHz power=$powerDb peak=$peakDb"
+                            )
+                        }
                         monitorViewModel.updateSpectrum(bins, binHz, powerDb, peakDb)
                     }
                 }

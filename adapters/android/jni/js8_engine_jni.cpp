@@ -4,10 +4,13 @@
 #include <algorithm>
 #include <cmath>
 #include <cctype>
+#include <chrono>
+#include <cstring>
 #include <limits>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "js8core/engine.hpp"
@@ -22,7 +25,7 @@
 
 // Forward declarations of JNI methods (defined in js8_jni_methods.cpp)
 extern "C" {
-JNIEXPORT jlong JNICALL Java_com_js8call_core_JS8Engine_00024Companion_nativeCreate(JNIEnv*, jobject, jobject, jint, jint);
+JNIEXPORT jlong JNICALL Java_com_js8call_core_JS8Engine_00024Companion_nativeCreate(JNIEnv*, jobject, jobject, jint, jint, jboolean);
 JNIEXPORT jboolean JNICALL Java_com_js8call_core_JS8Engine_nativeStart(JNIEnv*, jobject, jlong);
 JNIEXPORT void JNICALL Java_com_js8call_core_JS8Engine_nativeStop(JNIEnv*, jobject, jlong);
 JNIEXPORT void JNICALL Java_com_js8call_core_JS8Engine_nativeDestroy(JNIEnv*, jobject, jlong);
@@ -51,7 +54,7 @@ struct JS8Engine_Native {
   std::unique_ptr<js8core::android::FileStorage> storage;
   std::unique_ptr<js8core::android::ThreadScheduler> scheduler;
   std::unique_ptr<js8core::android::OboeAudioInput> audio_in;
-  std::unique_ptr<js8core::android::OboeAudioOutput> audio_out;
+  std::unique_ptr<js8core::AudioOutput> audio_out;
   std::unique_ptr<js8core::android::BsdUdpChannel> udp;
   std::unique_ptr<js8core::android::NullRigControl> rig;
 
@@ -97,6 +100,107 @@ static JNIEnv* get_jni_env() {
 
   return env;
 }
+
+class PumpAudioOutput final : public js8core::AudioOutput {
+ public:
+  using TxAudioHandler = std::function<void(std::span<const std::int16_t>, int)>;
+
+  explicit PumpAudioOutput(TxAudioHandler on_tx_audio)
+      : on_tx_audio_(std::move(on_tx_audio)) {}
+
+  ~PumpAudioOutput() override {
+    stop();
+  }
+
+  bool start(js8core::AudioStreamParams const& params,
+             js8core::AudioOutputFill fill,
+             js8core::AudioErrorHandler on_error) override {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (running_) return false;
+
+    params_ = params;
+    if (params_.format.sample_rate <= 0) {
+      params_.format.sample_rate = kDefaultRateHz;
+    }
+    params_.format.channels = 1;
+    params_.format.sample_type = js8core::SampleType::Int16;
+    if (params_.frames_per_buffer == 0) {
+      params_.frames_per_buffer = kDefaultFramesPerBuffer;
+    }
+
+    fill_ = std::move(fill);
+    on_error_ = std::move(on_error);
+    running_ = true;
+    worker_ = std::thread([this]() { this->pump_loop(); });
+    return true;
+  }
+
+  void stop() override {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      if (!running_) return;
+      running_ = false;
+    }
+    if (worker_.joinable()) {
+      worker_.join();
+    }
+  }
+
+ private:
+  void pump_loop() {
+    auto sample_rate = params_.format.sample_rate > 0 ? params_.format.sample_rate : kDefaultRateHz;
+    std::size_t frames = params_.frames_per_buffer > 0 ? params_.frames_per_buffer : kDefaultFramesPerBuffer;
+    auto frame_period = std::chrono::duration<double>(static_cast<double>(frames) /
+                                                       static_cast<double>(sample_rate));
+    std::vector<std::int16_t> pcm(frames, 0);
+    auto next_tick = std::chrono::steady_clock::now();
+
+    while (true) {
+      {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!running_) break;
+      }
+
+      std::memset(pcm.data(), 0, pcm.size() * sizeof(std::int16_t));
+
+      if (fill_) {
+        js8core::AudioOutputBuffer buffer;
+        buffer.data = std::span<std::byte>(reinterpret_cast<std::byte*>(pcm.data()),
+                                           pcm.size() * sizeof(std::int16_t));
+        buffer.format = params_.format;
+        buffer.playback_at = js8core::SteadyClock::now();
+        try {
+          std::size_t filled = fill_(buffer);
+          std::size_t max_bytes = pcm.size() * sizeof(std::int16_t);
+          if (filled < max_bytes) {
+            std::memset(reinterpret_cast<std::byte*>(pcm.data()) + filled, 0, max_bytes - filled);
+          }
+        } catch (...) {
+          if (on_error_) on_error_("TX pump fill callback failed");
+          std::memset(pcm.data(), 0, pcm.size() * sizeof(std::int16_t));
+        }
+      }
+
+      if (on_tx_audio_) {
+        on_tx_audio_(std::span<const std::int16_t>(pcm.data(), pcm.size()), sample_rate);
+      }
+
+      next_tick += std::chrono::duration_cast<std::chrono::steady_clock::duration>(frame_period);
+      std::this_thread::sleep_until(next_tick);
+    }
+  }
+
+  static constexpr int kDefaultRateHz = 11525;
+  static constexpr std::size_t kDefaultFramesPerBuffer = 192;
+
+  js8core::AudioStreamParams params_{};
+  js8core::AudioOutputFill fill_;
+  js8core::AudioErrorHandler on_error_;
+  TxAudioHandler on_tx_audio_;
+  std::mutex mutex_;
+  bool running_ = false;
+  std::thread worker_;
+};
 
 // Render a human-readable JS8 message if possible; otherwise return the raw frame
 static bool is_callsign_like(std::string const& token) {
@@ -380,7 +484,8 @@ static void log_callback(JS8Engine_Native* native, js8core::LogLevel level, std:
 extern "C" {
 
 JS8Engine_Native* js8_engine_create(JNIEnv* env, jobject callback_handler,
-                                     int sample_rate_hz, int submodes) {
+                                     int sample_rate_hz, int submodes,
+                                     int enable_tx_audio_tap) {
   if (!env || !callback_handler) return nullptr;
 
   auto native = new JS8Engine_Native();
@@ -397,7 +502,33 @@ JS8Engine_Native* js8_engine_create(JNIEnv* env, jobject callback_handler,
   native->scheduler = std::make_unique<js8core::android::ThreadScheduler>();
   // Capture is driven from JS8AudioHelper (Java) with explicit resampling; disable native Oboe capture
   native->audio_in = nullptr;
-  native->audio_out = std::make_unique<js8core::android::OboeAudioOutput>();
+  if (enable_tx_audio_tap != 0) {
+    native->audio_out = std::make_unique<PumpAudioOutput>(
+        [native](std::span<const std::int16_t> samples, int sample_rate_hz) {
+          if (!native || !native->callback_handler || samples.empty()) return;
+          JNIEnv* cb_env = get_jni_env();
+          if (!cb_env) return;
+          std::lock_guard<std::mutex> cb_lock(native->callback_mutex);
+          jclass handler_class = cb_env->GetObjectClass(native->callback_handler);
+          if (!handler_class) return;
+          jmethodID method = cb_env->GetMethodID(handler_class, "onTxAudio", "([SI)V");
+          if (method) {
+            auto array = cb_env->NewShortArray(static_cast<jsize>(samples.size()));
+            if (array) {
+              cb_env->SetShortArrayRegion(array,
+                                          0,
+                                          static_cast<jsize>(samples.size()),
+                                          reinterpret_cast<const jshort*>(samples.data()));
+              cb_env->CallVoidMethod(native->callback_handler, method, array,
+                                     static_cast<jint>(sample_rate_hz));
+              cb_env->DeleteLocalRef(array);
+            }
+          }
+          cb_env->DeleteLocalRef(handler_class);
+        });
+  } else {
+    native->audio_out = std::make_unique<js8core::android::OboeAudioOutput>();
+  }
   native->udp = std::make_unique<js8core::android::BsdUdpChannel>();
   native->rig = std::make_unique<js8core::android::NullRigControl>();
 
@@ -405,7 +536,7 @@ JS8Engine_Native* js8_engine_create(JNIEnv* env, jobject callback_handler,
   js8core::EngineConfig config;
   config.sample_rate_hz = sample_rate_hz;
   config.submodes = (submodes == 0) ? 0x1F : submodes;  // default to all standard submodes
-  config.tx_output_rate_hz = 0;  // Use device native output rate and resample
+  config.tx_output_rate_hz = (enable_tx_audio_tap != 0) ? 11525 : 0;
   config.tx_output_gain = 0.2f;  // Leave headroom to avoid splatter/ALC
 
   js8core::EngineCallbacks callbacks;
@@ -659,7 +790,9 @@ void js8_engine_set_submodes(JS8Engine_Native* engine, int submodes) {
 
 void js8_engine_set_output_device(JS8Engine_Native* engine, int device_id) {
   if (!engine || !engine->audio_out) return;
-  engine->audio_out->set_device_id(device_id);
+  auto* oboe_out = dynamic_cast<js8core::android::OboeAudioOutput*>(engine->audio_out.get());
+  if (!oboe_out) return;
+  oboe_out->set_device_id(device_id);
 }
 
 void js8_engine_set_tx_boost_enabled(JS8Engine_Native* engine, bool enabled) {
@@ -753,7 +886,7 @@ int js8_register_natives(JavaVM* vm, JNIEnv* env) {
 
   // Map Kotlin Companion method to static method
   JNINativeMethod methods[] = {
-    {"nativeCreate", "(Lcom/js8call/core/JS8Engine$CallbackHandler;II)J",
+    {"nativeCreate", "(Lcom/js8call/core/JS8Engine$CallbackHandler;IIZ)J",
      (void*)Java_com_js8call_core_JS8Engine_00024Companion_nativeCreate},
     {"nativeStart", "(J)Z", (void*)Java_com_js8call_core_JS8Engine_nativeStart},
     {"nativeStop", "(J)V", (void*)Java_com_js8call_core_JS8Engine_nativeStop},

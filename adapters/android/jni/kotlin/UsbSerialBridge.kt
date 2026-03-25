@@ -145,6 +145,11 @@ class UsbSerialBridge(private val context: Context) {
                 } catch (e: Exception) {
                     Log.d(TAG, "Failed to set DTR: ${e.message}")
                 }
+                try {
+                    selectedPort.rts = false
+                } catch (e: Exception) {
+                    Log.d(TAG, "Failed to set RTS: ${e.message}")
+                }
                 port = selectedPort
                 activeDeviceId = deviceId
                 activePortIndex = resolvedPortIndex
