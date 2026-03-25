@@ -125,7 +125,8 @@ class TransmitFragment : Fragment() {
     override fun onResume() {
         super.onResume()
         val directed = viewModel.directedTo.value.orEmpty()
-        if (directed.isNotBlank() && directedEditText.text?.toString().orEmpty().isBlank()) {
+        val current = directedEditText.text?.toString().orEmpty()
+        if (directed.isNotBlank() && directed != current) {
             isApplyingDirected = true
             directedEditText.setText(directed)
             directedEditText.setSelection(directed.length)
