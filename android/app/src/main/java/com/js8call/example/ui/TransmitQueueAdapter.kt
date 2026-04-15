@@ -9,6 +9,7 @@ import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import com.js8call.example.R
 import com.js8call.example.model.TransmitMessage
+import com.js8call.example.util.TxMessageClassifier
 
 class TransmitQueueAdapter :
     ListAdapter<TransmitMessage, TransmitQueueAdapter.QueueViewHolder>(QueueDiffCallback()) {
@@ -43,12 +44,7 @@ class TransmitQueueAdapter :
             if (directed.isEmpty()) return trimmed
             if (trimmed.startsWith("`")) return trimmed
 
-            val upper = trimmed.uppercase()
-            val lineStartsWithBase = upper.startsWith("@ALLCALL") ||
-                upper.startsWith("CQ") ||
-                upper.startsWith("HB") ||
-                upper.startsWith("HEARTBEAT")
-            if (lineStartsWithBase) return trimmed
+            if (TxMessageClassifier.isBaseMessage(trimmed)) return trimmed
             if (trimmed.startsWith(directed, ignoreCase = true)) return trimmed
 
             val sep = if (trimmed.startsWith(" ")) "" else " "

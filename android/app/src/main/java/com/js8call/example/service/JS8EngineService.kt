@@ -35,6 +35,7 @@ import com.js8call.example.MessageLogWriter
 import com.js8call.example.R
 import com.js8call.example.BuildConfig
 import com.js8call.example.network.PskReporterClient
+import com.js8call.example.util.TxMessageClassifier
 import java.util.Calendar
 import java.util.Locale
 import java.util.TimeZone
@@ -3291,12 +3292,7 @@ class JS8EngineService : Service() {
         if (selected.isEmpty()) return trimmed
         if (trimmed.startsWith("`")) return trimmed
 
-        val upper = trimmed.uppercase()
-        val lineStartsWithBase = upper.startsWith("@ALLCALL") ||
-            upper.startsWith("CQ") ||
-            upper.startsWith("HB") ||
-            upper.startsWith("HEARTBEAT")
-        if (lineStartsWithBase) return trimmed
+        if (TxMessageClassifier.isBaseMessage(trimmed)) return trimmed
         if (trimmed.startsWith(selected, ignoreCase = true)) return trimmed
 
         val sep = if (trimmed.startsWith(" ")) "" else " "
@@ -3307,9 +3303,7 @@ class JS8EngineService : Service() {
         val trimmed = text.trim()
         if (grid.length < 4) return trimmed
         val grid4 = grid.substring(0, 4).uppercase()
-        val upper = trimmed.uppercase()
-        val isHeartbeat = upper.startsWith("CQ") || upper.startsWith("HB") || upper.startsWith("HEARTBEAT")
-        if (!isHeartbeat) return trimmed
+        if (!TxMessageClassifier.shouldAppendGrid(trimmed)) return trimmed
         val gridRegex = Regex("\\b[A-R]{2}[0-9]{2}\\b", RegexOption.IGNORE_CASE)
         if (gridRegex.containsMatchIn(trimmed)) return trimmed
         return "$trimmed $grid4".trim()
