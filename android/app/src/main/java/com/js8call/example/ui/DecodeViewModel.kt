@@ -14,6 +14,52 @@ import kotlin.math.roundToInt
 import org.json.JSONArray
 import org.json.JSONObject
 
+internal fun assembleMultipartDecodeText(frameTexts: List<String>): String {
+    return buildString {
+        frameTexts.forEachIndexed { index, frameText ->
+            if (index > 0 && shouldInsertMultipartSpace(this, frameText)) {
+                append(' ')
+            }
+            append(frameText)
+        }
+    }
+}
+
+internal fun shouldInsertMultipartSpace(builder: StringBuilder, nextText: String): Boolean {
+    if (builder.isEmpty()) return false
+    if (nextText.isEmpty()) return false
+    var prevIndex = builder.length - 1
+    while (prevIndex >= 0 && builder[prevIndex].isWhitespace()) {
+        prevIndex--
+    }
+    if (prevIndex < 0) return false
+
+    var nextIndex = 0
+    while (nextIndex < nextText.length && nextText[nextIndex].isWhitespace()) {
+        nextIndex++
+    }
+    if (nextIndex >= nextText.length) return false
+
+    val prevChar = builder[prevIndex]
+    val nextChar = nextText[nextIndex]
+    if ((!prevChar.isLetterOrDigit() && prevChar != ':') || !nextChar.isLetterOrDigit()) {
+        return false
+    }
+
+    var tokenStart = prevIndex
+    while (tokenStart >= 0 && !builder[tokenStart].isWhitespace()) {
+        tokenStart--
+    }
+    val prevToken = builder.substring(tokenStart + 1, prevIndex + 1)
+    val hasDigit = prevToken.any { it.isDigit() }
+    return hasDigit || prevChar == ':' || isGroupToken(prevToken)
+}
+
+private fun isGroupToken(token: String): Boolean {
+    if (!token.startsWith("@") || token.length < 2) return false
+    return token.drop(1).all { it.isLetterOrDigit() || it == '/' }
+}
+
 /**
  * ViewModel for the Decodes screen.
  * Manages the list of decoded messages.
@@ -203,14 +249,7 @@ class DecodeViewModel(application: Application) : AndroidViewModel(application) 
         val frameTexts = buffer.frames.map { it.text }.toMutableList()
         normalizeCompoundDirectedHelpers(buffer.frames, frameTexts)
 
-        val assembledText = buildString {
-            frameTexts.forEachIndexed { index, frameText ->
-                if (index > 0 && shouldInsertSpace(this, frameText)) {
-                    append(' ')
-                }
-                append(frameText)
-            }
-        }
+        val assembledText = assembleMultipartDecodeText(frameTexts)
 
         // Use the last frame's metadata (most recent)
         val lastFrame = buffer.frames.last()
@@ -294,36 +333,6 @@ class DecodeViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun isDataFrame(type: Int): Boolean = (type and 0x4) != 0
-
-    private fun shouldInsertSpace(builder: StringBuilder, nextText: String): Boolean {
-        if (builder.isEmpty()) return false
-        if (nextText.isEmpty()) return false
-        var prevIndex = builder.length - 1
-        while (prevIndex >= 0 && builder[prevIndex].isWhitespace()) {
-            prevIndex--
-        }
-        if (prevIndex < 0) return false
-
-        var nextIndex = 0
-        while (nextIndex < nextText.length && nextText[nextIndex].isWhitespace()) {
-            nextIndex++
-        }
-        if (nextIndex >= nextText.length) return false
-
-        val prevChar = builder[prevIndex]
-        val nextChar = nextText[nextIndex]
-        if ((!prevChar.isLetterOrDigit() && prevChar != ':') || !nextChar.isLetterOrDigit()) {
-            return false
-        }
-
-        var tokenStart = prevIndex
-        while (tokenStart >= 0 && !builder[tokenStart].isWhitespace()) {
-            tokenStart--
-        }
-        val prevToken = builder.substring(tokenStart + 1, prevIndex + 1)
-        val hasDigit = prevToken.any { it.isDigit() }
-        return hasDigit || prevChar == ':'
-    }
 
     /**
      * Find a buffer key that matches the given frequency within tolerance.
