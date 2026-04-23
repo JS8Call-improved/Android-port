@@ -489,6 +489,7 @@ class JS8EngineService : Service() {
                     broadcastProcessTxQueue()
                     startTruSdxRxWorker()
                     scheduleTruSdxRxKeepAlive()
+                    scheduleTruSdxRxWatchdog()
                 } else {
                     // Start audio capture with selected device (if any)
                     scoRestartAttempts = 0
@@ -1700,7 +1701,9 @@ class JS8EngineService : Service() {
                 val pcm = ShortArray(frame.size)
                 var i = 0
                 while (i < frame.size) {
-                    pcm[i] = (frame[i].toInt() shl 8).toShort()
+                    // TruSDX RX audio arrives as unsigned 8-bit PCM on the serial stream.
+                    val sampleU8 = frame[i].toInt() and 0xFF
+                    pcm[i] = ((sampleU8 - 128) shl 8).toShort()
                     i++
                 }
 
