@@ -3,6 +3,7 @@ package com.js8call.example.service
 import android.os.SystemClock
 import android.util.Log
 import com.js8call.core.TruSdxDirectSerial
+import java.io.ByteArrayOutputStream
 import java.nio.charset.StandardCharsets
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
@@ -20,12 +21,32 @@ class TruSdxSerialSession(
 
     @Volatile private var connected = false
     private val running = AtomicBoolean(false)
-    @Volatile private var readThread: Thread? = null
     private val writeLock = Any()
-    @Volatile private var rxPaused = false
     @Volatile private var txActive = false
+    @Volatile private var speakerEnabled = false
+    @Volatile private var rxStreaming = false
+    private val serialFrameBuffer = ByteArrayOutputStream(READ_BUFFER_SIZE * 2)
+    private val rxAudioBuffer = ByteArrayOutputStream(RX_AUDIO_FLUSH_BYTES * 2)
+    private var parserTotalBytes = 0L
+    private var parserAudioBytes = 0L
+    private var parserCatBytes = 0L
+    private var parserCatMessages = 0L
+    private var parserLastLogNs = 0L
+    private var parserResyncCount = 0L
 
     fun start(deviceId: Int, portIndex: Int): Boolean {
+        directSerial.setListener(object : TruSdxDirectSerial.Listener {
+            override fun onData(data: ByteArray) {
+                if (!running.get()) return
+                processIncomingBytes(data, data.size)
+            }
+
+            override fun onRunError(message: String) {
+                running.set(false)
+                connected = false
+                listener.onIoError(message)
+            }
+        })
         val opened = directSerial.open(
             deviceId,
             portIndex,
@@ -37,17 +58,6 @@ class TruSdxSerialSession(
         if (!opened) {
             connected = false
             return false
-        }
-        directSerial.setDtr(true)
-        directSerial.setRts(false)
-        SystemClock.sleep(3000)
-        synchronized(writeLock) {
-            try {
-                writeRawAscii("UA1;")
-            } catch (_: Throwable) {
-                connected = false
-                return false
-            }
         }
         connected = true
         return true
@@ -70,15 +80,32 @@ class TruSdxSerialSession(
 
     fun initializeRigState(): Boolean {
         if (!connected) return false
-        if (!running.get()) {
-            startReadLoop()
+        clearParserState()
+        startReadLoop()
+        SystemClock.sleep(TRUSDX_STARTUP_CONFIG_DELAY_MS)
+        return synchronized(writeLock) {
+            try {
+                writeRawAscii("FR0;")
+                writeRawAscii("MD2;")
+                writeStreamingStateLocked()
+                true
+            } catch (_: Throwable) {
+                false
+            }
         }
-        return true
     }
 
-    fun setSpeakerEnabled(_enabled: Boolean): Boolean {
+    fun setSpeakerEnabled(enabled: Boolean): Boolean {
+        speakerEnabled = enabled
         if (!connected) return true
-        return true
+        return synchronized(writeLock) {
+            try {
+                writeStreamingStateLocked()
+                true
+            } catch (_: Throwable) {
+                false
+            }
+        }
     }
 
     fun setFrequency(frequencyHz: Long): Boolean {
@@ -91,7 +118,6 @@ class TruSdxSerialSession(
     fun setPtt(enabled: Boolean): Boolean {
         if (!connected) return false
         synchronized(writeLock) {
-            rxPaused = true
             try {
                 if (enabled) {
                     directSerial.setRts(true)
@@ -115,8 +141,6 @@ class TruSdxSerialSession(
                 return true
             } catch (_: Throwable) {
                 return false
-            } finally {
-                rxPaused = false
             }
         }
     }
@@ -130,14 +154,11 @@ class TruSdxSerialSession(
     fun ensureRxStreaming(): Boolean {
         if (!connected) return false
         return synchronized(writeLock) {
-            rxPaused = true
             try {
-                writeRawAscii("UA1;")
+                writeStreamingStateLocked()
                 true
             } catch (_: Throwable) {
                 false
-            } finally {
-                rxPaused = false
             }
         }
     }
@@ -145,14 +166,12 @@ class TruSdxSerialSession(
     fun sendRxKeepAlive(): Boolean {
         if (!connected) return false
         return synchronized(writeLock) {
-            rxPaused = true
             try {
-                writeRawAscii("RX;")
+                writeRawAscii(";RX;")
+                writeRawAscii("FA;")
                 true
             } catch (_: Throwable) {
                 false
-            } finally {
-                rxPaused = false
             }
         }
     }
@@ -165,13 +184,26 @@ class TruSdxSerialSession(
         val payload = ByteArray(samplesPcm16.size)
         var out = 0
         for (sample in samplesPcm16) {
-            val mapped = ((sample.toInt() shr 8) + 128).coerceIn(0, 255)
+            var mapped = ((sample.toInt() shr 8) + 128).coerceIn(0, 255)
+            if (mapped == ';'.code) {
+                mapped = ':'.code
+            }
             payload[out++] = mapped.toByte()
         }
 
         val written = synchronized(writeLock) {
             if (!connected) return@synchronized -1
-            directSerial.write(payload, payload.size, IO_TIMEOUT_MS)
+            var totalWritten = 0
+            while (totalWritten < payload.size) {
+                val chunkSize = minOf(TRUSDX_TX_CHUNK_BYTES, payload.size - totalWritten)
+                val chunk = payload.copyOfRange(totalWritten, totalWritten + chunkSize)
+                val chunkWritten = directSerial.write(chunk, chunk.size, IO_TIMEOUT_MS)
+                if (chunkWritten != chunk.size) {
+                    return@synchronized totalWritten + maxOf(chunkWritten, 0)
+                }
+                totalWritten += chunkWritten
+            }
+            totalWritten
         }
         if (written != payload.size) {
             Log.w(TAG, "TX audio write failed: bytes=$written expected=${payload.size}")
@@ -180,54 +212,15 @@ class TruSdxSerialSession(
         return true
     }
 
-    private fun serialCatExchange(
-        command: String,
-        expectReply: Boolean,
-        timeoutMs: Int = CAT_TIMEOUT_MS
-    ): String {
+    private fun serialCatExchange(command: String, expectReply: Boolean): String {
         synchronized(writeLock) {
-            rxPaused = true
             try {
-                discardPendingInput()
                 writeRawAscii(command)
-                if (!expectReply) {
-                    return ""
+                if (expectReply) {
+                    listener.onParserResync("sync-cat-read-disabled")
                 }
-
-                val deadline = SystemClock.elapsedRealtime() + timeoutMs
-                val readBuffer = ByteArray(CAT_READ_BUFFER_SIZE)
-                val response = StringBuilder(64)
-                while (SystemClock.elapsedRealtime() < deadline) {
-                    val read = directSerial.read(readBuffer, CAT_READ_TIMEOUT_MS)
-                    if (read < 0) {
-                        return response.toString()
-                    }
-                    if (read == 0) {
-                        continue
-                    }
-                    val chunk = String(readBuffer, 0, read, StandardCharsets.US_ASCII)
-                    response.append(chunk)
-                    val end = response.indexOf(";")
-                    if (end >= 0) {
-                        val msg = response.substring(0, end + 1)
-                        listener.onCatMessage(msg)
-                        return msg
-                    }
-                }
-                return response.toString()
+                return ""
             } finally {
-                rxPaused = false
-            }
-        }
-    }
-
-    private fun discardPendingInput() {
-        val deadline = SystemClock.elapsedRealtime() + 80L
-        val scratch = ByteArray(CAT_READ_BUFFER_SIZE)
-        while (SystemClock.elapsedRealtime() < deadline) {
-            val read = directSerial.read(scratch, 10)
-            if (read <= 0) {
-                break
             }
         }
     }
@@ -240,65 +233,121 @@ class TruSdxSerialSession(
         }
     }
 
+    private fun writeStreamingStateLocked() {
+        writeRawAscii(if (speakerEnabled) TRUSDX_STREAMING_ON_SPEAKER_ON else TRUSDX_STREAMING_ON_SPEAKER_OFF)
+    }
+
+    private fun clearParserState() {
+        serialFrameBuffer.reset()
+        rxAudioBuffer.reset()
+        rxStreaming = false
+        parserTotalBytes = 0L
+        parserAudioBytes = 0L
+        parserCatBytes = 0L
+        parserCatMessages = 0L
+        parserLastLogNs = 0L
+        parserResyncCount = 0L
+    }
+
     private fun startReadLoop() {
-        if (running.getAndSet(true)) return
-        val thread = Thread({
-            val readBuffer = ByteArray(READ_BUFFER_SIZE)
-            var lastDataNs = System.nanoTime()
-            var lastIdleLogNs = 0L
-            while (running.get()) {
-                if (rxPaused) {
-                    SystemClock.sleep(2)
-                    continue
+        running.set(true)
+    }
+
+    private fun processIncomingBytes(buffer: ByteArray, length: Int) {
+        if (length <= 0) return
+
+        val now = System.nanoTime()
+        parserTotalBytes += length.toLong()
+        if (serialFrameBuffer.size() + length > MAX_SERIAL_FRAME_BYTES) {
+            serialFrameBuffer.reset()
+            parserResyncCount += 1
+            listener.onParserResync("frame-overflow")
+        }
+        serialFrameBuffer.write(buffer, 0, length)
+
+        val data = serialFrameBuffer.toByteArray()
+        var start = 0
+        var index = 0
+        while (index < data.size) {
+            if (data[index] == ';'.code.toByte()) {
+                val segment = data.copyOfRange(start, index)
+                if (rxStreaming) {
+                    appendRxAudio(segment, force = true)
+                    rxStreaming = false
+                } else {
+                    handleCatSegment(segment)
                 }
-                val read = directSerial.read(readBuffer, READ_TIMEOUT_MS)
-                if (read < 0) {
-                    listener.onIoError("TruSDX serial read failed")
-                    running.set(false)
-                    connected = false
-                    break
-                }
-                if (read == 0) {
-                    val now = System.nanoTime()
-                    if (now - lastDataNs > 2_000_000_000L && now - lastIdleLogNs > 2_000_000_000L) {
-                        Log.w(SERVICE_TAG, "TruSDX read idle ${(now - lastDataNs) / 1_000_000L}ms")
-                        lastIdleLogNs = now
-                    }
-                    continue
-                }
-                lastDataNs = System.nanoTime()
-                val frame = ByteArray(read)
-                System.arraycopy(readBuffer, 0, frame, 0, read)
-                listener.onAudioFrame(frame)
+                start = index + 1
             }
-        }, "TruSdxSerialRead")
-        thread.isDaemon = true
-        readThread = thread
-        thread.start()
+            index++
+        }
+
+        serialFrameBuffer.reset()
+        if (start < data.size) {
+            val remain = data.copyOfRange(start, data.size)
+            if (rxStreaming) {
+                appendRxAudio(remain, force = false)
+            } else if (remain.size >= 2 && remain[0] == 'U'.code.toByte() && remain[1] == 'S'.code.toByte()) {
+                rxStreaming = true
+                appendRxAudio(remain.copyOfRange(2, remain.size), force = false)
+            } else {
+                serialFrameBuffer.write(remain)
+            }
+        }
+
+        if (parserLastLogNs == 0L || now - parserLastLogNs >= PARSER_LOG_INTERVAL_NS) {
+            Log.i(
+                TAG,
+                "RX parser: total=$parserTotalBytes audio=$parserAudioBytes catBytes=$parserCatBytes catMsgs=$parserCatMessages pending=${serialFrameBuffer.size()} resyncs=$parserResyncCount"
+            )
+            parserLastLogNs = now
+        }
+    }
+
+    private fun handleCatSegment(frame: ByteArray) {
+        if (frame.isEmpty()) return
+        if (frame.size >= 2 && frame[0] == 'U'.code.toByte() && frame[1] == 'S'.code.toByte()) {
+            rxStreaming = true
+            parserCatMessages += 1
+            parserCatBytes += 2
+            if (frame.size > 2) {
+                appendRxAudio(frame.copyOfRange(2, frame.size), force = false)
+            }
+            return
+        }
+
+        parserCatMessages += 1
+        parserCatBytes += frame.size.toLong()
+        listener.onCatMessage(String(frame, StandardCharsets.US_ASCII) + ";")
+    }
+
+    private fun appendRxAudio(data: ByteArray, force: Boolean) {
+        if (data.isNotEmpty()) {
+            rxAudioBuffer.write(data, 0, data.size)
+            parserAudioBytes += data.size.toLong()
+        }
+        if (rxAudioBuffer.size() >= RX_AUDIO_FLUSH_BYTES || (force && rxAudioBuffer.size() > 0)) {
+            val batch = rxAudioBuffer.toByteArray()
+            rxAudioBuffer.reset()
+            listener.onAudioFrame(batch)
+        }
     }
 
     private fun stopReadLoop() {
         running.set(false)
-        val thread = readThread
-        readThread = null
-        if (thread != null && thread.isAlive) {
-            try {
-                thread.join(500)
-            } catch (_: InterruptedException) {
-            }
-        }
-        rxPaused = false
     }
 
     companion object {
         private const val TAG = "TruSdxSerialSession"
-        private const val SERVICE_TAG = "JS8EngineService"
         private const val IO_TIMEOUT_MS = 500
-        private const val READ_TIMEOUT_MS = 50
         private const val READ_BUFFER_SIZE = 500
-        private const val CAT_TIMEOUT_MS = 300
-        private const val CAT_READ_TIMEOUT_MS = 30
-        private const val CAT_READ_BUFFER_SIZE = 64
+        private const val MAX_SERIAL_FRAME_BYTES = 2048
+        private const val PARSER_LOG_INTERVAL_NS = 2_000_000_000L
+        private const val RX_AUDIO_FLUSH_BYTES = 256
+        private const val TRUSDX_TX_CHUNK_BYTES = 256
+        private const val TRUSDX_STARTUP_CONFIG_DELAY_MS = 1500L
+        private const val TRUSDX_STREAMING_ON_SPEAKER_ON = "UA1;"
+        private const val TRUSDX_STREAMING_ON_SPEAKER_OFF = "UA2;"
 
         private const val TRUSDX_BAUD_RATE = 115200
         private const val TRUSDX_DATA_BITS = 8

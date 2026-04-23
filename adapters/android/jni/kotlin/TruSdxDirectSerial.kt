@@ -5,12 +5,24 @@ import android.hardware.usb.UsbManager
 import android.util.Log
 import com.hoho.android.usbserial.driver.UsbSerialPort
 import com.hoho.android.usbserial.driver.UsbSerialProber
+import com.hoho.android.usbserial.util.SerialInputOutputManager
 
 class TruSdxDirectSerial(context: Context) {
+    interface Listener {
+        fun onData(data: ByteArray)
+        fun onRunError(message: String)
+    }
+
     private val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
     private val lock = Any()
 
     @Volatile private var port: UsbSerialPort? = null
+    @Volatile private var ioManager: SerialInputOutputManager? = null
+    @Volatile private var listener: Listener? = null
+
+    fun setListener(listener: Listener?) {
+        this.listener = listener
+    }
 
     fun open(
         deviceId: Int,
@@ -50,14 +62,17 @@ class TruSdxDirectSerial(context: Context) {
             return try {
                 selectedPort.open(connection)
                 selectedPort.setParameters(baudRate, dataBits, stopBits, parity)
-                try {
-                    selectedPort.dtr = true
-                } catch (_: Throwable) {
-                }
-                try {
-                    selectedPort.rts = false
-                } catch (_: Throwable) {
-                }
+                val manager = SerialInputOutputManager(selectedPort, object : SerialInputOutputManager.Listener {
+                    override fun onNewData(data: ByteArray) {
+                        listener?.onData(data)
+                    }
+
+                    override fun onRunError(e: Exception) {
+                        listener?.onRunError(e.message ?: "TruSDX serial I/O error")
+                    }
+                })
+                manager.start()
+                ioManager = manager
                 port = selectedPort
                 true
             } catch (t: Throwable) {
@@ -133,6 +148,9 @@ class TruSdxDirectSerial(context: Context) {
     }
 
     private fun closeLocked() {
+        ioManager?.setListener(null)
+        ioManager?.stop()
+        ioManager = null
         val active = port
         port = null
         if (active != null) {

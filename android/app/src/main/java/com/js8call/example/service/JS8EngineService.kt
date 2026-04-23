@@ -489,7 +489,6 @@ class JS8EngineService : Service() {
                     broadcastProcessTxQueue()
                     startTruSdxRxWorker()
                     scheduleTruSdxRxKeepAlive()
-                    scheduleTruSdxRxWatchdog()
                 } else {
                     // Start audio capture with selected device (if any)
                     scoRestartAttempts = 0
@@ -653,6 +652,12 @@ class JS8EngineService : Service() {
             mainHandler.post {
                 if (initialized) {
                     Log.i(TAG, "TruSDX serial control ready device=$deviceId port=$portIndex")
+                    if (currentDialHz > 0L) {
+                        Thread {
+                            val ok = session?.setFrequency(currentDialHz) == true
+                            Log.i(TAG, "TruSDX initial frequency apply: hz=$currentDialHz ok=$ok")
+                        }.start()
+                    }
                 } else {
                     session?.stop()
                     trusdxConnected = false
@@ -1626,7 +1631,8 @@ class JS8EngineService : Service() {
 
         trusdxRxFrames += 1
         trusdxRxSamples += samplesU8.size.toLong()
-        trusdxLastRxAudioNs = System.nanoTime()
+        val now = System.nanoTime()
+        trusdxLastRxAudioNs = now
         trusdxRxRateWindowSamples += samplesU8.size.toLong()
         enqueueTruSdxRxFrame(samplesU8)
 
@@ -1634,18 +1640,17 @@ class JS8EngineService : Service() {
             val queued = trusdxRxFrameQueue.size
             Log.i(TAG, "TruSDX RX frame #$trusdxRxFrames size=${samplesU8.size} queued=$queued")
         }
-        if (isTruSdxDiagnosticsEnabled()) {
-            val now = trusdxLastRxAudioNs
-            if (trusdxRxRateWindowStartNs == 0L) {
-                trusdxRxRateWindowStartNs = now
-            } else {
-                val windowNs = now - trusdxRxRateWindowStartNs
-                if (windowNs >= 1_000_000_000L) {
-                    val rate = (trusdxRxRateWindowSamples * 1_000_000_000L) / windowNs
-                    Log.i(TAG, "TruSDX RX stream: frames=$trusdxRxFrames samples=$trusdxRxSamples chunk=${samplesU8.size} rate=${rate}B/s")
-                    trusdxRxRateWindowStartNs = now
-                    trusdxRxRateWindowSamples = 0L
+        if (trusdxRxRateWindowStartNs == 0L) {
+            trusdxRxRateWindowStartNs = now
+        } else {
+            val windowNs = now - trusdxRxRateWindowStartNs
+            if (windowNs >= 1_000_000_000L) {
+                val observedRate = ((trusdxRxRateWindowSamples * 1_000_000_000L) / windowNs).toInt()
+                if (isTruSdxDiagnosticsEnabled()) {
+                    Log.i(TAG, "TruSDX RX stream: frames=$trusdxRxFrames samples=$trusdxRxSamples chunk=${samplesU8.size} rate=${observedRate}B/s")
                 }
+                trusdxRxRateWindowStartNs = now
+                trusdxRxRateWindowSamples = 0L
             }
         }
     }
@@ -1664,9 +1669,9 @@ class JS8EngineService : Service() {
                     val ok = trusdxSerialSession?.sendRxKeepAlive() == true
                     trusdxRxKeepaliveCount += 1
                     if (!ok) {
-                        Log.w(TAG, "TruSDX RX keepalive failed")
-                    } else if (isTruSdxDiagnosticsEnabled() && trusdxRxKeepaliveCount % 50L == 0L) {
-                        Log.i(TAG, "TruSDX RX keepalive count=$trusdxRxKeepaliveCount")
+                        Log.w(TAG, "TruSDX frequency poll failed")
+                    } else if (isTruSdxDiagnosticsEnabled() && trusdxRxKeepaliveCount % 10L == 0L) {
+                        Log.i(TAG, "TruSDX frequency poll count=$trusdxRxKeepaliveCount")
                     }
                 }
                 mainHandler.postDelayed(this, TRUSDX_RX_KEEPALIVE_INTERVAL_MS)
@@ -3487,8 +3492,8 @@ class JS8EngineService : Service() {
         const val TX_STATE_FAILED = "failed"
 
         const val DEFAULT_AUDIO_FREQUENCY_HZ = 1500.0
-        const val TRUSDX_RX_SAMPLE_RATE_HZ = 7820
-        const val TRUSDX_TX_SAMPLE_RATE_HZ = 11525
+        const val TRUSDX_RX_SAMPLE_RATE_HZ = 7812
+        const val TRUSDX_TX_SAMPLE_RATE_HZ = 11520
         const val TRUSDX_AUDIO_SERIAL_ID = -2001
         const val TRUSDX_AUDIO_SPEAKER_ID = -2002
         private const val TRUSDX_RX_FRAME_QUEUE_MAX = 512
@@ -3496,7 +3501,7 @@ class JS8EngineService : Service() {
         private const val TRUSDX_RX_STALL_REARM_NS = 2_000_000_000L
         private const val TRUSDX_RX_REARM_COOLDOWN_NS = 2_500_000_000L
         private const val TRUSDX_STARTUP_WAIT_MS = 6000L
-        private const val TRUSDX_RX_KEEPALIVE_INTERVAL_MS = 80L
+        private const val TRUSDX_RX_KEEPALIVE_INTERVAL_MS = 2000L
         private const val TX_MONITOR_INTERVAL_MS = 250L
         private const val SCO_START_WAIT_INTERVAL_MS = 200L
         private const val SCO_START_MAX_ATTEMPTS = 10
