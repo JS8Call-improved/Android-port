@@ -536,7 +536,7 @@ JS8Engine_Native* js8_engine_create(JNIEnv* env, jobject callback_handler,
   js8core::EngineConfig config;
   config.sample_rate_hz = sample_rate_hz;
   config.submodes = (submodes == 0) ? 0x1F : submodes;  // default to all standard submodes
-  config.tx_output_rate_hz = (enable_tx_audio_tap != 0) ? 11525 : 0;
+  config.tx_output_rate_hz = (enable_tx_audio_tap != 0) ? 11520 : 0;
   config.tx_output_gain = 0.2f;  // Leave headroom to avoid splatter/ALC
 
   js8core::EngineCallbacks callbacks;

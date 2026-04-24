@@ -136,6 +136,8 @@ class TruSdxSerialSession(
                         writeRawAscii("RX;")
                         SystemClock.sleep(20)
                     }
+                    writeRawAscii(";RX;")
+                    writeStreamingStateLocked()
                     directSerial.setRts(false)
                 }
                 return true
