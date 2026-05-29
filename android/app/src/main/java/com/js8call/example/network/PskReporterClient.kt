@@ -83,18 +83,24 @@ class PskReporterClient(
     }
 
     fun setLocalStation(call: String, grid: String, antenna: String) {
+        val normalizedCall = call.trim().uppercase(Locale.US)
+        val normalizedGrid = grid.trim().uppercase(Locale.US)
+        val normalizedAntenna = antenna.trim()
         handler?.post {
-            rxCall = call
-            rxGrid = grid
-            rxAntenna = antenna
+            rxCall = normalizedCall
+            rxGrid = normalizedGrid
+            rxAntenna = normalizedAntenna
         }
     }
 
     fun addSpot(call: String, grid: String, snr: Int, frequencyHz: Long, mode: String, timestampSeconds: Long) {
         if (!started) return
-        if (call.isBlank()) return
+        val normalizedCall = call.trim().uppercase(Locale.US)
+        if (normalizedCall.isBlank()) return
+        val normalizedGrid = grid.trim().uppercase(Locale.US)
+        val normalizedMode = mode.trim().uppercase(Locale.US)
         val band = bandKeyForFrequency(frequencyHz)
-        val cacheKey = "${call}_$band"
+        val cacheKey = "${normalizedCall}_$band"
         val now = System.currentTimeMillis() / 1000
         val expiration = now - CACHE_TIMEOUT_SECONDS
 
@@ -102,13 +108,13 @@ class PskReporterClient(
             val previous = callsCache[cacheKey]
             val expired = previous == null || previous < expiration
             if (expired) {
-                spots.add(Spot(call, grid, snr, frequencyHz, mode, timestampSeconds))
+                spots.add(Spot(normalizedCall, normalizedGrid, snr, frequencyHz, normalizedMode, timestampSeconds))
                 callsCache[cacheKey] = now
             } else {
                 for (i in spots.indices.reversed()) {
                     val existing = spots[i]
-                    if (existing.call == call && bandKeyForFrequency(existing.frequencyHz) == band) {
-                        spots[i] = Spot(call, grid, snr, frequencyHz, mode, timestampSeconds)
+                    if (existing.call == normalizedCall && bandKeyForFrequency(existing.frequencyHz) == band) {
+                        spots[i] = Spot(normalizedCall, normalizedGrid, snr, frequencyHz, normalizedMode, timestampSeconds)
                         callsCache[cacheKey] = now
                         break
                     }

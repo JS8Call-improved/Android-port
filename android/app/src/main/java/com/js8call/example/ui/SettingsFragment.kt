@@ -77,6 +77,21 @@ class SettingsFragment : PreferenceFragmentCompat() {
             statusPref?.text = "JS8Android-$versionName"
         }
 
+        val callsignPref = findPreference<EditTextPreference>("callsign")
+        val existingCallsign = callsignPref?.text.orEmpty().trim().uppercase(Locale.US)
+        if (callsignPref != null && callsignPref.text != existingCallsign) {
+            callsignPref.text = existingCallsign
+        }
+        callsignPref?.setOnPreferenceChangeListener { preference, newValue ->
+            val normalizedValue = newValue?.toString().orEmpty().trim().uppercase(Locale.US)
+            preference.sharedPreferences
+                ?.edit()
+                ?.putString(preference.key, normalizedValue)
+                ?.apply()
+            (preference as? EditTextPreference)?.text = normalizedValue
+            false
+        }
+
         val customFrequencyPref = findPreference<EditTextPreference>("custom_frequency_mhz")
         customFrequencyPref?.setOnBindEditTextListener { editText ->
             editText.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL

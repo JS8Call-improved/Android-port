@@ -537,7 +537,12 @@ JS8Engine_Native* js8_engine_create(JNIEnv* env, jobject callback_handler,
   config.sample_rate_hz = sample_rate_hz;
   config.submodes = (submodes == 0) ? 0x1F : submodes;  // default to all standard submodes
   config.tx_output_rate_hz = (enable_tx_audio_tap != 0) ? 11520 : 0;
-  config.tx_output_gain = 0.2f;  // Leave headroom to avoid splatter/ALC
+  // TruSDX serial path (tx_audio_tap): raise gain so the 8-bit serial audio
+  // uses a meaningful portion of the U8 range (~128 of 256 levels at 0.5).
+  // Too low (0.2) wastes resolution and sounds harsh; too high (1.0) overdrives
+  // the radio's TX chain producing a noisy carrier with no modulation.
+  // Oboe/speaker path: keep headroom to avoid splatter/ALC on the analog chain.
+  config.tx_output_gain = (enable_tx_audio_tap != 0) ? 0.5f : 0.2f;
 
   js8core::EngineCallbacks callbacks;
   callbacks.on_event = [native](js8core::events::Variant const& event) {

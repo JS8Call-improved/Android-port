@@ -121,10 +121,11 @@ class TruSdxSerialSession(
             try {
                 if (enabled) {
                     directSerial.setRts(true)
-                    writeRawAscii("TX0;")
+                    // Single PTT command with leading semicolon to terminate any
+                    // pending CAT exchange, matching the FT8CN truSDX protocol.
                     writeRawAscii(";TX0;")
-                    writeRawAscii("TX0;")
-                    SystemClock.sleep(10)
+                    // Allow the radio time to switch to TX / audio-input mode.
+                    SystemClock.sleep(100)
                     txActive = true
                 } else {
                     txActive = false
@@ -187,8 +188,12 @@ class TruSdxSerialSession(
         var out = 0
         for (sample in samplesPcm16) {
             var mapped = ((sample.toInt() shr 8) + 128).coerceIn(0, 255)
-            if (mapped == ';'.code) {
-                mapped = ':'.code
+            if (mapped == SEMICOLON_BYTE) {
+                // Semicolon is the CAT protocol delimiter and must never appear in
+                // audio data.  Round to the nearest valid neighbour using the low
+                // byte of the original sample to decide direction, so the error is
+                // distributed evenly instead of always biasing downward.
+                mapped = if ((sample.toInt() and 0xFF) >= 128) SEMICOLON_BYTE + 1 else SEMICOLON_BYTE - 1
             }
             payload[out++] = mapped.toByte()
         }
@@ -355,5 +360,8 @@ class TruSdxSerialSession(
         private const val TRUSDX_DATA_BITS = 8
         private const val TRUSDX_STOP_BITS = 1
         private const val TRUSDX_PARITY = 0
+
+        /** Byte value of ';' -- the CAT protocol delimiter, forbidden in audio data. */
+        private const val SEMICOLON_BYTE = ';'.code  // 59
     }
 }
