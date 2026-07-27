@@ -637,6 +637,7 @@ void js8_engine_stop(JS8Engine_Native* engine) {
 int js8_engine_submit_audio(JS8Engine_Native* engine, const int16_t* samples,
                             size_t num_samples, int64_t timestamp_ns) {
   if (!engine || !engine->engine || !samples) return 0;
+  if (num_samples > std::numeric_limits<size_t>::max() / sizeof(int16_t)) return 0;
 
   // Convert to byte span
   size_t byte_size = num_samples * sizeof(int16_t);

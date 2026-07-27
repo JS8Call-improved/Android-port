@@ -1,6 +1,7 @@
 #include <jni.h>
 #include <android/log.h>
 #include <algorithm>
+#include <limits>
 #include <mutex>
 #include <string>
 #include <strings.h>
@@ -11,6 +12,35 @@
 // JNI method implementations for com.js8call.core.JS8Engine
 
 namespace {
+bool validate_audio_samples(JNIEnv* env,
+                            jshortArray samples,
+                            jint num_samples,
+                            const char* label) {
+  if (!env || !samples) {
+    __android_log_print(ANDROID_LOG_ERROR, "JS8Engine_JNI",
+                        "%s samples array is null", label);
+    return false;
+  }
+
+  jsize const array_length = env->GetArrayLength(samples);
+  if (num_samples <= 0 || num_samples > array_length) {
+    __android_log_print(ANDROID_LOG_ERROR, "JS8Engine_JNI",
+                        "Invalid %s sample count: count=%d array_length=%d",
+                        label, num_samples, array_length);
+    return false;
+  }
+
+  auto const count = static_cast<size_t>(num_samples);
+  if (count > std::numeric_limits<size_t>::max() / sizeof(int16_t)) {
+    __android_log_print(ANDROID_LOG_ERROR, "JS8Engine_JNI",
+                        "%s sample byte count overflow: count=%d",
+                        label, num_samples);
+    return false;
+  }
+
+  return true;
+}
+
 std::string to_utf8(JNIEnv* env, jstring value) {
   if (!env || !value) return {};
   const char* chars = env->GetStringUTFChars(value, nullptr);
@@ -96,6 +126,10 @@ Java_com_js8call_core_JS8Engine_nativeSubmitAudio(
     jlong timestamp_ns) {
   JS8Engine_Native* engine = reinterpret_cast<JS8Engine_Native*>(handle);
 
+  if (!validate_audio_samples(env, samples, num_samples, "audio")) {
+    return JNI_FALSE;
+  }
+
   // Get array elements
   jshort* sample_data = env->GetShortArrayElements(samples, nullptr);
   if (!sample_data) {
@@ -107,9 +141,14 @@ Java_com_js8call_core_JS8Engine_nativeSubmitAudio(
   // Log first submission with details
   static int submit_count = 0;
   if (submit_count++ % 100 == 0) {  // Every 100th submission
-    __android_log_print(ANDROID_LOG_DEBUG, "JS8Engine_JNI",
-                       "Audio submit: %d samples, first3=[%d, %d, %d]",
-                       num_samples, sample_data[0], sample_data[1], sample_data[2]);
+    if (num_samples >= 3) {
+      __android_log_print(ANDROID_LOG_DEBUG, "JS8Engine_JNI",
+                          "Audio submit: %d samples, first3=[%d, %d, %d]",
+                          num_samples, sample_data[0], sample_data[1], sample_data[2]);
+    } else {
+      __android_log_print(ANDROID_LOG_DEBUG, "JS8Engine_JNI",
+                          "Audio submit: %d samples", num_samples);
+    }
   }
 
   int result = js8_engine_submit_audio(
@@ -134,6 +173,10 @@ Java_com_js8call_core_JS8Engine_nativeSubmitAudioRaw(
     jint input_sample_rate_hz,
     jlong timestamp_ns) {
   JS8Engine_Native* engine = reinterpret_cast<JS8Engine_Native*>(handle);
+
+  if (!validate_audio_samples(env, samples, num_samples, "raw audio")) {
+    return JNI_FALSE;
+  }
 
   jshort* sample_data = env->GetShortArrayElements(samples, nullptr);
   if (!sample_data) {
