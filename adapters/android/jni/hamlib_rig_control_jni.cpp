@@ -357,14 +357,16 @@ Java_com_js8call_core_HamlibRigControl_nativeClose(JNIEnv* /*env*/,
                                                    jobject /*thiz*/,
                                                    jlong handle_value) {
   if (!handle_value) return;
-  auto* handle = reinterpret_cast<HamlibRigHandle*>(handle_value);
-  std::lock_guard<std::mutex> lock(handle->mutex);
-  if (handle->rig) {
-    rig_close(handle->rig);
-    rig_cleanup(handle->rig);
-    handle->rig = nullptr;
+  std::unique_ptr<HamlibRigHandle> handle(
+      reinterpret_cast<HamlibRigHandle*>(handle_value));
+  {
+    std::lock_guard<std::mutex> lock(handle->mutex);
+    if (handle->rig) {
+      rig_close(handle->rig);
+      rig_cleanup(handle->rig);
+      handle->rig = nullptr;
+    }
   }
-  delete handle;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
