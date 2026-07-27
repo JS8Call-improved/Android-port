@@ -608,12 +608,17 @@ void js8_engine_destroy(JS8Engine_Native* engine) {
   // Stop engine first
   js8_engine_stop(engine);
 
+  // Destroy the core engine while its callbacks and adapter dependencies are
+  // still alive. Its destructor stops and joins the decode/spectrum workers.
+  engine->engine.reset();
+
   // Delete global reference to callback handler
   if (engine->callback_handler) {
     JNIEnv* env = get_jni_env();
     if (env) {
       env->DeleteGlobalRef(engine->callback_handler);
     }
+    engine->callback_handler = nullptr;
   }
 
   delete engine;
