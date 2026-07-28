@@ -33,7 +33,7 @@ void Modulator::start(std::array<int, protocol::kJs8NumSymbols> const& tones,
   phi_ = 0.0;
   dphi_ = 0.0;
   amp_ = 1.0;
-  silent_frames_ = 0;
+  silent_frames_.store(0);
   ic_ = 0;
   isym0_ = std::numeric_limits<std::uint64_t>::max();
 
@@ -52,15 +52,15 @@ void Modulator::start(std::array<int, protocol::kJs8NumSymbols> const& tones,
     } else {
       wait_ms = static_cast<std::int64_t>(period_ms - period_offset + start_time_ms);
     }
-    silent_frames_ = wait_ms * base_rate_ / 1000;
+    silent_frames_.store(wait_ms * base_rate_ / 1000);
   }
 
-  state_.store(silent_frames_ > 0 ? State::Synchronizing : State::Active);
+  state_.store(silent_frames_.load() > 0 ? State::Synchronizing : State::Active);
 }
 
 void Modulator::stop() {
   state_.store(State::Idle);
-  silent_frames_ = 0;
+  silent_frames_.store(0);
   ic_ = 0;
   phi_ = 0.0;
 }
@@ -70,9 +70,9 @@ float Modulator::next_sample() {
   if (state == State::Idle) return 0.0f;
 
   if (state == State::Synchronizing) {
-    if (silent_frames_ > 0) {
-      --silent_frames_;
-      if (silent_frames_ == 0) {
+    auto const remaining = silent_frames_.load();
+    if (remaining > 0) {
+      if (silent_frames_.fetch_sub(1) == 1) {
         state_.store(State::Active);
       }
       return 0.0f;
@@ -113,6 +113,17 @@ float Modulator::next_sample() {
   }
 
   return sample;
+}
+
+int Modulator::milliseconds_until_active() const {
+  auto const state = state_.load();
+  if (state == State::Idle) return -1;
+  if (state == State::Active) return 0;
+
+  auto const frames = silent_frames_.load();
+  if (frames <= 0) return 0;
+  return static_cast<int>((frames * 1000 + protocol::kJs8RxSampleRate - 1) /
+                          protocol::kJs8RxSampleRate);
 }
 
 }  // namespace js8core::tx

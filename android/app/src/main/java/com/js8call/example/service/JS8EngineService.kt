@@ -38,6 +38,7 @@ import com.js8call.example.util.TxMessageClassifier
 import java.util.Calendar
 import java.util.Locale
 import java.util.TimeZone
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.LinkedBlockingDeque
 import java.util.concurrent.TimeUnit
 
@@ -98,6 +99,16 @@ class JS8EngineService : Service() {
     private var currentTxOffsetHz: Float = 1500f
     private var txMonitorActive = false
     private var txMonitorWasAudioActive = false
+    private val pttStateLock = Any()
+    @Volatile private var txPttGeneration = 0
+    @Volatile private var rigPttAsserted = false
+    private var rigPttDesired = false
+    private var rigPttDesiredGeneration = 0
+    private var rigPttCommandPending = false
+    private var rigPttFailureCount = 0
+    private var rigPttCompletion: ((Boolean) -> Unit)? = null
+    private var pttShuttingDown = false
+    @Volatile private var txPttFailed = false
     @Volatile private var txSessionActive = false
     @Volatile private var txAudioActive = false
     @Volatile private var trusdxTxIntentActive = false
@@ -128,6 +139,7 @@ class JS8EngineService : Service() {
     private val gridRegex = Regex("\\b[A-R]{2}[0-9]{2}([A-X]{2})?\\b", RegexOption.IGNORE_CASE)
     private val txMonitorRunnable = object : Runnable {
         override fun run() {
+            val generation = txPttGeneration
             val activeEngine = engine
             if (activeEngine == null) {
                 txMonitorActive = false
@@ -135,45 +147,65 @@ class JS8EngineService : Service() {
             }
             val sessionActive = activeEngine.isTransmitting()
             val audioActive = activeEngine.isTransmittingAudio()
+            val millisecondsUntilAudio = activeEngine.txMillisecondsUntilAudio()
             txSessionActive = sessionActive
             txAudioActive = audioActive
             if (!sessionActive) {
                 txMonitorActive = false
                 txMonitorWasAudioActive = false
                 trusdxTxIntentActive = false
-                // Release PTT when TX finishes
                 if (isRigControlConnected()) {
-                    Thread {
-                        val pttOff = setRigPtt(false)
-                        Log.i(TAG, "TX finished, PTT released: $pttOff")
-                    }.start()
+                    requestRigPtt(false, generation) { released ->
+                        if (!isCurrentTxGeneration(generation)) return@requestRigPtt
+                        if (released) {
+                            broadcastTxState(TX_STATE_FINISHED)
+                        } else {
+                            broadcastError("Failed to release PTT after transmission")
+                            broadcastTxState(TX_STATE_FAILED)
+                        }
+                    }
+                } else {
+                    if (isCurrentTxGeneration(generation)) {
+                        broadcastTxState(TX_STATE_FINISHED)
+                    }
                 }
-                broadcastTxState(TX_STATE_FINISHED)
                 return
             }
+
+            val rigRequired = isRigPttRequired()
+            val rigConnected = isRigControlConnected()
+            if (rigRequired && !rigConnected) {
+                failTransmitForPtt(generation, "Rig control is not connected")
+                return
+            }
+            if (rigConnected && !audioActive && millisecondsUntilAudio in 0..PTT_LEAD_TIME_MS) {
+                requestRigPtt(true, generation)
+            }
+
+            if (audioActive && rigConnected && !isRigPttReady(generation)) {
+                activeEngine.setTransmitReady(false)
+                txMonitorHandler.postDelayed(this, TX_PREKEY_MONITOR_INTERVAL_MS)
+                return
+            }
+
             if (audioActive && !txMonitorWasAudioActive) {
                 txMonitorWasAudioActive = true
                 logTxStarted()
-                // Enable PTT when audio TX starts
-                if (isRigControlConnected()) {
-                    Thread {
-                        val pttOn = setRigPtt(true)
-                        Log.i(TAG, "TX audio started, PTT enabled: $pttOn")
-                    }.start()
-                }
                 broadcastTxState(TX_STATE_STARTED)
             } else if (!audioActive && txMonitorWasAudioActive) {
                 txMonitorWasAudioActive = false
-                // Release PTT when audio stops (between packets)
-                if (isRigControlConnected()) {
-                    Thread {
-                        val pttOff = setRigPtt(false)
-                        Log.i(TAG, "TX audio paused, PTT released: $pttOff")
-                    }.start()
+                if (rigConnected) {
+                    requestRigPtt(false, generation)
                 }
                 broadcastTxState(TX_STATE_QUEUED)
             }
-            txMonitorHandler.postDelayed(this, TX_MONITOR_INTERVAL_MS)
+
+            val nextCheckMs = if (millisecondsUntilAudio.toLong() > PTT_LEAD_TIME_MS + TX_MONITOR_INTERVAL_MS) {
+                TX_MONITOR_INTERVAL_MS
+            } else {
+                TX_PREKEY_MONITOR_INTERVAL_MS
+            }
+            txMonitorHandler.postDelayed(this, nextCheckMs)
         }
     }
 
@@ -1308,6 +1340,16 @@ class JS8EngineService : Service() {
             engineStartGeneration++
             engineStartInProgress = false
             trusdxInitInProgress = false
+            synchronized(pttStateLock) {
+                txPttGeneration++
+                rigPttDesired = rigPttAsserted
+                rigPttDesiredGeneration = txPttGeneration
+                rigPttFailureCount = 0
+                rigPttCompletion = null
+                pttShuttingDown = true
+                txPttFailed = false
+            }
+            engine?.setTransmitReady(false)
             scoSilenceCheckToken++
             scoStartToken++
             audioHelper?.stopCapture()
@@ -1316,8 +1358,17 @@ class JS8EngineService : Service() {
             stopTxMonitor()
             disableScoRouting()
 
+            txHandler.removeCallbacksAndMessages(null)
+            synchronized(pttStateLock) {
+                rigPttDesired = false
+                rigPttDesiredGeneration = txPttGeneration
+                rigPttCommandPending = false
+                rigPttCompletion = null
+            }
             if (isRigControlConnected()) {
-                setRigPtt(false)
+                if (!releaseRigPttForShutdown()) {
+                    Log.e(TAG, "Unable to confirm PTT release during shutdown")
+                }
             }
 
             // Disconnect rig control on background thread
@@ -2178,6 +2229,7 @@ class JS8EngineService : Service() {
         val activeEngine = engine
         if (activeEngine != null) {
             val submode = getPreferredTxSubmode()
+            prepareEngineForTransmit(activeEngine)
              val ok = activeEngine.transmitMessage(
                 text = payload,
                 myCall = callsign,
@@ -2260,6 +2312,7 @@ class JS8EngineService : Service() {
             "TX request: text='$payloadText', directed='${directed}', submode=$submode, freq=$audioFrequencyHz, delay=$txDelaySec, identify=$effectiveForceIdentify"
         )
 
+        prepareEngineForTransmit(activeEngine)
         val ok = activeEngine.transmitMessage(
             text = payloadText,
             myCall = callsign,
@@ -2398,10 +2451,19 @@ class JS8EngineService : Service() {
         txMonitorHandler.removeCallbacks(txMonitorRunnable)
         txMonitorActive = true
         txMonitorWasAudioActive = false
+        synchronized(pttStateLock) {
+            txPttGeneration++
+            rigPttDesired = rigPttAsserted
+            rigPttDesiredGeneration = txPttGeneration
+            rigPttFailureCount = 0
+            rigPttCompletion = null
+            pttShuttingDown = false
+            txPttFailed = false
+        }
         if (rigControlMode == "trusdx_serial") {
             trusdxTxIntentActive = true
         }
-        txMonitorHandler.postDelayed(txMonitorRunnable, TX_MONITOR_INTERVAL_MS)
+        txMonitorHandler.post(txMonitorRunnable)
     }
 
     private fun stopTxMonitor() {
@@ -2409,6 +2471,182 @@ class JS8EngineService : Service() {
         txMonitorActive = false
         trusdxTxIntentActive = false
         txMonitorHandler.removeCallbacks(txMonitorRunnable)
+    }
+
+    private fun isRigPttReady(generation: Int): Boolean {
+        return synchronized(pttStateLock) {
+            generation == txPttGeneration &&
+                rigPttAsserted &&
+                rigPttDesired &&
+                !rigPttCommandPending
+        }
+    }
+
+    private fun isCurrentTxGeneration(generation: Int): Boolean {
+        return synchronized(pttStateLock) { generation == txPttGeneration }
+    }
+
+    private fun requestRigPtt(
+        enabled: Boolean,
+        generation: Int,
+        onComplete: ((Boolean) -> Unit)? = null
+    ) {
+        if (!enabled) engine?.setTransmitReady(false)
+
+        var completion: ((Boolean) -> Unit)? = null
+        var scheduleCommand = false
+        var openTransmitGate = false
+        synchronized(pttStateLock) {
+            if (generation != txPttGeneration || (txPttFailed && enabled)) return
+            if (rigPttDesired != enabled || rigPttDesiredGeneration != generation) {
+                rigPttDesired = enabled
+                rigPttDesiredGeneration = generation
+                rigPttFailureCount = 0
+            }
+            if (onComplete != null) rigPttCompletion = onComplete
+
+            if (!rigPttCommandPending) {
+                if (rigPttAsserted == rigPttDesired) {
+                    completion = rigPttCompletion
+                    rigPttCompletion = null
+                    openTransmitGate = enabled && generation == txPttGeneration
+                } else {
+                    rigPttCommandPending = true
+                    scheduleCommand = true
+                }
+            }
+        }
+
+        if (openTransmitGate) engine?.setTransmitReady(true)
+        completion?.invoke(true)
+        if (scheduleCommand) txHandler.post { runRigPttCommand() }
+    }
+
+    private fun runRigPttCommand() {
+        val target: Boolean
+        val generation: Int
+        synchronized(pttStateLock) {
+            target = rigPttDesired
+            generation = rigPttDesiredGeneration
+        }
+
+        val success = setRigPtt(target)
+        var scheduleNext = false
+        var completion: ((Boolean) -> Unit)? = null
+        var failEnable = false
+        var transmitReady: Boolean? = null
+        var completionResult = success
+        synchronized(pttStateLock) {
+            rigPttCommandPending = false
+            if (success) {
+                rigPttAsserted = target
+                rigPttFailureCount = 0
+                transmitReady = if (target) {
+                    target == rigPttDesired && generation == txPttGeneration
+                } else {
+                    false
+                }
+            }
+
+            if (pttShuttingDown) {
+                transmitReady = false
+                rigPttCompletion = null
+                return@synchronized
+            }
+
+            val targetStillDesired = target == rigPttDesired &&
+                generation == rigPttDesiredGeneration
+            if (!success && targetStillDesired) {
+                rigPttFailureCount++
+                if (rigPttFailureCount <= PTT_COMMAND_RETRIES) {
+                    rigPttCommandPending = true
+                    scheduleNext = true
+                } else {
+                    completion = rigPttCompletion
+                    rigPttCompletion = null
+                    failEnable = target
+                    rigPttDesired = rigPttAsserted
+                }
+            } else if (rigPttAsserted != rigPttDesired) {
+                rigPttCommandPending = true
+                scheduleNext = true
+            } else if (rigPttDesiredGeneration == txPttGeneration) {
+                completion = rigPttCompletion
+                rigPttCompletion = null
+                completionResult = true
+            }
+        }
+
+        transmitReady?.let { engine?.setTransmitReady(it) }
+
+        mainHandler.post {
+            if (success) {
+                Log.i(TAG, "PTT ${if (target) "enabled" else "released"} generation=$generation")
+            } else {
+                Log.w(TAG, "PTT ${if (target) "enable" else "release"} failed generation=$generation")
+            }
+            completion?.invoke(completionResult)
+            if (failEnable) {
+                failTransmitForPtt(generation, "Failed to enable PTT")
+            }
+        }
+        if (scheduleNext) txHandler.post { runRigPttCommand() }
+    }
+
+    private fun failTransmitForPtt(generation: Int, message: String) {
+        synchronized(pttStateLock) {
+            if (generation != txPttGeneration || txPttFailed) return
+            txPttFailed = true
+            rigPttDesired = false
+            rigPttDesiredGeneration = generation
+            rigPttFailureCount = 0
+            rigPttCompletion = null
+            if (!rigPttCommandPending && rigPttAsserted) {
+                rigPttCommandPending = true
+                txHandler.post { runRigPttCommand() }
+            }
+        }
+
+        Log.e(TAG, message)
+        txMonitorActive = false
+        txMonitorHandler.removeCallbacks(txMonitorRunnable)
+        engine?.stopTransmit()
+        txSessionActive = false
+        txAudioActive = false
+        txMonitorWasAudioActive = false
+        trusdxTxIntentActive = false
+        engine?.setTransmitReady(false)
+        broadcastError(message)
+        broadcastTxState(TX_STATE_FAILED)
+    }
+
+    private fun releaseRigPttForShutdown(): Boolean {
+        if (Looper.myLooper() == txHandler.looper) {
+            val released = setRigPtt(false)
+            if (released) rigPttAsserted = false
+            return released
+        }
+
+        val completed = CountDownLatch(1)
+        var released = false
+        txHandler.post {
+            try {
+                released = setRigPtt(false)
+                if (released) {
+                    synchronized(pttStateLock) {
+                        rigPttAsserted = false
+                    }
+                }
+            } finally {
+                completed.countDown()
+            }
+        }
+        completed.await()
+        if (!released) {
+            released = setRigPtt(false)
+            if (released) rigPttAsserted = false
+        }
+        return released
     }
 
     /**
@@ -3226,6 +3464,7 @@ class JS8EngineService : Service() {
         val payload = text.trim()
         if (payload.isEmpty()) return false
 
+        prepareEngineForTransmit(activeEngine)
         val ok = activeEngine.transmitMessage(
             text = payload,
             myCall = callsign,
@@ -3266,6 +3505,7 @@ class JS8EngineService : Service() {
         val directedCall = directed?.trim().orEmpty().uppercase()
         if (requireDirected && directedCall.isBlank()) return
 
+        prepareEngineForTransmit(activeEngine)
         val ok = activeEngine.transmitMessage(
             text = payloadText,
             myCall = callsign,
@@ -3386,6 +3626,12 @@ class JS8EngineService : Service() {
             "trusdx_serial" -> trusdxConnected
             else -> false
         }
+    }
+
+    private fun isRigPttRequired(): Boolean = rigControlMode != "none"
+
+    private fun prepareEngineForTransmit(activeEngine: JS8Engine) {
+        activeEngine.setTransmitReady(!isRigPttRequired())
     }
 
     private fun setRigPtt(enabled: Boolean): Boolean {
@@ -3562,6 +3808,9 @@ class JS8EngineService : Service() {
         private const val TRUSDX_RX_STALL_REARM_NS = 2_000_000_000L
         private const val TRUSDX_RX_REARM_COOLDOWN_NS = 2_500_000_000L
         private const val TRUSDX_RX_KEEPALIVE_INTERVAL_MS = 2000L
+        private const val PTT_LEAD_TIME_MS = 500
+        private const val PTT_COMMAND_RETRIES = 1
+        private const val TX_PREKEY_MONITOR_INTERVAL_MS = 25L
         private const val TX_MONITOR_INTERVAL_MS = 250L
         private const val SCO_START_WAIT_INTERVAL_MS = 200L
         private const val SCO_START_MAX_ATTEMPTS = 10

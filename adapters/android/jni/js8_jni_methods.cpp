@@ -338,6 +338,25 @@ Java_com_js8call_core_JS8Engine_nativeIsTransmittingAudio(
   return js8_engine_is_transmitting_audio(engine) ? JNI_TRUE : JNI_FALSE;
 }
 
+JNIEXPORT jint JNICALL
+Java_com_js8call_core_JS8Engine_nativeTxMillisecondsUntilAudio(
+    JNIEnv* /* env */,
+    jobject /* thiz */,
+    jlong handle) {
+  JS8Engine_Native* engine = reinterpret_cast<JS8Engine_Native*>(handle);
+  return static_cast<jint>(js8_engine_tx_milliseconds_until_audio(engine));
+}
+
+JNIEXPORT void JNICALL
+Java_com_js8call_core_JS8Engine_nativeSetTxReady(
+    JNIEnv* /* env */,
+    jobject /* thiz */,
+    jlong handle,
+    jboolean ready) {
+  JS8Engine_Native* engine = reinterpret_cast<JS8Engine_Native*>(handle);
+  js8_engine_set_tx_ready(engine, ready == JNI_TRUE);
+}
+
 JNIEXPORT jboolean JNICALL
 Java_com_js8call_core_JS8Engine_nativeIsRunning(
     JNIEnv* /* env */,

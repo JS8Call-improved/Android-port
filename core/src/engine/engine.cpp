@@ -346,7 +346,15 @@ public:
   }
 
   bool is_transmitting_audio() const override {
-    return tx_modulator_.is_active();
+    return tx_modulator_.is_active() && tx_ready_.load();
+  }
+
+  int tx_milliseconds_until_audio() const override {
+    return tx_modulator_.milliseconds_until_active();
+  }
+
+  void set_tx_ready(bool ready) override {
+    tx_ready_.store(ready);
   }
 
   void set_tx_boost_enabled(bool enabled) override {
@@ -803,6 +811,8 @@ public:
         }
       }
 
+      if (tx_modulator_.is_active() && !tx_ready_.load()) return 0.0f;
+
       return tx_modulator_.next_sample();
     }
 
@@ -958,6 +968,7 @@ public:
     bool tx_output_logged_ = false;
     std::atomic<bool> tx_active_{false};
     bool tx_output_started_{false};
+    std::atomic<bool> tx_ready_{true};
     static constexpr auto kSpectrumInterval = std::chrono::milliseconds(100);
     std::chrono::steady_clock::time_point last_spectrum_time_{};
     std::size_t spectrum_n_{0};

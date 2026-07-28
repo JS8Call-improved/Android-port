@@ -126,6 +126,8 @@ public:
   virtual void stop_transmit() = 0;
   virtual bool is_transmitting() const = 0;
   virtual bool is_transmitting_audio() const = 0;
+  virtual int tx_milliseconds_until_audio() const = 0;
+  virtual void set_tx_ready(bool ready) = 0;
   virtual void set_tx_boost_enabled(bool enabled) = 0;
 };
 

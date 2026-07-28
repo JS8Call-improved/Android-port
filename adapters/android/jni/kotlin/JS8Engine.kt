@@ -226,6 +226,18 @@ class JS8Engine private constructor(
     }
 
     /**
+     * Milliseconds until scheduled TX audio begins, or -1 when no TX is active.
+     */
+    fun txMillisecondsUntilAudio(): Int {
+        return withNativeHandleOr(-1) { nativeTxMillisecondsUntilAudio(it) }
+    }
+
+    /** Controls whether scheduled modulation may advance and reach the output. */
+    fun setTransmitReady(ready: Boolean) {
+        withNativeHandle { nativeSetTxReady(it, ready) }
+    }
+
+    /**
      * Close and destroy the engine. After calling this, the engine cannot be used.
      */
     override fun close() {
@@ -314,6 +326,8 @@ class JS8Engine private constructor(
     private external fun nativeStopTransmit(handle: Long)
     private external fun nativeIsTransmitting(handle: Long): Boolean
     private external fun nativeIsTransmittingAudio(handle: Long): Boolean
+    private external fun nativeTxMillisecondsUntilAudio(handle: Long): Int
+    private external fun nativeSetTxReady(handle: Long, ready: Boolean)
 
     /**
      * Callback interface for engine events.

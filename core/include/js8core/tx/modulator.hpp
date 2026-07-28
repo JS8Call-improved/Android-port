@@ -23,6 +23,7 @@ public:
   void stop();
   bool is_idle() const { return state_.load() == State::Idle; }
   bool is_active() const { return state_.load() == State::Active; }
+  int milliseconds_until_active() const;
 
   float next_sample();
 
@@ -38,7 +39,7 @@ private:
   double phi_ = 0.0;
   double dphi_ = 0.0;
   double amp_ = 1.0;
-  std::int64_t silent_frames_ = 0;
+  std::atomic<std::int64_t> silent_frames_{0};
   std::uint64_t ic_ = 0;
   std::uint64_t isym0_ = 0;
 };
