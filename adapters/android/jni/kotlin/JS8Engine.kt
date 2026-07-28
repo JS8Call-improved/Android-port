@@ -1,5 +1,7 @@
 package com.js8call.core
 
+import java.util.concurrent.locks.ReentrantReadWriteLock
+
 /**
  * Native JS8Call engine wrapper for Android.
  *
@@ -10,6 +12,8 @@ class JS8Engine private constructor(
     private var nativeHandle: Long,
     private val callbackHandler: CallbackHandler
 ) : AutoCloseable {
+
+    private val lifecycleLock = ReentrantReadWriteLock(true)
 
     companion object {
         init {
@@ -49,17 +53,14 @@ class JS8Engine private constructor(
      * Start the engine. Must be called before submitting audio.
      */
     fun start(): Boolean {
-        checkNotClosed()
-        return nativeStart(nativeHandle)
+        return withNativeHandle { nativeStart(it) }
     }
 
     /**
      * Stop the engine. Can be restarted later.
      */
     fun stop() {
-        if (nativeHandle != 0L) {
-            nativeStop(nativeHandle)
-        }
+        withNativeHandleOr(Unit) { nativeStop(it) }
     }
 
     /**
@@ -70,8 +71,7 @@ class JS8Engine private constructor(
      * @return true if successful
      */
     fun submitAudio(samples: ShortArray, timestampNs: Long = System.nanoTime()): Boolean {
-        checkNotClosed()
-        return nativeSubmitAudio(nativeHandle, samples, samples.size, timestampNs)
+        return withNativeHandle { nativeSubmitAudio(it, samples, samples.size, timestampNs) }
     }
 
     /**
@@ -88,8 +88,9 @@ class JS8Engine private constructor(
         inputSampleRateHz: Int,
         timestampNs: Long = System.nanoTime()
     ): Boolean {
-        checkNotClosed()
-        return nativeSubmitAudioRaw(nativeHandle, samples, numSamples, inputSampleRateHz, timestampNs)
+        return withNativeHandle {
+            nativeSubmitAudioRaw(it, samples, numSamples, inputSampleRateHz, timestampNs)
+        }
     }
 
     /**
@@ -98,8 +99,7 @@ class JS8Engine private constructor(
      * @param frequencyHz Frequency in Hz
      */
     fun setFrequency(frequencyHz: Long) {
-        checkNotClosed()
-        nativeSetFrequency(nativeHandle, frequencyHz)
+        withNativeHandle { nativeSetFrequency(it, frequencyHz) }
     }
 
     /**
@@ -108,8 +108,7 @@ class JS8Engine private constructor(
      * @param submodes Bitmask of enabled submodes
      */
     fun setSubmodes(submodes: Int) {
-        checkNotClosed()
-        nativeSetSubmodes(nativeHandle, submodes)
+        withNativeHandle { nativeSetSubmodes(it, submodes) }
     }
 
     /**
@@ -118,23 +117,21 @@ class JS8Engine private constructor(
      * @param enabled true to enable boost, false to disable
      */
     fun setTxBoostEnabled(enabled: Boolean) {
-        checkNotClosed()
-        nativeSetTxBoostEnabled(nativeHandle, enabled)
+        withNativeHandle { nativeSetTxBoostEnabled(it, enabled) }
     }
 
     /**
      * Set preferred output audio device ID (0 or negative for default).
      */
     fun setOutputDevice(deviceId: Int) {
-        checkNotClosed()
-        nativeSetOutputDevice(nativeHandle, deviceId)
+        withNativeHandle { nativeSetOutputDevice(it, deviceId) }
     }
 
     /**
      * Check if the engine is running.
      */
     fun isRunning(): Boolean {
-        return nativeHandle != 0L && nativeIsRunning(nativeHandle)
+        return withNativeHandleOr(false) { nativeIsRunning(it) }
     }
 
     /**
@@ -151,19 +148,20 @@ class JS8Engine private constructor(
         forceIdentify: Boolean = false,
         forceData: Boolean = false
     ): Boolean {
-        checkNotClosed()
-        return nativeTransmitMessage(
-            nativeHandle,
-            text,
-            myCall,
-            myGrid,
-            selectedCall,
-            submode,
-            audioFrequencyHz,
-            txDelaySec,
-            forceIdentify,
-            forceData
-        )
+        return withNativeHandle { handle ->
+            nativeTransmitMessage(
+                handle,
+                text,
+                myCall,
+                myGrid,
+                selectedCall,
+                submode,
+                audioFrequencyHz,
+                txDelaySec,
+                forceIdentify,
+                forceData
+            )
+        }
     }
 
     /**
@@ -176,15 +174,16 @@ class JS8Engine private constructor(
         audioFrequencyHz: Double,
         txDelaySec: Double = 0.0
     ): Boolean {
-        checkNotClosed()
-        return nativeTransmitFrame(
-            nativeHandle,
-            frame,
-            bits,
-            submode,
-            audioFrequencyHz,
-            txDelaySec
-        )
+        return withNativeHandle { handle ->
+            nativeTransmitFrame(
+                handle,
+                frame,
+                bits,
+                submode,
+                audioFrequencyHz,
+                txDelaySec
+            )
+        }
     }
 
     /**
@@ -195,51 +194,72 @@ class JS8Engine private constructor(
         submode: Int,
         txDelaySec: Double = 0.0
     ): Boolean {
-        checkNotClosed()
-        return nativeStartTune(
-            nativeHandle,
-            audioFrequencyHz,
-            submode,
-            txDelaySec
-        )
+        return withNativeHandle { handle ->
+            nativeStartTune(
+                handle,
+                audioFrequencyHz,
+                submode,
+                txDelaySec
+            )
+        }
     }
 
     /**
      * Stop any active transmission or tuning tone.
      */
     fun stopTransmit() {
-        if (nativeHandle != 0L) {
-            nativeStopTransmit(nativeHandle)
-        }
+        withNativeHandleOr(Unit) { nativeStopTransmit(it) }
     }
 
     /**
      * Check if a transmission is currently active.
      */
     fun isTransmitting(): Boolean {
-        return nativeHandle != 0L && nativeIsTransmitting(nativeHandle)
+        return withNativeHandleOr(false) { nativeIsTransmitting(it) }
     }
 
     /**
      * Check if the TX modulator is actively producing audio.
      */
     fun isTransmittingAudio(): Boolean {
-        return nativeHandle != 0L && nativeIsTransmittingAudio(nativeHandle)
+        return withNativeHandleOr(false) { nativeIsTransmittingAudio(it) }
     }
 
     /**
      * Close and destroy the engine. After calling this, the engine cannot be used.
      */
     override fun close() {
-        if (nativeHandle != 0L) {
-            nativeDestroy(nativeHandle)
-            nativeHandle = 0L
+        val writeLock = lifecycleLock.writeLock()
+        writeLock.lock()
+        val handle = try {
+            nativeHandle.also { nativeHandle = 0L }
+        } finally {
+            writeLock.unlock()
+        }
+
+        if (handle != 0L) nativeDestroy(handle)
+    }
+
+    private inline fun <T> withNativeHandle(action: (Long) -> T): T {
+        val readLock = lifecycleLock.readLock()
+        readLock.lock()
+        return try {
+            val handle = nativeHandle
+            check(handle != 0L) { "Engine has been closed" }
+            action(handle)
+        } finally {
+            readLock.unlock()
         }
     }
 
-    private fun checkNotClosed() {
-        if (nativeHandle == 0L) {
-            throw IllegalStateException("Engine has been closed")
+    private inline fun <T> withNativeHandleOr(defaultValue: T, action: (Long) -> T): T {
+        val readLock = lifecycleLock.readLock()
+        readLock.lock()
+        return try {
+            val handle = nativeHandle
+            if (handle == 0L) defaultValue else action(handle)
+        } finally {
+            readLock.unlock()
         }
     }
 
