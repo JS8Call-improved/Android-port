@@ -17,7 +17,6 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.IBinder
 import android.os.Looper
-import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
@@ -66,6 +65,9 @@ class JS8EngineService : Service() {
     private var trusdxDirectSerial: TruSdxDirectSerial? = null
     private var trusdxSerialSession: TruSdxSerialSession? = null
     @Volatile private var trusdxInitInProgress: Boolean = false
+    @Volatile private var engineStartGeneration: Int = 0
+    @Volatile private var engineStartInProgress: Boolean = false
+    @Volatile private var trusdxStartupWorkerActive: Boolean = false
     @Volatile private var trusdxParserResyncs: Long = 0
     @Volatile private var trusdxRxFrames: Long = 0
     @Volatile private var trusdxRxSamples: Long = 0
@@ -376,20 +378,42 @@ class JS8EngineService : Service() {
         }
     }
 
-    private fun startEngine() {
-        try {
-            initializeRigControl()
-
-            if (rigControlMode == "trusdx_serial") {
-                val ready = waitForTruSdxReady(TRUSDX_STARTUP_WAIT_MS)
-                if (!ready) {
-                    Log.w(TAG, "TruSDX serial not ready before engine start")
-                    broadcastError("TruSDX serial link not ready")
-                    broadcastEngineState(STATE_ERROR)
-                    return
-                }
+    private fun startEngine(resumeGeneration: Int? = null) {
+        val generation = if (resumeGeneration == null) {
+            if (engineStartInProgress || engine != null) {
+                Log.w(TAG, "Ignoring duplicate engine start request")
+                return
+            }
+            if (trusdxStartupWorkerActive) {
+                Log.w(TAG, "Ignoring engine start while TruSDX cleanup is still active")
+                broadcastError("TruSDX serial initialization is still stopping. Please try again.")
+                broadcastEngineState(STATE_STOPPED)
+                return
             }
 
+            engineStartInProgress = true
+            val nextGeneration = ++engineStartGeneration
+            try {
+                initializeRigControl(nextGeneration)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error initializing rig control", e)
+                failEngineStart(nextGeneration, "Error initializing rig control: ${e.message}")
+                return
+            }
+
+            if (rigControlMode == "trusdx_serial") {
+                return
+            }
+            nextGeneration
+        } else {
+            if (!isCurrentEngineStart(resumeGeneration)) {
+                Log.i(TAG, "Ignoring stale engine start continuation generation=$resumeGeneration")
+                return
+            }
+            resumeGeneration
+        }
+
+        try {
             // Create callback handler that marshals to main thread
             val callbackHandler = object : JS8Engine.CallbackHandler {
                 override fun onDecoded(
@@ -501,20 +525,47 @@ class JS8EngineService : Service() {
                         startAudioCapture(engine!!, selectedAudioDeviceId)
                     }
                 }
+                engineStartInProgress = false
             } else {
                 Log.e(TAG, "Failed to start engine")
-                broadcastError("Failed to start engine")
-                broadcastEngineState(STATE_ERROR)
+                engine?.close()
+                engine = null
+                failEngineStart(generation, "Failed to start engine")
             }
 
         } catch (e: Exception) {
             Log.e(TAG, "Error starting engine", e)
-            broadcastError("Error starting engine: ${e.message}")
-            broadcastEngineState(STATE_ERROR)
+            engine?.close()
+            engine = null
+            failEngineStart(generation, "Error starting engine: ${e.message}")
         }
     }
 
-    private fun initializeRigControl() {
+    private fun isCurrentEngineStart(generation: Int): Boolean {
+        return engineStartInProgress && engineStartGeneration == generation
+    }
+
+    private fun failEngineStart(generation: Int, message: String) {
+        if (!isCurrentEngineStart(generation)) return
+        if (rigControlMode == "trusdx_serial" && trusdxSerialSession?.isConnected() == true) {
+            trusdxStartupWorkerActive = true
+            Thread {
+                try {
+                    trusdxSerialSession?.stop()
+                } finally {
+                    trusdxStartupWorkerActive = false
+                }
+            }.start()
+        }
+        engineStartInProgress = false
+        trusdxInitInProgress = false
+        trusdxConnected = false
+        rigCtlErrorShown = true
+        broadcastError(message)
+        broadcastEngineState(STATE_ERROR)
+    }
+
+    private fun initializeRigControl(generation: Int) {
         val prefs = PreferenceManager.getDefaultSharedPreferences(this)
         val rigControlEnabled = prefs.getBoolean("rig_control_enabled", false)
         val rigType = prefs.getString("rig_type", "none")
@@ -536,12 +587,12 @@ class JS8EngineService : Service() {
             "network" -> initializeNetworkRigControl()
             "hamlib_usb" -> initializeHamlibUsbControl()
             "rts_ptt" -> initializeRtsPttControl()
-            "trusdx_serial" -> initializeTruSdxControl()
+            "trusdx_serial" -> initializeTruSdxControl(generation)
             else -> Log.w(TAG, "Unknown rig type: $rigType")
         }
     }
 
-    private fun initializeTruSdxControl() {
+    private fun initializeTruSdxControl(generation: Int) {
         Log.i(TAG, "Initializing TruSDX serial control")
         trusdxInitInProgress = true
         trusdxConnected = false
@@ -569,24 +620,20 @@ class JS8EngineService : Service() {
         val selection = resolveSerialSelection(selectedPort, prefs)
         if (selection == null) {
             Log.w(TAG, "Invalid serial port selection: $selectedPort")
-            broadcastError("Invalid serial port selection for TruSDX control.")
-            rigCtlErrorShown = true
-            trusdxInitInProgress = false
+            failEngineStart(generation, "Invalid serial port selection for TruSDX control.")
             return
         }
 
         if (selection.transport != SerialTransport.USB) {
             Log.w(TAG, "TruSDX only supports USB serial transport")
-            broadcastError("TruSDX mode supports USB serial only.")
-            rigCtlErrorShown = true
-            trusdxInitInProgress = false
+            failEngineStart(generation, "TruSDX mode supports USB serial only.")
             return
         }
 
-        openTruSdxSerialUsb(selection)
+        openTruSdxSerialUsb(selection, generation)
     }
 
-    private fun openTruSdxSerialUsb(selection: SerialSelection) {
+    private fun openTruSdxSerialUsb(selection: SerialSelection, generation: Int) {
         var deviceId = selection.usbDeviceId
         var portIndex = selection.portIndex
         if (deviceId == null) {
@@ -611,9 +658,7 @@ class JS8EngineService : Service() {
 
         if (usbDevice == null) {
             Log.w(TAG, "No USB serial device found for TruSDX")
-            broadcastError("No USB serial device found for TruSDX control.")
-            rigCtlErrorShown = true
-            trusdxInitInProgress = false
+            failEngineStart(generation, "No USB serial device found for TruSDX control.")
             return
         }
 
@@ -622,65 +667,78 @@ class JS8EngineService : Service() {
         if (!UsbPermissionHelper.hasPermission(this, usbDevice)) {
             Log.i(TAG, "Requesting USB permission for TruSDX device...")
             UsbPermissionHelper.requestPermission(this, usbDevice) { granted ->
+                if (!isCurrentEngineStart(generation)) {
+                    Log.i(TAG, "Ignoring stale TruSDX permission result generation=$generation")
+                    return@requestPermission
+                }
                 if (granted) {
                     Log.i(TAG, "USB permission granted for TruSDX device")
-                    openTruSdxSerialUsbInternal(usbDevice.deviceId, portIndex)
+                    openTruSdxSerialUsbInternal(usbDevice.deviceId, portIndex, generation)
                 } else {
                     Log.w(TAG, "USB permission denied for TruSDX device")
-                    broadcastError("USB permission denied. Please grant USB access in Settings.")
-                    rigCtlErrorShown = true
-                    trusdxInitInProgress = false
+                    failEngineStart(generation, "USB permission denied. Please grant USB access in Settings.")
                 }
             }
         } else {
             Log.i(TAG, "USB permission already granted for TruSDX device")
-            openTruSdxSerialUsbInternal(usbDevice.deviceId, portIndex)
+            openTruSdxSerialUsbInternal(usbDevice.deviceId, portIndex, generation)
         }
     }
 
-    private fun openTruSdxSerialUsbInternal(deviceId: Int, portIndex: Int) {
+    private fun openTruSdxSerialUsbInternal(deviceId: Int, portIndex: Int, generation: Int) {
+        trusdxStartupWorkerActive = true
         Thread {
-            val session = trusdxSerialSession
-            val opened = session?.start(deviceId, portIndex) == true
-            if (opened) {
-                session?.setSpeakerEnabled(selectedAudioDeviceId == TRUSDX_AUDIO_SPEAKER_ID)
-            }
-            val initialized = opened && session?.initializeRigState() == true
-            trusdxConnected = initialized
-            rigCtlErrorShown = !initialized
-            trusdxInitInProgress = false
-            mainHandler.post {
-                if (initialized) {
-                    Log.i(TAG, "TruSDX serial control ready device=$deviceId port=$portIndex")
-                    if (currentDialHz > 0L) {
-                        Thread {
-                            val ok = session?.setFrequency(currentDialHz) == true
-                            Log.i(TAG, "TruSDX initial frequency apply: hz=$currentDialHz ok=$ok")
-                        }.start()
+            try {
+                if (!isCurrentEngineStart(generation)) {
+                    trusdxStartupWorkerActive = false
+                    return@Thread
+                }
+                val session = trusdxSerialSession
+                val opened = session?.start(deviceId, portIndex) == true
+                if (opened) {
+                    session?.setSpeakerEnabled(selectedAudioDeviceId == TRUSDX_AUDIO_SPEAKER_ID)
+                }
+                val initialized = opened && session?.initializeRigState() == true
+                if (!isCurrentEngineStart(generation)) {
+                    if (opened) session?.stop()
+                    trusdxStartupWorkerActive = false
+                    return@Thread
+                }
+                mainHandler.post {
+                    if (!isCurrentEngineStart(generation)) {
+                        if (opened) session?.stop()
+                        trusdxStartupWorkerActive = false
+                        return@post
                     }
-                } else {
-                    session?.stop()
-                    trusdxConnected = false
-                    Log.w(TAG, "Failed to initialize TruSDX serial control")
-                    broadcastError("Failed to initialize TruSDX serial control.")
-                    rigCtlErrorShown = true
+                    if (initialized) {
+                        trusdxConnected = true
+                        rigCtlErrorShown = false
+                        trusdxInitInProgress = false
+                        trusdxStartupWorkerActive = false
+                        Log.i(TAG, "TruSDX serial control ready device=$deviceId port=$portIndex")
+                        if (currentDialHz > 0L) {
+                            Thread {
+                                val ok = session?.setFrequency(currentDialHz) == true
+                                Log.i(TAG, "TruSDX initial frequency apply: hz=$currentDialHz ok=$ok")
+                            }.start()
+                        }
+                        startEngine(generation)
+                    } else {
+                        session?.stop()
+                        trusdxStartupWorkerActive = false
+                        trusdxConnected = false
+                        Log.w(TAG, "Failed to initialize TruSDX serial control")
+                        failEngineStart(generation, "Failed to initialize TruSDX serial control.")
+                    }
+                }
+            } catch (error: Throwable) {
+                Log.e(TAG, "TruSDX serial initialization failed", error)
+                trusdxStartupWorkerActive = false
+                mainHandler.post {
+                    failEngineStart(generation, "Failed to initialize TruSDX serial control: ${error.message}")
                 }
             }
         }.start()
-    }
-
-    private fun waitForTruSdxReady(timeoutMs: Long): Boolean {
-        val deadline = SystemClock.elapsedRealtime() + timeoutMs
-        while (SystemClock.elapsedRealtime() < deadline) {
-            if (trusdxConnected) {
-                return true
-            }
-            if (!trusdxInitInProgress) {
-                return false
-            }
-            SystemClock.sleep(25)
-        }
-        return trusdxConnected
     }
 
     private fun applyTxBoostSetting() {
@@ -1247,6 +1305,9 @@ class JS8EngineService : Service() {
 
     private fun stopEngine() {
         try {
+            engineStartGeneration++
+            engineStartInProgress = false
+            trusdxInitInProgress = false
             scoSilenceCheckToken++
             scoStartToken++
             audioHelper?.stopCapture()
@@ -3500,7 +3561,6 @@ class JS8EngineService : Service() {
         private const val TRUSDX_RX_WATCHDOG_INTERVAL_MS = 1200L
         private const val TRUSDX_RX_STALL_REARM_NS = 2_000_000_000L
         private const val TRUSDX_RX_REARM_COOLDOWN_NS = 2_500_000_000L
-        private const val TRUSDX_STARTUP_WAIT_MS = 6000L
         private const val TRUSDX_RX_KEEPALIVE_INTERVAL_MS = 2000L
         private const val TX_MONITOR_INTERVAL_MS = 250L
         private const val SCO_START_WAIT_INTERVAL_MS = 200L
