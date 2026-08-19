@@ -238,6 +238,19 @@ class JS8Engine private constructor(
     }
 
     /**
+     * Set the clock drift offset (ms) applied to all cycle timing. Positive
+     * means the engine's clock runs ahead of the system clock.
+     */
+    fun setTimeDriftMs(driftMs: Long) {
+        withNativeHandle { nativeSetTimeDriftMs(it, driftMs) }
+    }
+
+    /** Current clock drift offset in milliseconds. */
+    fun timeDriftMs(): Long {
+        return withNativeHandleOr(0L) { nativeGetTimeDriftMs(it) }
+    }
+
+    /**
      * Close and destroy the engine. After calling this, the engine cannot be used.
      */
     override fun close() {
@@ -328,6 +341,8 @@ class JS8Engine private constructor(
     private external fun nativeIsTransmittingAudio(handle: Long): Boolean
     private external fun nativeTxMillisecondsUntilAudio(handle: Long): Int
     private external fun nativeSetTxReady(handle: Long, ready: Boolean)
+    private external fun nativeSetTimeDriftMs(handle: Long, driftMs: Long)
+    private external fun nativeGetTimeDriftMs(handle: Long): Long
 
     /**
      * Callback interface for engine events.
@@ -345,7 +360,8 @@ class JS8Engine private constructor(
             text: String,
             type: Int,
             quality: Float,
-            mode: Int
+            mode: Int,
+            driftMs: Int
         )
 
         /**

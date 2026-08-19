@@ -237,6 +237,25 @@ Java_com_js8call_core_JS8Engine_nativeSetTxBoostEnabled(
   js8_engine_set_tx_boost_enabled(engine, static_cast<bool>(enabled));
 }
 
+JNIEXPORT void JNICALL
+Java_com_js8call_core_JS8Engine_nativeSetTimeDriftMs(
+    JNIEnv* /* env */,
+    jobject /* thiz */,
+    jlong handle,
+    jlong drift_ms) {
+  JS8Engine_Native* engine = reinterpret_cast<JS8Engine_Native*>(handle);
+  js8_engine_set_time_drift_ms(engine, static_cast<long long>(drift_ms));
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_js8call_core_JS8Engine_nativeGetTimeDriftMs(
+    JNIEnv* /* env */,
+    jobject /* thiz */,
+    jlong handle) {
+  JS8Engine_Native* engine = reinterpret_cast<JS8Engine_Native*>(handle);
+  return static_cast<jlong>(js8_engine_get_time_drift_ms(engine));
+}
+
 JNIEXPORT jboolean JNICALL
 Java_com_js8call_core_JS8Engine_nativeTransmitMessage(
     JNIEnv* env,

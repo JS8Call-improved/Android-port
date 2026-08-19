@@ -106,7 +106,8 @@ class DecodeFragment : Fragment() {
     private fun showDecodeOptions(decode: com.js8call.example.model.DecodedMessage) {
         val options = arrayOf(
             getString(R.string.decodes_copy),
-            getString(R.string.decodes_reply)
+            getString(R.string.decodes_reply),
+            getString(R.string.decodes_sync_time, decode.driftMs)
         )
 
         MaterialAlertDialogBuilder(requireContext())
@@ -115,9 +116,23 @@ class DecodeFragment : Fragment() {
                 when (which) {
                     0 -> copyToClipboard(decode.text)
                     1 -> replyToMessage(decode)
+                    2 -> syncTimeToSignal(decode)
                 }
             }
             .show()
+    }
+
+    private fun syncTimeToSignal(decode: com.js8call.example.model.DecodedMessage) {
+        val intent = android.content.Intent(requireContext(), com.js8call.example.service.JS8EngineService::class.java).apply {
+            action = com.js8call.example.service.JS8EngineService.ACTION_SET_TIME_DRIFT
+            putExtra(com.js8call.example.service.JS8EngineService.EXTRA_TIME_DRIFT_MS, decode.driftMs.toLong())
+        }
+        requireContext().startService(intent)
+        android.widget.Toast.makeText(
+            requireContext(),
+            getString(R.string.decodes_sync_time_applied, decode.driftMs),
+            android.widget.Toast.LENGTH_SHORT
+        ).show()
     }
 
     private fun copyToClipboard(text: String) {

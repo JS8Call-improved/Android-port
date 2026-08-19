@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
@@ -50,6 +51,9 @@ struct Decoded {
   int type = 0;
   float quality = 0.0f;
   int mode = 0;
+  // Suggested total clock drift (ms) that would center this signal's cycle,
+  // computed from the decode window position and xdt; see set_time_drift_ms().
+  int drift_ms = 0;
 };
 
 struct DecodeFinished {
@@ -129,6 +133,12 @@ public:
   virtual int tx_milliseconds_until_audio() const = 0;
   virtual void set_tx_ready(bool ready) = 0;
   virtual void set_tx_boost_enabled(bool enabled) = 0;
+
+  // Clock drift offset applied to all cycle timing (RX decode windows, TX start,
+  // decode UTC stamps). Positive means the engine's clock runs ahead of the
+  // system clock. Takes effect at the next captured audio buffer.
+  virtual void set_time_drift_ms(std::int64_t drift_ms) = 0;
+  virtual std::int64_t time_drift_ms() const = 0;
 };
 
 std::unique_ptr<Js8Engine> make_engine(EngineConfig const& config,

@@ -329,6 +329,18 @@ class JS8EngineService : Service() {
                 val txIntent = Intent(intent)
                 txHandler.post { handleTransmitMessage(txIntent) }
             }
+            ACTION_TIME_SYNC_ONCE -> {
+                Log.i(TAG, "One-shot time sync armed; waiting for next decode")
+                timeSyncOncePending = true
+            }
+            ACTION_SET_TIME_DRIFT -> {
+                val driftMs = intent.getLongExtra(EXTRA_TIME_DRIFT_MS, 0L)
+                Log.i(TAG, "Setting time drift to $driftMs ms")
+                timeSyncOncePending = false
+                driftMmaMs = driftMs
+                driftMmaN = if (driftMs == 0L) 0 else 1
+                applyTimeDrift(driftMs)
+            }
         }
         return START_STICKY
     }
@@ -450,15 +462,16 @@ class JS8EngineService : Service() {
             val callbackHandler = object : JS8Engine.CallbackHandler {
                 override fun onDecoded(
                     utc: Int, snr: Int, dt: Float, freq: Float,
-                    text: String, type: Int, quality: Float, mode: Int
+                    text: String, type: Int, quality: Float, mode: Int, driftMs: Int
                 ) {
                     Log.d(TAG, "Decoded: $text (SNR: $snr dB)")
                     logRxDecode(text, snr, freq, mode)
 
                     // Broadcast on main thread
                     mainHandler.post {
+                        maybeApplyTimeSync(driftMs)
                         updateHeardCallsign(text)
-                        broadcastDecode(utc, snr, dt, freq, text, type, quality, mode)
+                        broadcastDecode(utc, snr, dt, freq, text, type, quality, mode, driftMs)
                         handleRelayFrame(text, snr, mode, freq, type)
                         maybeHandleIncomingMessage(text, snr, freq, type)
                         maybeHandleAutoReply(text, snr, mode)
@@ -532,6 +545,7 @@ class JS8EngineService : Service() {
                 spectrumEventCount = 0
 
                 applyTxBoostSetting()
+                applyTimeDriftSetting()
 
                 if (rigControlMode == "trusdx_serial") {
                     Log.i(TAG, "TruSDX mode active: skipping microphone capture")
@@ -1432,7 +1446,7 @@ class JS8EngineService : Service() {
 
     private fun broadcastDecode(
         utc: Int, snr: Int, dt: Float, freq: Float,
-        text: String, type: Int, quality: Float, mode: Int
+        text: String, type: Int, quality: Float, mode: Int, driftMs: Int
     ) {
         val intent = Intent(ACTION_DECODE).apply {
             putExtra(EXTRA_UTC, utc)
@@ -1443,6 +1457,69 @@ class JS8EngineService : Service() {
             putExtra(EXTRA_TYPE, type)
             putExtra(EXTRA_QUALITY, quality)
             putExtra(EXTRA_MODE, mode)
+            putExtra(EXTRA_DRIFT_MS, driftMs)
+        }
+        LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
+    }
+
+    // --- Time sync -----------------------------------------------------------
+    //
+    // Each decode carries the engine's suggested total drift (ms). In one-shot
+    // mode the first suggestion is applied directly; in continuous auto-sync a
+    // modified moving average smooths suggestions (desktop behavior, capped at
+    // 60 observations) before being applied.
+
+    private var timeSyncOncePending = false
+    private var driftMmaMs = 0L
+    private var driftMmaN = 0
+
+    private fun maybeApplyTimeSync(suggestedDriftMs: Int) {
+        val prefs = PreferenceManager.getDefaultSharedPreferences(this)
+        val autoSync = prefs.getBoolean(PREF_TIME_SYNC_AUTO, false)
+        if (!autoSync && !timeSyncOncePending) return
+
+        if (timeSyncOncePending) {
+            timeSyncOncePending = false
+            driftMmaMs = suggestedDriftMs.toLong()
+            driftMmaN = 1
+            applyTimeDrift(suggestedDriftMs.toLong())
+            return
+        }
+
+        if (driftMmaN == 0) {
+            driftMmaN = 1
+            driftMmaMs = engine?.timeDriftMs() ?: 0L
+        }
+        driftMmaMs = (((driftMmaN - 1) * driftMmaMs) + suggestedDriftMs) / driftMmaN
+        if (driftMmaN < 60) driftMmaN++
+        applyTimeDrift(driftMmaMs)
+    }
+
+    private fun applyTimeDrift(driftMs: Long) {
+        engine?.setTimeDriftMs(driftMs)
+        PreferenceManager.getDefaultSharedPreferences(this)
+            .edit()
+            .putLong(PREF_TIME_DRIFT_MS, driftMs)
+            .apply()
+        Log.i(TAG, "Time drift applied: $driftMs ms")
+        broadcastTimeDrift(driftMs)
+        // TX slots are computed against the drifted clock now; reschedule.
+        scheduleHeartbeat(false)
+    }
+
+    private fun applyTimeDriftSetting() {
+        val prefs = PreferenceManager.getDefaultSharedPreferences(this)
+        val driftMs = prefs.getLong(PREF_TIME_DRIFT_MS, 0L)
+        if (driftMs != 0L) {
+            engine?.setTimeDriftMs(driftMs)
+            Log.i(TAG, "Time drift restored: $driftMs ms")
+        }
+        broadcastTimeDrift(driftMs)
+    }
+
+    private fun broadcastTimeDrift(driftMs: Long) {
+        val intent = Intent(ACTION_TIME_DRIFT).apply {
+            putExtra(EXTRA_TIME_DRIFT_MS, driftMs)
         }
         LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
     }
@@ -2123,9 +2200,11 @@ class JS8EngineService : Service() {
             return
         }
 
-        val now = System.currentTimeMillis()
+        // Work in the drifted timeline so heartbeat slots line up with the
+        // engine's (possibly drift-adjusted) cycle boundaries.
+        val now = System.currentTimeMillis() + (engine?.timeDriftMs() ?: 0L)
         val frameDuration = getFrameDurationMs()
-        
+
         // Base delay
         var delay = if (first) {
             // If first run, schedule for the next available slot (plus a small random wait to avoid instant blast?)
@@ -3741,6 +3820,9 @@ class JS8EngineService : Service() {
         const val ACTION_RADIO_FREQUENCY = "com.js8call.example.ACTION_RADIO_FREQUENCY"
         const val ACTION_MESSAGE_RECEIVED = "com.js8call.example.ACTION_MESSAGE_RECEIVED"
         const val ACTION_QUEUE_TX = "com.js8call.example.ACTION_QUEUE_TX"
+        const val ACTION_TIME_SYNC_ONCE = "com.js8call.example.ACTION_TIME_SYNC_ONCE"
+        const val ACTION_SET_TIME_DRIFT = "com.js8call.example.ACTION_SET_TIME_DRIFT"
+        const val ACTION_TIME_DRIFT = "com.js8call.example.ACTION_TIME_DRIFT"
 
         // Engine states
         const val STATE_STOPPED = "stopped"
@@ -3758,6 +3840,8 @@ class JS8EngineService : Service() {
         const val EXTRA_TYPE = "type"
         const val EXTRA_QUALITY = "quality"
         const val EXTRA_MODE = "mode"
+        const val EXTRA_DRIFT_MS = "drift_ms"
+        const val EXTRA_TIME_DRIFT_MS = "time_drift_ms"
         const val EXTRA_BINS = "bins"
         const val EXTRA_BIN_HZ = "bin_hz"
         const val EXTRA_POWER_DB = "power_db"
@@ -3789,6 +3873,8 @@ class JS8EngineService : Service() {
         const val EXTRA_QUEUE_TX_PRIORITY = "queue_tx_priority"
         const val PREF_TRANSMIT_MODE = "transmit_mode"
         const val PREF_HEARTBEAT_INTERVAL = "heartbeat_interval"
+        const val PREF_TIME_SYNC_AUTO = "time_sync_auto"
+        const val PREF_TIME_DRIFT_MS = "time_drift_ms"
         const val PREF_LOG_MESSAGES = "log_messages_to_file"
         const val RIG_MODE_USB = "USB"
         const val RIG_MODE_PKTUSB = "PKTUSB"

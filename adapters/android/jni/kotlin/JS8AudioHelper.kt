@@ -516,10 +516,10 @@ class UIThreadCallbackAdapter(
 
     override fun onDecoded(
         utc: Int, snr: Int, dt: Float, freq: Float,
-        text: String, type: Int, quality: Float, mode: Int
+        text: String, type: Int, quality: Float, mode: Int, driftMs: Int
     ) {
         handler.post {
-            delegate.onDecoded(utc, snr, dt, freq, text, type, quality, mode)
+            delegate.onDecoded(utc, snr, dt, freq, text, type, quality, mode, driftMs)
         }
     }
 

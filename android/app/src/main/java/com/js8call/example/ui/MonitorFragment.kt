@@ -38,6 +38,9 @@ class MonitorFragment : Fragment() {
     private lateinit var snrValue: TextView
     private lateinit var powerValue: TextView
     private lateinit var txOffsetValue: TextView
+    private lateinit var timeDriftValue: TextView
+    private lateinit var timeSyncButton: Button
+    private lateinit var timeDriftResetButton: Button
     private lateinit var audioDeviceSpinner: Spinner
     private lateinit var frequencySpinner: Spinner
     private lateinit var startStopButton: Button
@@ -74,6 +77,9 @@ class MonitorFragment : Fragment() {
         snrValue = view.findViewById(R.id.snr_value)
         powerValue = view.findViewById(R.id.power_value)
         txOffsetValue = view.findViewById(R.id.tx_offset_value)
+        timeDriftValue = view.findViewById(R.id.time_drift_value)
+        timeSyncButton = view.findViewById(R.id.time_sync_button)
+        timeDriftResetButton = view.findViewById(R.id.time_drift_reset_button)
         monitorVersionText = view.findViewById(R.id.monitor_version)
         audioDeviceSpinner = view.findViewById(R.id.audio_device_spinner)
         frequencySpinner = view.findViewById(R.id.frequency_spinner)
@@ -116,6 +122,23 @@ class MonitorFragment : Fragment() {
             toggleMonitoring()
         }
 
+        // One-shot time sync: apply the drift suggested by the next decode.
+        timeSyncButton.setOnClickListener {
+            val intent = Intent(requireContext(), JS8EngineService::class.java).apply {
+                action = JS8EngineService.ACTION_TIME_SYNC_ONCE
+            }
+            requireContext().startService(intent)
+            Snackbar.make(requireView(), getString(R.string.monitor_time_sync_armed), Snackbar.LENGTH_SHORT).show()
+        }
+
+        timeDriftResetButton.setOnClickListener {
+            val intent = Intent(requireContext(), JS8EngineService::class.java).apply {
+                action = JS8EngineService.ACTION_SET_TIME_DRIFT
+                putExtra(JS8EngineService.EXTRA_TIME_DRIFT_MS, 0L)
+            }
+            requireContext().startService(intent)
+        }
+
     }
 
     override fun onPause() {
@@ -154,6 +177,13 @@ class MonitorFragment : Fragment() {
             // Update TX offset
             txOffsetValue.text = "${status.txOffsetHz.toInt()} Hz"
             waterfallView.txOffsetHz = status.txOffsetHz
+
+            // Update time drift
+            timeDriftValue.text = if (status.timeDriftMs != 0L) {
+                String.format("%+d ms", status.timeDriftMs)
+            } else {
+                "0 ms"
+            }
 
             // Show error if present
             status.errorMessage?.let { error ->

@@ -21,6 +21,7 @@ enum class EngineState {
     val frequency: Long = 14078000, // Default to 20m JS8 frequency
     val audioDevice: String = "Unknown",
     val txOffsetHz: Float = 1500f, // Default TX offset
+    val timeDriftMs: Long = 0L,
     val errorMessage: String? = null
 ) {
     val isRunning: Boolean

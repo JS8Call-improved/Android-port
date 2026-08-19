@@ -21,6 +21,9 @@ public:
              bool tuning);
 
   void stop();
+  // Offset added to the wall clock when aligning TX start to the cycle
+  // boundary; mirrors the engine's time drift.
+  void set_clock_offset_ms(std::int64_t offset_ms) { clock_offset_ms_.store(offset_ms); }
   bool is_idle() const { return state_.load() == State::Idle; }
   bool is_active() const { return state_.load() == State::Active; }
   int milliseconds_until_active() const;
@@ -40,6 +43,7 @@ private:
   double dphi_ = 0.0;
   double amp_ = 1.0;
   std::atomic<std::int64_t> silent_frames_{0};
+  std::atomic<std::int64_t> clock_offset_ms_{0};
   std::uint64_t ic_ = 0;
   std::uint64_t isym0_ = 0;
 };

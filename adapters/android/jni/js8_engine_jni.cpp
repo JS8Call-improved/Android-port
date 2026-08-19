@@ -44,6 +44,8 @@ JNIEXPORT jboolean JNICALL Java_com_js8call_core_JS8Engine_nativeIsTransmitting(
 JNIEXPORT jboolean JNICALL Java_com_js8call_core_JS8Engine_nativeIsTransmittingAudio(JNIEnv*, jobject, jlong);
 JNIEXPORT jint JNICALL Java_com_js8call_core_JS8Engine_nativeTxMillisecondsUntilAudio(JNIEnv*, jobject, jlong);
 JNIEXPORT void JNICALL Java_com_js8call_core_JS8Engine_nativeSetTxReady(JNIEnv*, jobject, jlong, jboolean);
+JNIEXPORT void JNICALL Java_com_js8call_core_JS8Engine_nativeSetTimeDriftMs(JNIEnv*, jobject, jlong, jlong);
+JNIEXPORT jlong JNICALL Java_com_js8call_core_JS8Engine_nativeGetTimeDriftMs(JNIEnv*, jobject, jlong);
 }
 
 // Global JavaVM reference for callbacks
@@ -400,12 +402,12 @@ static void event_callback(JS8Engine_Native* native, js8core::events::Variant co
     auto rendered = render_decoded_text(*decoded);
 
     auto emit_decoded = [&](js8core::events::Decoded const& d, std::string const& text_str) {
-      jmethodID method = env->GetMethodID(handler_class, "onDecoded", "(IIFFLjava/lang/String;IFI)V");
+      jmethodID method = env->GetMethodID(handler_class, "onDecoded", "(IIFFLjava/lang/String;IFII)V");
       if (method) {
         jstring text = env->NewStringUTF(text_str.c_str());
         env->CallVoidMethod(native->callback_handler, method,
                            d.utc, d.snr, d.xdt, d.frequency,
-                           text, d.type, d.quality, d.mode);
+                           text, d.type, d.quality, d.mode, d.drift_ms);
         env->DeleteLocalRef(text);
       }
     };
@@ -892,6 +894,16 @@ void js8_engine_set_tx_ready(JS8Engine_Native* engine, bool ready) {
   engine->engine->set_tx_ready(ready);
 }
 
+void js8_engine_set_time_drift_ms(JS8Engine_Native* engine, long long drift_ms) {
+  if (!engine || !engine->engine) return;
+  engine->engine->set_time_drift_ms(drift_ms);
+}
+
+long long js8_engine_get_time_drift_ms(JS8Engine_Native* engine) {
+  if (!engine || !engine->engine) return 0;
+  return engine->engine->time_drift_ms();
+}
+
 int js8_engine_is_running(JS8Engine_Native* engine) {
   if (!engine || !engine->engine) return 0;
   // TODO: Add is_running() method to engine interface
@@ -936,6 +948,10 @@ int js8_register_natives(JavaVM* vm, JNIEnv* env) {
      (void*)Java_com_js8call_core_JS8Engine_nativeTxMillisecondsUntilAudio},
     {"nativeSetTxReady", "(JZ)V",
      (void*)Java_com_js8call_core_JS8Engine_nativeSetTxReady},
+    {"nativeSetTimeDriftMs", "(JJ)V",
+     (void*)Java_com_js8call_core_JS8Engine_nativeSetTimeDriftMs},
+    {"nativeGetTimeDriftMs", "(J)J",
+     (void*)Java_com_js8call_core_JS8Engine_nativeGetTimeDriftMs},
     {"nativeIsRunning", "(J)Z", (void*)Java_com_js8call_core_JS8Engine_nativeIsRunning}
   };
 

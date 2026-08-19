@@ -99,7 +99,8 @@ class JS8EngineLifecycleTest {
                     text: String,
                     type: Int,
                     quality: Float,
-                    mode: Int
+                    mode: Int,
+                    driftMs: Int
                 ) = Unit
 
                 override fun onSpectrum(
@@ -157,7 +158,8 @@ class JS8EngineLifecycleTest {
             text: String,
             type: Int,
             quality: Float,
-            mode: Int
+            mode: Int,
+            driftMs: Int
         ) = Unit
 
         override fun onSpectrum(
