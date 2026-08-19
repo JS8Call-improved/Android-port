@@ -47,7 +47,8 @@ class MainActivity : AppCompatActivity() {
                     val type = intent.getIntExtra(JS8EngineService.EXTRA_TYPE, 0)
                     val quality = intent.getFloatExtra(JS8EngineService.EXTRA_QUALITY, 0f)
                     val mode = intent.getIntExtra(JS8EngineService.EXTRA_MODE, 0)
-                    decodeViewModel.addDecode(utc, snr, dt, freq, text, type, quality, mode)
+                    val driftMs = intent.getIntExtra(JS8EngineService.EXTRA_DRIFT_MS, 0)
+                    decodeViewModel.addDecode(utc, snr, dt, freq, text, type, quality, mode, driftMs)
                     monitorViewModel.updateSnr(snr)
                 }
                 JS8EngineService.ACTION_MESSAGE_RECEIVED -> {
@@ -142,6 +143,10 @@ class MainActivity : AppCompatActivity() {
                         monitorViewModel.updateFrequency(frequencyHz)
                     }
                 }
+                JS8EngineService.ACTION_TIME_DRIFT -> {
+                    val driftMs = intent.getLongExtra(JS8EngineService.EXTRA_TIME_DRIFT_MS, 0L)
+                    monitorViewModel.updateTimeDrift(driftMs)
+                }
             }
         }
     }
@@ -222,6 +227,7 @@ class MainActivity : AppCompatActivity() {
             addAction(JS8EngineService.ACTION_AUDIO_DEVICE)
             addAction(JS8EngineService.ACTION_ERROR)
             addAction(JS8EngineService.ACTION_RADIO_FREQUENCY)
+            addAction(JS8EngineService.ACTION_TIME_DRIFT)
         }
         LocalBroadcastManager.getInstance(this)
             .registerReceiver(monitorReceiver, monitorFilter)

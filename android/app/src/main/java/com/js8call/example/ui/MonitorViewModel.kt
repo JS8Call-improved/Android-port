@@ -104,6 +104,13 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     }
 
     /**
+     * Update the applied time drift.
+     */
+    fun updateTimeDrift(driftMs: Long) {
+        _status.value = _status.value?.copy(timeDriftMs = driftMs)
+    }
+
+    /**
      * Set the TX offset frequency in Hz.
      */
     fun setTxOffset(offsetHz: Float) {

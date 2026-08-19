@@ -262,4 +262,18 @@
 
     </PreferenceCategory>
 
+    <!-- Timing Category -->
+    <PreferenceCategory
+        app:title="@string/settings_category_timing"
+        app:iconSpaceReserved="false">
+
+        <SwitchPreferenceCompat
+            app:key="time_sync_auto"
+            app:title="@string/settings_time_sync_auto"
+            app:summary="@string/settings_time_sync_auto_summary"
+            app:defaultValue="false"
+            app:iconSpaceReserved="false" />
+
+    </PreferenceCategory>
+
 </PreferenceScreen>

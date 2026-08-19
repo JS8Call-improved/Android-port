@@ -39,8 +39,9 @@ void Modulator::start(std::array<int, protocol::kJs8NumSymbols> const& tones,
 
   if (!tuning_) {
     auto now = std::chrono::system_clock::now();
-    auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
-    auto period_offset = static_cast<std::int64_t>(now_ms % period_ms);
+    auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count() +
+                  clock_offset_ms_.load();
+    auto period_offset = static_cast<std::int64_t>(((now_ms % period_ms) + period_ms) % period_ms);
     auto tx_delay_ms = static_cast<std::int64_t>(tx_delay_s * 1000.0);
     auto start_time_ms = static_cast<std::int64_t>(start_delay_ms) + tx_delay_ms;
     if (start_time_ms < 0) start_time_ms = 0;

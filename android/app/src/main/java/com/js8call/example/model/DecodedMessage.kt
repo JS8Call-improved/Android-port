@@ -14,6 +14,8 @@ data class DecodedMessage(
     val type: Int,
     val quality: Float,
     val mode: Int,
+    // Suggested total drift (ms); used by "sync clock to this signal".
+    val driftMs: Int = 0,
     val timestamp: Long = System.currentTimeMillis()
 ) {
     /**

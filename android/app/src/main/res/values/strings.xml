@@ -22,6 +22,10 @@
     <string name="monitor_snr">SNR</string>
     <string name="monitor_power">Power</string>
     <string name="monitor_tx_offset">TX Offset</string>
+    <string name="monitor_time_drift">Time Drift</string>
+    <string name="monitor_time_sync">Sync</string>
+    <string name="monitor_time_drift_reset">Reset</string>
+    <string name="monitor_time_sync_armed">Time sync armed — will apply on next decode</string>
     <string name="monitor_audio_device">Audio Device</string>
     <string name="monitor_radio_frequency">Radio Frequency</string>
 
@@ -31,6 +35,8 @@
     <string name="decodes_clear">Clear</string>
     <string name="decodes_copy">Copy</string>
     <string name="decodes_reply">Reply</string>
+    <string name="decodes_sync_time">Sync clock to this signal (%+d ms)</string>
+    <string name="decodes_sync_time_applied">Time drift set to %+d ms</string>
     <string name="decodes_filter">Filter</string>
     <string name="decode_time">Time</string>
     <string name="decode_snr">SNR</string>
@@ -144,6 +150,9 @@
     <string name="settings_relay_summary">Automatically relay messages using CALL&gt;</string>
 
     <string name="settings_category_heartbeat">Heartbeat</string>
+    <string name="settings_category_timing">Timing</string>
+    <string name="settings_time_sync_auto">Auto time sync</string>
+    <string name="settings_time_sync_auto_summary">Continuously adjust the app\'s clock drift from received signals. Useful off-grid where the device clock cannot sync.</string>
     <string name="settings_heartbeat_interval">Heartbeat Interval</string>
     <string name="settings_heartbeat_interval_summary">Time between automatic heartbeats</string>
 

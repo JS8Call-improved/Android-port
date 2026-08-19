@@ -69,7 +69,8 @@ class JS8EngineTxTimingTest {
             text: String,
             type: Int,
             quality: Float,
-            mode: Int
+            mode: Int,
+            driftMs: Int
         ) = Unit
 
         override fun onSpectrum(

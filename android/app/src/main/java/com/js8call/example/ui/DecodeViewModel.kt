@@ -129,6 +129,7 @@ class DecodeViewModel(application: Application) : AndroidViewModel(application) 
                         type = obj.optInt("type"),
                         quality = obj.optDouble("quality").toFloat(),
                         mode = obj.optInt("mode"),
+                        driftMs = obj.optInt("driftMs"),
                         timestamp = obj.optLong("timestamp", System.currentTimeMillis())
                     )
                 )
@@ -155,9 +156,10 @@ class DecodeViewModel(application: Application) : AndroidViewModel(application) 
         text: String,
         type: Int,
         quality: Float,
-        mode: Int
+        mode: Int,
+        driftMs: Int = 0
     ) {
-        val message = DecodedMessage(utc, snr, dt, freq, text, type, quality, mode)
+        val message = DecodedMessage(utc, snr, dt, freq, text, type, quality, mode, driftMs)
 
         // Clean up stale buffers before processing new message
         cleanupStaleBuffers()
@@ -263,6 +265,7 @@ class DecodeViewModel(application: Application) : AndroidViewModel(application) 
             type = lastFrame.type,
             quality = lastFrame.quality,
             mode = lastFrame.mode,
+            driftMs = lastFrame.driftMs,
             timestamp = lastFrame.timestamp
         )
     }
@@ -398,6 +401,7 @@ class DecodeViewModel(application: Application) : AndroidViewModel(application) 
             obj.put("type", decode.type)
             obj.put("quality", decode.quality)
             obj.put("mode", decode.mode)
+            obj.put("driftMs", decode.driftMs)
             obj.put("timestamp", decode.timestamp)
             arr.put(obj)
         }

@@ -167,7 +167,8 @@ class MainActivity : AppCompatActivity() {
             text: String,
             type: Int,
             quality: Float,
-            mode: Int
+            mode: Int,
+            driftMs: Int
         ) {
             // Update UI with decoded message
             val decoded = String.format(

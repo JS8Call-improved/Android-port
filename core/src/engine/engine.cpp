@@ -68,25 +68,7 @@ public:
 
     // Align the ring buffer position to wall clock so decode windows line up with
     // the desktop timing (cycles relative to UTC within the current minute).
-    {
-      auto const sample_rate = config_.sample_rate_hz ? config_.sample_rate_hz : kJs8RxSampleRate;
-      using clock = std::chrono::system_clock;
-      auto now = clock::now();
-      auto ms_since_epoch = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch());
-      // JS8 RX buffer spans 60 seconds; use milliseconds into the current minute.
-      auto ms_in_minute = ms_since_epoch.count() % (kJs8NtMax * 1000);
-      int aligned = static_cast<int>((ms_in_minute * sample_rate) / 1000);
-      decode_state_.params.kin = aligned;
-      total_samples_ = aligned;
-      k0_ = aligned;
-      if (callbacks_.on_log) {
-        char log_msg[256];
-        snprintf(log_msg, sizeof(log_msg),
-                 "Ring buffer aligned to UTC minute: ms_in_minute=%lld, offset_samples=%d, sample_rate=%d",
-                 static_cast<long long>(ms_in_minute), aligned, sample_rate);
-        callbacks_.on_log(LogLevel::Info, log_msg);
-      }
-    }
+    align_ring_to_clock();
 
     if (config_.submodes == 0) {
       int mask = 0;
@@ -157,6 +139,11 @@ public:
     if (config_.sample_rate_hz && buffer.format.sample_rate != config_.sample_rate_hz) {
       if (callbacks_.on_error) callbacks_.on_error("Unexpected sample rate");
       return false;
+    }
+
+    // Apply a pending drift change here, on the thread that owns the ring state.
+    if (drift_realign_pending_.exchange(false)) {
+      align_ring_to_clock();
     }
 
     auto bytes_per_sample = static_cast<std::size_t>(sizeof(std::int16_t) * buffer.format.channels);
@@ -361,6 +348,22 @@ public:
     config_.tx_output_gain_boost_enabled = enabled;
   }
 
+  void set_time_drift_ms(std::int64_t drift_ms) override {
+    if (time_drift_ms_.exchange(drift_ms) == drift_ms) return;
+    tx_modulator_.set_clock_offset_ms(drift_ms);
+    drift_realign_pending_.store(true);
+    if (callbacks_.on_log) {
+      char log_msg[128];
+      snprintf(log_msg, sizeof(log_msg),
+               "Time drift set to %lld ms", static_cast<long long>(drift_ms));
+      callbacks_.on_log(LogLevel::Info, log_msg);
+    }
+  }
+
+  std::int64_t time_drift_ms() const override {
+    return time_drift_ms_.load();
+  }
+
  private:
     struct SubmodeSchedule {
       protocol::SubmodeId id;
@@ -386,10 +389,42 @@ public:
       bool tuning = false;
     };
 
+    std::chrono::system_clock::time_point drifted_now() const {
+      return std::chrono::system_clock::now() +
+             std::chrono::milliseconds(time_drift_ms_.load());
+    }
+
+    // Runs at construction and, after a drift change, on the audio thread (see submit_capture).
+    void align_ring_to_clock() {
+      auto const sample_rate = config_.sample_rate_hz ? config_.sample_rate_hz : kJs8RxSampleRate;
+      ring_drift_ms_ = time_drift_ms_.load();
+      auto ms_since_epoch = std::chrono::duration_cast<std::chrono::milliseconds>(
+          drifted_now().time_since_epoch());
+      // JS8 RX buffer spans 60 seconds; use milliseconds into the current minute.
+      auto ms_in_minute = ms_since_epoch.count() % (kJs8NtMax * 1000);
+      int aligned = static_cast<int>((ms_in_minute * sample_rate) / 1000);
+      decode_state_.params.kin = aligned;
+      total_samples_ = aligned;
+      k0_ = aligned;
+      // Force every schedule to re-snap its decode window to the new phase.
+      for (auto& sch : schedules_) {
+        sch.current_decode_start = -1;
+        sch.next_decode_start = -1;
+      }
+      if (callbacks_.on_log) {
+        char log_msg[256];
+        snprintf(log_msg, sizeof(log_msg),
+                 "Ring buffer aligned to UTC minute: ms_in_minute=%lld, offset_samples=%d, sample_rate=%d, drift_ms=%lld",
+                 static_cast<long long>(ms_in_minute), aligned, sample_rate,
+                 static_cast<long long>(time_drift_ms_.load()));
+        callbacks_.on_log(LogLevel::Info, log_msg);
+      }
+    }
+
     void init_schedules() {
       // Get current UTC time to synchronize decode windows
       using clock = std::chrono::system_clock;
-      auto now = clock::now();
+      auto now = drifted_now();
       auto t = clock::to_time_t(now);
       std::tm utc_tm{};
 #if defined(_WIN32)
@@ -468,7 +503,7 @@ public:
 
     void populate_decode_metadata() {
       using clock = std::chrono::system_clock;
-      auto now = clock::now();
+      auto now = drifted_now();
       auto t = clock::to_time_t(now);
       std::tm utc_tm{};
 #if defined(_WIN32)
@@ -574,9 +609,8 @@ public:
       static int drift_log_counter = 0;
       if (++drift_log_counter % 200 == 0 && callbacks_.on_log) {
         auto const sample_rate = config_.sample_rate_hz ? config_.sample_rate_hz : kJs8RxSampleRate;
-        using clock = std::chrono::system_clock;
-        auto now = clock::now();
-        auto ms_since_epoch = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch());
+        auto ms_since_epoch = std::chrono::duration_cast<std::chrono::milliseconds>(
+            drifted_now().time_since_epoch());
         int ms_in_minute = static_cast<int>(ms_since_epoch.count() % (kJs8NtMax * 1000));
         int k_ms = static_cast<int>((static_cast<long long>(k) * 1000) / sample_rate);
         int delta_ms = ms_in_minute - k_ms;
@@ -682,6 +716,7 @@ public:
       DecodeState snapshot;
       snapshot.params = decode_state_.params;
       snapshot.samples = decode_state_.samples;
+      snapshot.drift_ms_at_capture = ring_drift_ms_;
       enqueue_decode(std::move(snapshot));
     }
 
@@ -957,6 +992,10 @@ public:
     std::vector<SubmodeSchedule> schedules_;
     int total_samples_{0};
     int k0_{0};  // Previous sample position for isDecodeReady logic
+    std::atomic<std::int64_t> time_drift_ms_{0};
+    std::atomic<bool> drift_realign_pending_{false};
+    // Written only on the audio thread; may lag time_drift_ms_ by one capture buffer.
+    std::int64_t ring_drift_ms_{0};
     bool running_{false};
     std::mutex tx_mutex_;
     std::deque<TxFrame> tx_queue_;
@@ -995,6 +1034,40 @@ public:
     };
     std::deque<SpectrumTask> spectrum_queue_;
     bool spectrum_stop_{false};
+
+    // Desktop auto-sync math (mainwindow.cpp, events::Decoded handler).
+    int compute_drift_estimate(DecodeState const& task, events::Decoded const& d) const {
+      auto sm = submode_from_varicode(d.mode);
+      if (!sm) return static_cast<int>(task.drift_ms_at_capture);
+
+      int kpos = 0;
+      switch (sm->id) {
+        case protocol::SubmodeId::A: kpos = task.params.kposA; break;
+        case protocol::SubmodeId::B: kpos = task.params.kposB; break;
+        case protocol::SubmodeId::C: kpos = task.params.kposC; break;
+        case protocol::SubmodeId::E: kpos = task.params.kposE; break;
+        case protocol::SubmodeId::I: kpos = task.params.kposI; break;
+      }
+
+      auto const sample_rate = config_.sample_rate_hz ? config_.sample_rate_hz : kJs8RxSampleRate;
+      int const period_ms = sm->tx_seconds * 1000;
+
+      float signal_time = static_cast<float>(kpos) / static_cast<float>(sample_rate);
+      signal_time -= static_cast<float>(sm->start_delay_ms) / 1000.0f;
+      signal_time += d.xdt;
+      if (signal_time < 0.0f) signal_time += 60.0f;
+      else if (signal_time > 60.0f) signal_time -= 60.0f;
+
+      int const signal_ms = static_cast<int>(1000.0f * signal_time);
+      int drift = (signal_ms / period_ms) * period_ms - signal_ms;
+      // Take the shorter way around the cycle (-14s becomes +1s, etc).
+      if (drift + period_ms < std::abs(drift)) drift += period_ms;
+      else if (std::abs(drift - period_ms) < drift) drift -= period_ms;
+
+      auto total = task.drift_ms_at_capture + drift;
+      total %= period_ms;
+      return static_cast<int>(total);
+    }
 
     void emit_event(events::Variant const& ev) {
       if (!callbacks_.on_event) return;
@@ -1080,7 +1153,13 @@ public:
           callbacks_.on_log(LogLevel::Info, log_msg);
         }
 
-        std::size_t decode_count = legacy_decode(task, [this](events::Variant const& ev) {
+        std::size_t decode_count = legacy_decode(task, [this, &task](events::Variant const& ev) {
+          if (auto const* d = std::get_if<events::Decoded>(&ev)) {
+            auto out = *d;
+            out.drift_ms = compute_drift_estimate(task, out);
+            emit_event(events::Variant{std::move(out)});
+            return;
+          }
           emit_event(ev);
         });
 
