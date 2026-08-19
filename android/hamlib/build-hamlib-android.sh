@@ -7,7 +7,9 @@ PATCH_DIR="${SCRIPT_DIR}/patches"
 
 HAMLIB_SRC="${HAMLIB_SRC:-${SCRIPT_DIR}/hamlib-src}"
 HAMLIB_BUILD="${HAMLIB_BUILD:-${SCRIPT_DIR}/hamlib-build}"
-HAMLIB_VERSION="${HAMLIB_VERSION:-master}"
+# Pinned: the Android patches no longer apply to current Hamlib master (see #45).
+# This is the last revision they apply to cleanly.
+HAMLIB_VERSION="${HAMLIB_VERSION:-1b2461aba99f0dde0531e1732c00e60aeee40657}"
 ANDROID_API="${ANDROID_API:-26}"
 ABIS="${ABIS:-arm64-v8a armeabi-v7a x86_64}"
 
