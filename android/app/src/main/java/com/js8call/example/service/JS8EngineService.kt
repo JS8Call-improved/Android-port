@@ -1462,13 +1462,6 @@ class JS8EngineService : Service() {
         LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
     }
 
-    // --- Time sync -----------------------------------------------------------
-    //
-    // Each decode carries the engine's suggested total drift (ms). In one-shot
-    // mode the first suggestion is applied directly; in continuous auto-sync a
-    // modified moving average smooths suggestions (desktop behavior, capped at
-    // 60 observations) before being applied.
-
     private var timeSyncOncePending = false
     private var driftMmaMs = 0L
     private var driftMmaN = 0
@@ -2200,8 +2193,7 @@ class JS8EngineService : Service() {
             return
         }
 
-        // Work in the drifted timeline so heartbeat slots line up with the
-        // engine's (possibly drift-adjusted) cycle boundaries.
+        // Drifted timeline, so slots match the engine's cycle boundaries.
         val now = System.currentTimeMillis() + (engine?.timeDriftMs() ?: 0L)
         val frameDuration = getFrameDurationMs()
 

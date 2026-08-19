@@ -237,10 +237,7 @@ class JS8Engine private constructor(
         withNativeHandle { nativeSetTxReady(it, ready) }
     }
 
-    /**
-     * Set the clock drift offset (ms) applied to all cycle timing. Positive
-     * means the engine's clock runs ahead of the system clock.
-     */
+    /** Positive = engine clock ahead of system clock. */
     fun setTimeDriftMs(driftMs: Long) {
         withNativeHandle { nativeSetTimeDriftMs(it, driftMs) }
     }

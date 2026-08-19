@@ -21,8 +21,6 @@ public:
              bool tuning);
 
   void stop();
-  // Offset added to the wall clock when aligning TX start to the cycle
-  // boundary; mirrors the engine's time drift.
   void set_clock_offset_ms(std::int64_t offset_ms) { clock_offset_ms_.store(offset_ms); }
   bool is_idle() const { return state_.load() == State::Idle; }
   bool is_active() const { return state_.load() == State::Active; }

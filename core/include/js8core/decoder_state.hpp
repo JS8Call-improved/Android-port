@@ -37,6 +37,8 @@ struct DecodeParams {
 struct DecodeState {
   std::vector<std::int16_t> samples;  // size kJs8NtMax * kJs8RxSampleRate
   DecodeParams params;
+  // Drift the ring alignment used at snapshot time; estimates must use this, not current drift.
+  std::int64_t drift_ms_at_capture = 0;
 };
 
 struct SpectrumState {

@@ -51,8 +51,7 @@ struct Decoded {
   int type = 0;
   float quality = 0.0f;
   int mode = 0;
-  // Suggested total clock drift (ms) that would center this signal's cycle,
-  // computed from the decode window position and xdt; see set_time_drift_ms().
+  // Suggested total drift (ms) to center this signal's cycle.
   int drift_ms = 0;
 };
 
@@ -134,9 +133,7 @@ public:
   virtual void set_tx_ready(bool ready) = 0;
   virtual void set_tx_boost_enabled(bool enabled) = 0;
 
-  // Clock drift offset applied to all cycle timing (RX decode windows, TX start,
-  // decode UTC stamps). Positive means the engine's clock runs ahead of the
-  // system clock. Takes effect at the next captured audio buffer.
+  // Positive = engine clock ahead of system clock; takes effect at the next captured buffer.
   virtual void set_time_drift_ms(std::int64_t drift_ms) = 0;
   virtual std::int64_t time_drift_ms() const = 0;
 };

@@ -122,7 +122,6 @@ class MonitorFragment : Fragment() {
             toggleMonitoring()
         }
 
-        // One-shot time sync: apply the drift suggested by the next decode.
         timeSyncButton.setOnClickListener {
             val intent = Intent(requireContext(), JS8EngineService::class.java).apply {
                 action = JS8EngineService.ACTION_TIME_SYNC_ONCE

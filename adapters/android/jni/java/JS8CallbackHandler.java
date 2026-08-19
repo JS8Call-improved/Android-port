@@ -20,8 +20,7 @@ public interface JS8CallbackHandler {
      * @param type Message type identifier
      * @param quality Decode quality metric (0-1)
      * @param mode Submode identifier
-     * @param driftMs Suggested total clock drift (ms) that would center this
-     *                signal's cycle; see JS8Engine.setTimeDriftMs()
+     * @param driftMs Suggested total drift (ms) to center this signal's cycle
      */
     void onDecoded(int utc, int snr, float dt, float freq,
                    String text, int type, float quality, int mode, int driftMs);

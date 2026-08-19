@@ -351,8 +351,6 @@ public:
   void set_time_drift_ms(std::int64_t drift_ms) override {
     if (time_drift_ms_.exchange(drift_ms) == drift_ms) return;
     tx_modulator_.set_clock_offset_ms(drift_ms);
-    // The ring buffer phase is owned by the audio thread; realign there just
-    // before the next buffer is written rather than racing it here.
     drift_realign_pending_.store(true);
     if (callbacks_.on_log) {
       char log_msg[128];
@@ -391,18 +389,15 @@ public:
       bool tuning = false;
     };
 
-    // Wall clock shifted by the current time drift; all cycle timing derives
-    // from this so RX windows, TX starts, and UTC stamps stay coherent.
     std::chrono::system_clock::time_point drifted_now() const {
       return std::chrono::system_clock::now() +
              std::chrono::milliseconds(time_drift_ms_.load());
     }
 
-    // (Re)aligns the ring buffer write position to the drifted clock. Runs on
-    // the constructor and, after a drift change, on the audio thread before
-    // the next buffer is written (see submit_capture).
+    // Runs at construction and, after a drift change, on the audio thread (see submit_capture).
     void align_ring_to_clock() {
       auto const sample_rate = config_.sample_rate_hz ? config_.sample_rate_hz : kJs8RxSampleRate;
+      ring_drift_ms_ = time_drift_ms_.load();
       auto ms_since_epoch = std::chrono::duration_cast<std::chrono::milliseconds>(
           drifted_now().time_since_epoch());
       // JS8 RX buffer spans 60 seconds; use milliseconds into the current minute.
@@ -721,6 +716,7 @@ public:
       DecodeState snapshot;
       snapshot.params = decode_state_.params;
       snapshot.samples = decode_state_.samples;
+      snapshot.drift_ms_at_capture = ring_drift_ms_;
       enqueue_decode(std::move(snapshot));
     }
 
@@ -998,6 +994,8 @@ public:
     int k0_{0};  // Previous sample position for isDecodeReady logic
     std::atomic<std::int64_t> time_drift_ms_{0};
     std::atomic<bool> drift_realign_pending_{false};
+    // Written only on the audio thread; may lag time_drift_ms_ by one capture buffer.
+    std::int64_t ring_drift_ms_{0};
     bool running_{false};
     std::mutex tx_mutex_;
     std::deque<TxFrame> tx_queue_;
@@ -1037,14 +1035,10 @@ public:
     std::deque<SpectrumTask> spectrum_queue_;
     bool spectrum_stop_{false};
 
-    // Port of the desktop auto-sync math (mainwindow.cpp, events::Decoded):
-    // place the decoded signal within the drifted minute using its decode
-    // window position and xdt, measure the distance to the nearest cycle
-    // boundary, and fold that into the current drift. The result is the total
-    // drift (ms) that would center this signal in its cycle.
+    // Desktop auto-sync math (mainwindow.cpp, events::Decoded handler).
     int compute_drift_estimate(DecodeState const& task, events::Decoded const& d) const {
       auto sm = submode_from_varicode(d.mode);
-      if (!sm) return static_cast<int>(time_drift_ms_.load());
+      if (!sm) return static_cast<int>(task.drift_ms_at_capture);
 
       int kpos = 0;
       switch (sm->id) {
@@ -1070,7 +1064,7 @@ public:
       if (drift + period_ms < std::abs(drift)) drift += period_ms;
       else if (std::abs(drift - period_ms) < drift) drift -= period_ms;
 
-      auto total = time_drift_ms_.load() + drift;
+      auto total = task.drift_ms_at_capture + drift;
       total %= period_ms;
       return static_cast<int>(total);
     }
