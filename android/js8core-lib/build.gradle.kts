@@ -30,9 +30,10 @@ android {
             }
         }
 
-        // Specify ABIs to build (arm64 only for faster debug builds)
+        // 64-bit plus 32-bit ARM: some Fire OS devices (e.g. Fire HD 10 2019)
+        // run a 32-bit userland and only accept armeabi-v7a
         ndk {
-            abiFilters += listOf("arm64-v8a")
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
         }
     }
 
