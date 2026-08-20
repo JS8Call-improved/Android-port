@@ -24,8 +24,10 @@ import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import androidx.preference.PreferenceManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.snackbar.Snackbar
+import com.google.android.material.textfield.MaterialAutoCompleteTextView
 import com.google.android.material.textfield.TextInputEditText
 import com.js8call.example.R
+import com.js8call.example.data.MessageRepository
 import com.js8call.example.model.TransmitState
 import com.js8call.example.service.JS8EngineService
 
@@ -35,9 +37,10 @@ import com.js8call.example.service.JS8EngineService
 class TransmitFragment : Fragment() {
 
     private lateinit var viewModel: TransmitViewModel
+    private lateinit var decodeViewModel: DecodeViewModel
 
     private lateinit var messageEditText: TextInputEditText
-    private lateinit var directedEditText: TextInputEditText
+    private lateinit var directedEditText: MaterialAutoCompleteTextView
     private lateinit var sendButton: Button
     private lateinit var queueRecyclerView: RecyclerView
     private lateinit var queueEmptyText: TextView
@@ -51,6 +54,8 @@ class TransmitFragment : Fragment() {
     private lateinit var queueAdapter: TransmitQueueAdapter
     private var currentTxOffset: Float = 1500f
     private var isApplyingDirected: Boolean = false
+    private var conversationCallsigns: List<String> = emptyList()
+    private var heardCallsigns: List<String> = emptyList()
 
     private val preferenceListener =
         SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
@@ -81,8 +86,9 @@ class TransmitFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        // Initialize ViewModel
+        // Initialize ViewModels
         viewModel = ViewModelProvider(requireActivity())[TransmitViewModel::class.java]
+        decodeViewModel = ViewModelProvider(requireActivity())[DecodeViewModel::class.java]
 
         // Find views
         messageEditText = view.findViewById(R.id.message_edit_text)
@@ -99,7 +105,6 @@ class TransmitFragment : Fragment() {
         queueRecyclerView.adapter = queueAdapter
 
         // Set up listeners
-        setupListeners()
         setupModeSelector()
         setupSpeedSelector()
 
@@ -108,6 +113,14 @@ class TransmitFragment : Fragment() {
 
         // Register broadcast receiver
         registerBroadcastReceiver()
+    }
+
+    override fun onViewStateRestored(savedInstanceState: Bundle?) {
+        super.onViewStateRestored(savedInstanceState)
+        // Text watchers must attach after view state restoration. Restoring the
+        // saved (stale) field text fires the watchers, which would push it into
+        // the ViewModel and wipe a directed callsign set from another screen.
+        setupListeners()
     }
 
     override fun onDestroyView() {
@@ -128,7 +141,7 @@ class TransmitFragment : Fragment() {
         val current = directedEditText.text?.toString().orEmpty()
         if (directed.isNotBlank() && directed != current) {
             isApplyingDirected = true
-            directedEditText.setText(directed)
+            directedEditText.setText(directed, false)
             directedEditText.setSelection(directed.length)
             isApplyingDirected = false
         }
@@ -268,10 +281,22 @@ class TransmitFragment : Fragment() {
             val current = directedEditText.text?.toString().orEmpty()
             if (callsign.isNotBlank() && callsign != current) {
                 isApplyingDirected = true
-                directedEditText.setText(callsign)
+                directedEditText.setText(callsign, false)
                 directedEditText.setSelection(callsign.length)
                 isApplyingDirected = false
             }
+        }
+
+        // Callsign suggestions: conversation history plus stations heard this session
+        MessageRepository.getInstance(requireContext()).getConversationCallsigns()
+            .observe(viewLifecycleOwner) { callsigns ->
+                conversationCallsigns = callsigns
+                updateCallsignSuggestions()
+            }
+
+        decodeViewModel.decodes.observe(viewLifecycleOwner) {
+            heardCallsigns = decodeViewModel.heardCallsigns()
+            updateCallsignSuggestions()
         }
 
         viewModel.txOffsetHz.observe(viewLifecycleOwner) { offset ->
@@ -297,6 +322,13 @@ class TransmitFragment : Fragment() {
                 queueEmptyText.visibility = View.GONE
             }
         }
+    }
+
+    private fun updateCallsignSuggestions() {
+        val merged = (conversationCallsigns + heardCallsigns).distinct()
+        directedEditText.setAdapter(
+            ArrayAdapter(requireContext(), android.R.layout.simple_list_item_1, merged)
+        )
     }
 
     private fun updateSendButtonState() {

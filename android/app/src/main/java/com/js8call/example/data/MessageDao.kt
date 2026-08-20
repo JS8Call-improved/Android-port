@@ -107,6 +107,9 @@ interface MessageDao {
     @Query("SELECT COUNT(*) FROM messages WHERE conversationId = :conversationId AND isRead = 0 AND direction = 0")
     suspend fun getUnreadCountForConversation(conversationId: String): Int
 
+    @Query("SELECT conversationId FROM messages GROUP BY conversationId ORDER BY MAX(timestamp) DESC")
+    fun getConversationCallsigns(): LiveData<List<String>>
+
     // ========== Search ==========
 
     @Query("SELECT * FROM messages WHERE text LIKE '%' || :query || '%' ORDER BY timestamp DESC")

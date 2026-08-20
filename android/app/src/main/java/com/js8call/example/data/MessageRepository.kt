@@ -25,6 +25,10 @@ class MessageRepository(context: Context) {
         }
     }
 
+    fun getConversationCallsigns(): LiveData<List<String>> {
+        return messageDao.getConversationCallsigns()
+    }
+
     // ========== Messages ==========
 
     fun getMessagesForConversation(callsign: String): LiveData<List<MessageEntity>> {
