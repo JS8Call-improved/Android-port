@@ -54,7 +54,9 @@ class MonitorFragment : Fragment() {
     private var lastSelectedAudioDeviceId = -1
 
     // Frequency management
-    private var isUpdatingFrequencySpinner = false
+    // Spinner position last applied programmatically; onItemSelected skips it
+    // because setSelection() fires the listener asynchronously.
+    private var appliedFrequencyIndex = -1
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -474,9 +476,11 @@ class MonitorFragment : Fragment() {
             if (currentIndex == closestIndex) {
                 return
             }
-            isUpdatingFrequencySpinner = true
+            appliedFrequencyIndex = closestIndex
             frequencySpinner.setSelection(closestIndex)
-            isUpdatingFrequencySpinner = false
+
+            val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext())
+            prefs.edit().putString("last_frequency", frequencyValues[closestIndex]).apply()
 
             android.util.Log.i("MonitorFragment", "Set frequency to ${frequencyEntries[closestIndex]} based on radio frequency $frequencyHz Hz")
             Snackbar.make(requireView(), "Radio tuned to ${frequencyEntries[closestIndex]}", Snackbar.LENGTH_SHORT).show()
@@ -522,15 +526,15 @@ class MonitorFragment : Fragment() {
             ?: 0
 
         // Set initial selection
-        isUpdatingFrequencySpinner = true
-        frequencySpinner.setSelection(savedIndex)
-        isUpdatingFrequencySpinner = false
+        appliedFrequencyIndex = savedIndex
+        frequencySpinner.setSelection(savedIndex, false)
 
         // Set up selection listener
         frequencySpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                if (isUpdatingFrequencySpinner) return
+                if (position == appliedFrequencyIndex) return
                 if (position < 0 || position >= frequencyValues.size) return
+                appliedFrequencyIndex = position
 
                 val frequencyHz = frequencyValues[position].toLongOrNull() ?: return
                 android.util.Log.d("MonitorFragment", "Frequency selected: ${frequencyEntries[position]} ($frequencyHz Hz)")
