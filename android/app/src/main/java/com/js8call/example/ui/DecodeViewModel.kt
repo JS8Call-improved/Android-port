@@ -414,6 +414,19 @@ class DecodeViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     /**
+     * Sender callsigns from the in-memory decode list, newest first.
+     */
+    fun heardCallsigns(): List<String> {
+        return allDecodes.mapNotNull { senderCallsign(it.text) }.distinct()
+    }
+
+    private fun senderCallsign(text: String): String? {
+        val firstToken = text.trim().split(Regex("\\s+"), limit = 2).firstOrNull() ?: return null
+        val callsign = firstToken.trimEnd(':').uppercase()
+        return callsign.takeIf { isCallsignLike(it) }
+    }
+
+    /**
      * Set filter text.
      */
     fun setFilter(text: String) {
