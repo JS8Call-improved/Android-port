@@ -60,7 +60,7 @@ class MessagesFragment : Fragment() {
         // Set up FAB (navigate to Transmit tab to compose new message)
         newMessageFab.setOnClickListener {
             // Navigate to Transmit tab for new message
-            val bottomNav = activity?.findViewById<com.google.android.material.bottomnavigation.BottomNavigationView>(R.id.bottom_navigation)
+            val bottomNav = activity?.findViewById<com.google.android.material.navigation.NavigationBarView>(R.id.bottom_navigation)
             bottomNav?.selectedItemId = R.id.navigation_transmit
         }
 

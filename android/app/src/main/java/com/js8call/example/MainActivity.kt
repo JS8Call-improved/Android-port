@@ -17,7 +17,7 @@ import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import androidx.navigation.fragment.NavHostFragment
 import androidx.navigation.ui.setupWithNavController
 import androidx.preference.PreferenceManager
-import com.google.android.material.bottomnavigation.BottomNavigationView
+import com.google.android.material.navigation.NavigationBarView
 import com.google.android.material.snackbar.Snackbar
 import com.js8call.example.model.EngineState
 import com.js8call.example.service.JS8EngineService
@@ -28,7 +28,7 @@ import com.js8call.example.ui.TransmitViewModel
 
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var bottomNav: BottomNavigationView
+    private lateinit var bottomNav: NavigationBarView
     private lateinit var decodeViewModel: DecodeViewModel
     private lateinit var monitorViewModel: MonitorViewModel
     private var spectrumBroadcastCount: Long = 0
