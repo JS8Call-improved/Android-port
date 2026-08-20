@@ -99,7 +99,6 @@ class TransmitFragment : Fragment() {
         queueRecyclerView.adapter = queueAdapter
 
         // Set up listeners
-        setupListeners()
         setupModeSelector()
         setupSpeedSelector()
 
@@ -108,6 +107,14 @@ class TransmitFragment : Fragment() {
 
         // Register broadcast receiver
         registerBroadcastReceiver()
+    }
+
+    override fun onViewStateRestored(savedInstanceState: Bundle?) {
+        super.onViewStateRestored(savedInstanceState)
+        // Text watchers must attach after view state restoration. Restoring the
+        // saved (stale) field text fires the watchers, which would push it into
+        // the ViewModel and wipe a directed callsign set from another screen.
+        setupListeners()
     }
 
     override fun onDestroyView() {
