@@ -48,7 +48,6 @@
     <string name="tx_compose_hint">Type message here…</string>
     <string name="tx_send">Send</string>
     <string name="tx_cq">CQ</string>
-    <string name="tx_directed">To:</string>
     <string name="tx_directed_hint">Directed Callsign</string>
     <string name="tx_snr_report">SNR</string>
     <string name="tx_queue">Queue</string>

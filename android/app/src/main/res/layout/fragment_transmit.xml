@@ -40,7 +40,6 @@
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/message_input_layout"
-        app:prefixText="@string/tx_directed"
         app:startIconDrawable="@android:drawable/ic_menu_send">
 
         <com.google.android.material.textfield.MaterialAutoCompleteTextView
