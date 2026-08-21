@@ -12,6 +12,7 @@ import android.os.Looper
 import android.text.InputType
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.ViewModelProvider
 import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
 import androidx.preference.Preference
@@ -33,6 +34,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
     private var pendingLocationListener: LocationListener? = null
     private var pendingLocationTimeout: Runnable? = null
     private var gridPreference: GridSquarePreference? = null
+    private var audioDevicePreference: Preference? = null
     private var pendingStoragePermissionEnable = false
     private var logPreference: SwitchPreferenceCompat? = null
 
@@ -206,6 +208,16 @@ class SettingsFragment : PreferenceFragmentCompat() {
             }
         }
 
+        audioDevicePreference = findPreference("audio_device")
+        audioDevicePreference?.setOnPreferenceClickListener {
+            // Both screens share one picker, so a change made here also moves a
+            // live capture and shows up on the Monitor strip.
+            val engineRunning = ViewModelProvider(requireActivity())[MonitorViewModel::class.java]
+                .isRunning.value == true
+            AudioDevices.showPicker(requireContext(), engineRunning) { updateAudioDeviceSummary() }
+            true
+        }
+
         gridPreference = findPreference("grid")
         gridPreference?.onUpdateClickListener = { onGridUpdateRequested() }
 
@@ -227,9 +239,21 @@ class SettingsFragment : PreferenceFragmentCompat() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        // Inputs come and go with what is plugged in, so re-read them on the
+        // way in rather than only when the screen is built.
+        updateAudioDeviceSummary()
+    }
+
     override fun onStop() {
         cancelLocationRequest()
         super.onStop()
+    }
+
+    private fun updateAudioDeviceSummary() {
+        audioDevicePreference?.summary = AudioDevices.selectedName(requireContext())
+            ?: getString(R.string.settings_audio_device_none)
     }
 
     private fun onGridUpdateRequested() {

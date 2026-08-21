@@ -48,6 +48,14 @@
         app:title="@string/settings_category_audio"
         app:iconSpaceReserved="false">
 
+        <!-- Same picker the Monitor strip offers; the summary is set in code
+             because the inputs are whatever is plugged in at the time. -->
+        <Preference
+            app:key="audio_device"
+            app:title="@string/settings_audio_device"
+            app:persistent="false"
+            app:iconSpaceReserved="false" />
+
         <SwitchPreferenceCompat
             app:key="tx_boost_enabled"
             app:title="@string/settings_tx_boost"
