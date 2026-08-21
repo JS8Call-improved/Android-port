@@ -132,6 +132,7 @@ public:
   virtual int tx_milliseconds_until_audio() const = 0;
   virtual void set_tx_ready(bool ready) = 0;
   virtual void set_tx_boost_enabled(bool enabled) = 0;
+  virtual void set_submodes(int submodes) = 0;
 
   // Positive = engine clock ahead of system clock; takes effect at the next captured buffer.
   virtual void set_time_drift_ms(std::int64_t drift_ms) = 0;

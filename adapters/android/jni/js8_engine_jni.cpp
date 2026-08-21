@@ -798,9 +798,8 @@ void js8_engine_set_frequency(JS8Engine_Native* engine, uint64_t frequency_hz) {
 }
 
 void js8_engine_set_submodes(JS8Engine_Native* engine, int submodes) {
-  // TODO: Implement submode setting through engine API
-  (void)engine;
-  (void)submodes;
+  if (!engine || !engine->engine) return;
+  engine->engine->set_submodes(submodes);
 }
 
 void js8_engine_set_output_device(JS8Engine_Native* engine, int device_id) {

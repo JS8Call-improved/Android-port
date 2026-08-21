@@ -42,16 +42,17 @@ void Modulator::start(std::array<int, protocol::kJs8NumSymbols> const& tones,
     auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count() +
                   clock_offset_ms_.load();
     auto period_offset = static_cast<std::int64_t>(((now_ms % period_ms) + period_ms) % period_ms);
-    auto tx_delay_ms = static_cast<std::int64_t>(tx_delay_s * 1000.0);
-    auto start_time_ms = static_cast<std::int64_t>(start_delay_ms) + tx_delay_ms;
-    if (start_time_ms < 0) start_time_ms = 0;
-    if (start_time_ms >= period_ms) start_time_ms %= period_ms;
+    auto tx_delay_ms = std::max<std::int64_t>(0, static_cast<std::int64_t>(tx_delay_s * 1000.0));
 
+    // tx_delay_s decides whether this request belongs in the next period; it
+    // must not move a submode's fixed on-air offset (Turbo is always 100 ms).
     std::int64_t wait_ms = 0;
-    if (period_offset <= start_time_ms) {
-      wait_ms = start_time_ms - period_offset;
+    if (period_offset + tx_delay_ms >= period_ms) {
+      wait_ms = period_ms - period_offset + start_delay_ms;
+    } else if (period_offset < start_delay_ms) {
+      wait_ms = start_delay_ms - period_offset;
     } else {
-      wait_ms = static_cast<std::int64_t>(period_ms - period_offset + start_time_ms);
+      ic_ = static_cast<std::uint64_t>((period_offset - start_delay_ms) * base_rate_ / 1000);
     }
     silent_frames_.store(wait_ms * base_rate_ / 1000);
   }

@@ -1246,6 +1246,10 @@ std::vector<std::pair<std::string, int>> build_message_frames(std::string const&
     bool hasDirected = false;
     bool hasData = forceData;
 
+    // Data frames must preserve the caller's payload exactly. Desktop disables
+    // automatic identification here so it cannot prepend the sender callsign.
+    if (forceData) forceIdentify = false;
+
     // Remove own callsign prefix
     auto mycallWithSep = mycall + ":";
     if (line.rfind(mycallWithSep, 0) == 0 || line.rfind(mycall + " ", 0) == 0) {
@@ -1255,7 +1259,11 @@ std::vector<std::pair<std::string, int>> build_message_frames(std::string const&
     // Auto-append selected call if needed
     if (!selectedCall.empty() && line.rfind(selectedCall, 0) != 0 && line.rfind("`", 0) != 0 && !forceData) {
       bool lineStartsWithBase = (line.rfind("@ALLCALL", 0) == 0) || (line.rfind("CQ", 0) == 0) || (line.rfind("HB", 0) == 0);
-      if (!lineStartsWithBase) {
+      auto const separator = line.find_first_of(" :");
+      auto const firstToken = line.substr(0, separator);
+      bool isCompound = false;
+      bool lineStartsWithCallsign = is_valid_callsign(firstToken, &isCompound) && firstToken.size() > 3;
+      if (!lineStartsWithBase && !lineStartsWithCallsign) {
         auto sep = line.rfind(" ", 0) == 0 ? "" : " ";
         line = selectedCall + sep + line;
       }

@@ -43,6 +43,8 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.LinkedBlockingDeque
 import java.util.concurrent.TimeUnit
 
+internal fun assembleMsgPayload(parts: List<String>): String = parts.joinToString(separator = "")
+
 /**
  * Foreground service for running the JS8 engine in the background.
  *
@@ -535,7 +537,7 @@ class JS8EngineService : Service() {
             // Create engine
             engine = JS8Engine.create(
                 sampleRateHz = 12000,
-                submodes = 0x1F, // Enable A/B/C/E/I by default
+                submodes = configuredRxSubmodes(),
                 callbackHandler = callbackHandler,
                 enableTxAudioTap = rigControlMode == "trusdx_serial"
             )
@@ -793,6 +795,10 @@ class JS8EngineService : Service() {
         val txBoostEnabled = prefs.getBoolean("tx_boost_enabled", false)
         engine?.setTxBoostEnabled(txBoostEnabled)
         Log.i(TAG, "TX boost: ${if (txBoostEnabled) "enabled (+10 dB)" else "disabled"}")
+    }
+
+    private fun configuredRxSubmodes(): Int {
+        return RX_SUBMODES_BASE or SUBMODE_TURBO
     }
 
     private fun initializeNetworkRigControl() {
@@ -2875,7 +2881,8 @@ class JS8EngineService : Service() {
     }
     
     private fun processMsgBuffer(buffer: MsgBuffer, myCallsign: String) {
-        val fullText = buffer.parts.joinToString(" ").trim()
+        // Data frames split at arbitrary byte boundaries, not word boundaries.
+        val fullText = assembleMsgPayload(buffer.parts).trim()
         // Remove end-of-message marker if present
         var cleanText = fullText.replace(Regex("\\s*[▪■]+\\s*$"), "").trim()
         
@@ -3789,6 +3796,7 @@ class JS8EngineService : Service() {
         private const val SUBMODE_FAST = 1
         private const val SUBMODE_TURBO = 2
         private const val SUBMODE_SLOW = 4
+        private const val RX_SUBMODES_BASE = SUBMODE_NORMAL or SUBMODE_FAST or SUBMODE_SLOW
         private const val CHECKSUM_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ+-./?"
         private const val CHECKSUM_BASE = 41
 

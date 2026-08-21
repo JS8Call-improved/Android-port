@@ -45,6 +45,30 @@ int main() {
   }
 
   {
+    // Regression: forced data must not be modified by automatic identification.
+    auto frames = js8core::protocol::varicode::build_message_frames(
+        "KN4CRD", "EM73", "", "PAYLOAD", true, true, 2, nullptr);
+    check(frames.size() == 1, "forced Turbo data produces one frame");
+    if (!frames.empty()) {
+      check(js8core::protocol::varicode::unpack_fast_data_message(frames.front().first) == "PAYLOAD",
+            "forced Turbo data preserves payload without sender callsign");
+    }
+  }
+
+  {
+    // Regression: an explicit destination must not be replaced by selectedCall.
+    auto frames = js8core::protocol::varicode::build_message_frames(
+        "KN4CRD", "EM73", "W1AW", "K1ABC SNR?", false, false, 2, nullptr);
+    bool addressedToExplicitCall = false;
+    for (auto const& frame : frames) {
+      std::uint8_t type = 0;
+      auto decoded = js8core::protocol::varicode::unpack_directed_message(frame.first, &type);
+      if (decoded.size() > 1 && decoded[1] == "K1ABC") addressedToExplicitCall = true;
+    }
+    check(addressedToExplicitCall, "explicit Turbo destination is not auto-prefixed");
+  }
+
+  {
     // Regression: command-only compound helper frame must not decode as a fake grid (e.g. RA90).
     std::uint8_t type = 0;
     std::uint16_t extra = 0;

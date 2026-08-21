@@ -77,6 +77,7 @@ public:
       }
       config_.submodes = mask;
     }
+    enabled_submodes_.store(config_.submodes);
     init_schedules();
     start_decode_worker();
     start_spectrum_worker();
@@ -346,6 +347,15 @@ public:
 
   void set_tx_boost_enabled(bool enabled) override {
     config_.tx_output_gain_boost_enabled = enabled;
+  }
+
+  void set_submodes(int submodes) override {
+    constexpr int knownSubmodes = (1 << static_cast<int>(protocol::SubmodeId::A)) |
+                                 (1 << static_cast<int>(protocol::SubmodeId::B)) |
+                                 (1 << static_cast<int>(protocol::SubmodeId::C)) |
+                                 (1 << static_cast<int>(protocol::SubmodeId::E)) |
+                                 (1 << static_cast<int>(protocol::SubmodeId::I));
+    enabled_submodes_.store(submodes & knownSubmodes);
   }
 
   void set_time_drift_ms(std::int64_t drift_ms) override {
@@ -629,6 +639,7 @@ public:
       // Use isDecodeReady() to determine if each submode should decode
       // This replaces the old rolling window approach with UTC-synchronized fixed windows
       for (auto& sch : schedules_) {
+        if ((enabled_submodes_.load() & (1 << static_cast<int>(sch.id))) == 0) continue;
         int start = 0;
         int size = 0;
 
@@ -993,6 +1004,7 @@ public:
     int total_samples_{0};
     int k0_{0};  // Previous sample position for isDecodeReady logic
     std::atomic<std::int64_t> time_drift_ms_{0};
+    std::atomic<int> enabled_submodes_{0};
     std::atomic<bool> drift_realign_pending_{false};
     // Written only on the audio thread; may lag time_drift_ms_ by one capture buffer.
     std::int64_t ring_drift_ms_{0};
