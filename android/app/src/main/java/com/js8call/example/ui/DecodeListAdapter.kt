@@ -50,16 +50,25 @@ class DecodeListAdapter : ListAdapter<DecodedMessage, DecodeListAdapter.DecodeVi
         private val defaultTextColor = messageText.currentTextColor
 
         fun bind(decode: DecodedMessage, myGroups: Set<String>) {
+            timeText.text = decode.formattedTime()
+            freqText.text = String.format("%.1f Hz", decode.frequency)
+            messageText.text = decode.text
+
+            if (decode.outgoing) {
+                val txColor = ContextCompat.getColor(itemView.context, R.color.decode_outgoing)
+                snrIndicator.setBackgroundColor(txColor)
+                snrText.text = itemView.context.getString(R.string.decodes_outgoing_tag)
+                dtText.text = ""
+                messageText.setTextColor(txColor)
+                return
+            }
+
             // Set SNR indicator color
             val color = ContextCompat.getColor(itemView.context, decode.snrColorRes)
             snrIndicator.setBackgroundColor(color)
 
-            // Set text values
-            timeText.text = decode.formattedTime()
             snrText.text = String.format("%+d dB", decode.snr)
             dtText.text = String.format("%+.1f s", decode.dt)
-            freqText.text = String.format("%.1f Hz", decode.frequency)
-            messageText.text = decode.text
 
             // Highlight group messages
             val isGroupMsg = myGroups.any { it.isNotEmpty() && decode.text.contains(it, ignoreCase = true) }

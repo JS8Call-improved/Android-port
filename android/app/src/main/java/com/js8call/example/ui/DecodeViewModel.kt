@@ -130,7 +130,8 @@ class DecodeViewModel(application: Application) : AndroidViewModel(application) 
                         quality = obj.optDouble("quality").toFloat(),
                         mode = obj.optInt("mode"),
                         driftMs = obj.optInt("driftMs"),
-                        timestamp = obj.optLong("timestamp", System.currentTimeMillis())
+                        timestamp = obj.optLong("timestamp", System.currentTimeMillis()),
+                        outgoing = obj.optBoolean("outgoing")
                     )
                 )
             }
@@ -228,6 +229,31 @@ class DecodeViewModel(application: Application) : AndroidViewModel(application) 
                 messageBuffers.remove(newKey)
             }
         }
+    }
+
+    /**
+     * Add a message this station transmitted. It skips multipart buffering
+     * because the full text is known at submit time.
+     */
+    fun addOutgoing(text: String, frequency: Float) {
+        if (text.isBlank()) return
+        val cal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"))
+        val utc = cal.get(java.util.Calendar.HOUR_OF_DAY) * 10000 +
+            cal.get(java.util.Calendar.MINUTE) * 100 +
+            cal.get(java.util.Calendar.SECOND)
+        addDecodeToDisplay(
+            DecodedMessage(
+                utc = utc,
+                snr = 0,
+                dt = 0f,
+                frequency = frequency,
+                text = text,
+                type = 3,
+                quality = 1f,
+                mode = 0,
+                outgoing = true
+            )
+        )
     }
 
     /**
@@ -403,6 +429,7 @@ class DecodeViewModel(application: Application) : AndroidViewModel(application) 
             obj.put("mode", decode.mode)
             obj.put("driftMs", decode.driftMs)
             obj.put("timestamp", decode.timestamp)
+            obj.put("outgoing", decode.outgoing)
             arr.put(obj)
         }
 

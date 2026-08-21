@@ -38,6 +38,7 @@
     <string name="decodes_sync_time">Sync clock to this signal (%+d ms)</string>
     <string name="decodes_sync_time_applied">Time drift set to %+d ms</string>
     <string name="decodes_filter">Filter</string>
+    <string name="decodes_outgoing_tag">TX</string>
     <string name="decode_time">Time</string>
     <string name="decode_snr">SNR</string>
     <string name="decode_freq">Freq</string>
