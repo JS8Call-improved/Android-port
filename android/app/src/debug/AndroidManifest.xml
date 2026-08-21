@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <!-- Debug builds only: this manifest never merges into release, so
+             the exported receiver does not exist there. -->
+        <receiver
+            android:name="com.js8call.example.debug.DebugDecodeReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.js8call.example.DEBUG_INJECT_DECODE" />
+            </intent-filter>
+        </receiver>
+    </application>
+
+</manifest>

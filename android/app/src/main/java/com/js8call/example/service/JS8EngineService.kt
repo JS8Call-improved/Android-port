@@ -351,6 +351,32 @@ class JS8EngineService : Service() {
                 Log.i(TAG, "One-shot time sync armed; waiting for next decode")
                 timeSyncOncePending = true
             }
+            ACTION_DEBUG_INJECT_DECODE -> {
+                // Debug builds only: run a synthetic decode through the same
+                // path a real one takes. Protocol handling becomes testable on
+                // one emulator with no audio, including malformed frames and
+                // bad checksums no cooperating sender would produce.
+                if (BuildConfig.DEBUG) {
+                    val text = intent.getStringExtra(EXTRA_TEXT)
+                    if (!text.isNullOrBlank()) {
+                        val snr = intent.getIntExtra(EXTRA_SNR, -10)
+                        val freq = intent.getFloatExtra(EXTRA_FREQ, 1500f)
+                        val type = intent.getIntExtra(EXTRA_TYPE, 0)
+                        val submode = intent.getIntExtra(EXTRA_MODE, 0)
+                        Log.i(TAG, "Injected decode: '$text' type=$type submode=$submode")
+                        val cal = Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"))
+                        val utc = cal.get(Calendar.HOUR_OF_DAY) * 10000 +
+                            cal.get(Calendar.MINUTE) * 100 + cal.get(Calendar.SECOND)
+                        mainHandler.post {
+                            updateHeardCallsign(text)
+                            broadcastDecode(utc, snr, 0f, freq, text, type, 1f, submode, 0)
+                            handleRelayFrame(text, snr, submode, freq, type)
+                            maybeHandleIncomingMessage(text, snr, freq, type, submode)
+                            maybeHandleAutoReply(text, snr, submode)
+                        }
+                    }
+                }
+            }
             ACTION_SET_TIME_DRIFT -> {
                 val driftMs = intent.getLongExtra(EXTRA_TIME_DRIFT_MS, 0L)
                 Log.i(TAG, "Setting time drift to $driftMs ms")
@@ -3952,6 +3978,8 @@ class JS8EngineService : Service() {
         const val ACTION_SET_TIME_DRIFT = "com.js8call.example.ACTION_SET_TIME_DRIFT"
         const val ACTION_TIME_DRIFT = "com.js8call.example.ACTION_TIME_DRIFT"
         const val ACTION_RIG_STATUS = "com.js8call.example.ACTION_RIG_STATUS"
+        // Debug builds only; ignored in release. See onStartCommand.
+        const val ACTION_DEBUG_INJECT_DECODE = "com.js8call.example.ACTION_DEBUG_INJECT_DECODE"
 
         // Engine states
         const val STATE_STOPPED = "stopped"
