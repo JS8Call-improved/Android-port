@@ -111,11 +111,15 @@
                 android:layout_marginTop="12dp"
                 android:hint="@string/monitor_audio_device">
 
+                <!-- No saved view state: the restore re-runs the adapter filter
+                     against the restored text, leaving one item in the dropdown.
+                     onViewCreated repopulates the list and selection anyway. -->
                 <com.google.android.material.textfield.MaterialAutoCompleteTextView
                     android:id="@+id/audio_device_spinner"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:inputType="none" />
+                    android:inputType="none"
+                    android:saveEnabled="false" />
 
             </com.google.android.material.textfield.TextInputLayout>
 
@@ -132,7 +136,8 @@
                     android:id="@+id/frequency_spinner"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:inputType="none" />
+                    android:inputType="none"
+                    android:saveEnabled="false" />
 
             </com.google.android.material.textfield.TextInputLayout>
 
