@@ -30,6 +30,38 @@
                 android:text="@string/decodes_title"
                 android:textAppearance="?attr/textAppearanceTitleMedium" />
 
+            <!-- One-tap CQ -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/cq_button"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minWidth="48dp"
+                android:contentDescription="@string/decodes_send_cq"
+                android:text="@string/decodes_cq"
+                android:textColor="?attr/colorOnSurfaceVariant"
+                android:textStyle="bold" />
+
+            <!-- One-tap heartbeat -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/heartbeat_button"
+                style="@style/Widget.Material3.Button.IconButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:contentDescription="@string/decodes_send_heartbeat"
+                app:icon="@drawable/ic_heart_plus"
+                app:iconTint="?attr/colorOnSurfaceVariant" />
+
+            <!-- Jump to the All activity thread -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/open_all_activity_button"
+                style="@style/Widget.Material3.Button.IconButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:contentDescription="@string/decodes_open_all_activity"
+                app:icon="@drawable/ic_open_in_new"
+                app:iconTint="?attr/colorOnSurfaceVariant" />
+
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/clear_fab"
                 style="@style/Widget.Material3.Button.IconButton"

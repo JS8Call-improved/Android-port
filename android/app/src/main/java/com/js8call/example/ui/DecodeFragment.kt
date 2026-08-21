@@ -94,6 +94,18 @@ open class DecodeFragment : Fragment() {
             confirmClearDecodes()
         }
 
+        // Header quick actions (also absent in the bare layout; the All
+        // activity thread has its own compose bar for these)
+        view.findViewById<View>(R.id.cq_button)?.setOnClickListener {
+            queueBroadcast("CQ CQ CQ")
+        }
+        view.findViewById<View>(R.id.heartbeat_button)?.setOnClickListener {
+            queueBroadcast("HB")
+        }
+        view.findViewById<View>(R.id.open_all_activity_button)?.setOnClickListener {
+            findNavController().navigate(R.id.navigation_everything)
+        }
+
         // Observe decodes
         viewModel.decodes.observe(viewLifecycleOwner) { decodes ->
             // Stick to the newest message unless the user scrolled up to read history.
@@ -223,6 +235,23 @@ open class DecodeFragment : Fragment() {
         if (!token.any { it.isLetter() }) return false
         if (!token.any { it.isDigit() }) return false
         return true
+    }
+
+    private fun queueBroadcast(text: String) {
+        val monitorViewModel = ViewModelProvider(requireActivity())[MonitorViewModel::class.java]
+        if (monitorViewModel.status.value?.state != com.js8call.example.model.EngineState.RUNNING) {
+            Snackbar.make(requireView(), R.string.decodes_start_first, Snackbar.LENGTH_SHORT).show()
+            return
+        }
+        val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext())
+        if (prefs.getString("callsign", "")?.isNotBlank() != true) {
+            Snackbar.make(requireView(), R.string.error_callsign_required, Snackbar.LENGTH_LONG).show()
+            return
+        }
+        transmitViewModel.queueMessage(text, directed = null, priority = 1)
+        androidx.localbroadcastmanager.content.LocalBroadcastManager.getInstance(requireContext())
+            .sendBroadcast(android.content.Intent(com.js8call.example.MainActivity.ACTION_PROCESS_TX_QUEUE))
+        Snackbar.make(requireView(), getString(R.string.decodes_queued, text), Snackbar.LENGTH_SHORT).show()
     }
 
     private fun confirmClearDecodes() {

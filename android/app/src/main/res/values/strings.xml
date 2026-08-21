@@ -34,6 +34,12 @@
     <string name="decodes_title">Decoded Messages</string>
     <string name="decodes_empty">No messages decoded yet</string>
     <string name="decodes_clear">Clear</string>
+    <string name="decodes_cq">CQ</string>
+    <string name="decodes_send_cq">Send CQ</string>
+    <string name="decodes_send_heartbeat">Send heartbeat</string>
+    <string name="decodes_open_all_activity">Open All activity</string>
+    <string name="decodes_queued">Queued %1$s</string>
+    <string name="decodes_start_first">Start monitoring first</string>
     <string name="decodes_copy">Copy</string>
     <string name="decodes_reply">Reply</string>
     <string name="decodes_sync_time">Sync clock to this signal (%+d ms)</string>
