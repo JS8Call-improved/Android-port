@@ -5,152 +5,160 @@
     android:id="@+id/status_card"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    app:cardElevation="4dp">
+    app:cardElevation="2dp">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="12dp">
+        android:orientation="vertical">
 
-        <!-- Status Text -->
+        <!-- Header strip, same idiom as the Transmit tab's Queue card -->
         <TextView
             android:id="@+id/status_text"
-            style="@style/StatusIndicator"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/monitor_status_stopped"
-            android:textSize="14sp"
-            tools:text="STOPPED" />
-
-        <!-- Status Details Grid -->
-        <GridLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:columnCount="2"
-            android:rowCount="6">
+            android:background="?attr/colorSurfaceVariant"
+            android:padding="8dp"
+            android:text="@string/monitor_status_stopped"
+            android:textAppearance="?attr/textAppearanceTitleMedium"
+            tools:text="STOPPED" />
 
-            <!-- SNR -->
-            <TextView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_columnWeight="1"
-                android:text="@string/monitor_snr"
-                android:textSize="12sp"
-                android:textStyle="bold" />
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="12dp">
 
-            <TextView
-                android:id="@+id/snr_value"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_columnWeight="1"
-                android:text="--"
-                android:textSize="12sp"
-                tools:text="+5 dB" />
-
-            <!-- Power -->
-            <TextView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_columnWeight="1"
-                android:layout_marginTop="4dp"
-                android:text="@string/monitor_power"
-                android:textSize="12sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:id="@+id/power_value"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_columnWeight="1"
-                android:layout_marginTop="4dp"
-                android:text="--"
-                android:textSize="12sp"
-                tools:text="-45 dB" />
-
-            <!-- TX Offset -->
-            <TextView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_columnWeight="1"
-                android:layout_marginTop="4dp"
-                android:text="@string/monitor_tx_offset"
-                android:textSize="12sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:id="@+id/tx_offset_value"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_columnWeight="1"
-                android:layout_marginTop="4dp"
-                android:text="1500 Hz"
-                android:textSize="12sp" />
-
-            <!-- Audio Device -->
-            <TextView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_columnWeight="1"
-                android:layout_marginTop="4dp"
-                android:text="@string/monitor_audio_device"
-                android:textSize="12sp"
-                android:textStyle="bold" />
-
-            <Spinner
-                android:id="@+id/audio_device_spinner"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_columnWeight="1"
-                android:layout_marginTop="4dp"
-                android:minHeight="32dp"
-                android:spinnerMode="dropdown" />
-
-            <!-- Radio Frequency -->
-            <TextView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_columnWeight="1"
-                android:layout_marginTop="4dp"
-                android:text="@string/monitor_radio_frequency"
-                android:textSize="12sp"
-                android:textStyle="bold" />
-
-            <Spinner
-                android:id="@+id/frequency_spinner"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_columnWeight="1"
-                android:layout_marginTop="4dp"
-                android:minHeight="32dp"
-                android:spinnerMode="dropdown" />
-
-            <!-- Time Drift -->
-            <TextView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_columnWeight="1"
-                android:layout_marginTop="4dp"
-                android:layout_gravity="center_vertical"
-                android:text="@string/monitor_time_drift"
-                android:textSize="12sp"
-                android:textStyle="bold" />
-
+            <!-- Signal stat tiles -->
             <LinearLayout
-                android:layout_width="0dp"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_columnWeight="1"
+                android:baselineAligned="false"
+                android:orientation="horizontal">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/monitor_snr"
+                        android:textAppearance="?attr/textAppearanceLabelMedium"
+                        android:textColor="?attr/colorOnSurfaceVariant" />
+
+                    <TextView
+                        android:id="@+id/snr_value"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="--"
+                        android:textAppearance="?attr/textAppearanceTitleMedium"
+                        tools:text="+5 dB" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/monitor_power"
+                        android:textAppearance="?attr/textAppearanceLabelMedium"
+                        android:textColor="?attr/colorOnSurfaceVariant" />
+
+                    <TextView
+                        android:id="@+id/power_value"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="--"
+                        android:textAppearance="?attr/textAppearanceTitleMedium"
+                        tools:text="-45 dB" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/monitor_tx_offset"
+                        android:textAppearance="?attr/textAppearanceLabelMedium"
+                        android:textColor="?attr/colorOnSurfaceVariant" />
+
+                    <TextView
+                        android:id="@+id/tx_offset_value"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="1500 Hz"
+                        android:textAppearance="?attr/textAppearanceTitleMedium" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- Audio device -->
+            <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/audio_device_layout"
+                style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:hint="@string/monitor_audio_device">
+
+                <com.google.android.material.textfield.MaterialAutoCompleteTextView
+                    android:id="@+id/audio_device_spinner"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="none" />
+
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <!-- Radio frequency -->
+            <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/frequency_layout"
+                style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:hint="@string/monitor_radio_frequency">
+
+                <com.google.android.material.textfield.MaterialAutoCompleteTextView
+                    android:id="@+id/frequency_spinner"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="none" />
+
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <!-- Time drift -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
                 android:gravity="center_vertical"
                 android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/monitor_time_drift"
+                    android:textAppearance="?attr/textAppearanceLabelMedium"
+                    android:textColor="?attr/colorOnSurfaceVariant" />
 
                 <TextView
                     android:id="@+id/time_drift_value"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
                     android:layout_weight="1"
                     android:text="0 ms"
-                    android:textSize="12sp"
+                    android:textAppearance="?attr/textAppearanceBodyMedium"
                     tools:text="+1200 ms" />
 
                 <Button
@@ -161,8 +169,7 @@
                     android:minWidth="0dp"
                     android:minHeight="32dp"
                     android:paddingHorizontal="8dp"
-                    android:text="@string/monitor_time_sync"
-                    android:textSize="12sp" />
+                    android:text="@string/monitor_time_sync" />
 
                 <Button
                     android:id="@+id/time_drift_reset_button"
@@ -172,11 +179,10 @@
                     android:minWidth="0dp"
                     android:minHeight="32dp"
                     android:paddingHorizontal="8dp"
-                    android:text="@string/monitor_time_drift_reset"
-                    android:textSize="12sp" />
+                    android:text="@string/monitor_time_drift_reset" />
             </LinearLayout>
 
-        </GridLayout>
+        </LinearLayout>
 
     </LinearLayout>
 

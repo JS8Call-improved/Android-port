@@ -11,11 +11,9 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.AdapterView
-import android.widget.ArrayAdapter
 import android.widget.Button
-import android.widget.Spinner
 import android.widget.TextView
+import com.google.android.material.textfield.MaterialAutoCompleteTextView
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModelProvider
@@ -41,16 +39,14 @@ class MonitorFragment : Fragment() {
     private lateinit var timeDriftValue: TextView
     private lateinit var timeSyncButton: Button
     private lateinit var timeDriftResetButton: Button
-    private lateinit var audioDeviceSpinner: Spinner
-    private lateinit var frequencySpinner: Spinner
+    private lateinit var audioDeviceSpinner: MaterialAutoCompleteTextView
+    private lateinit var frequencySpinner: MaterialAutoCompleteTextView
     private lateinit var startStopButton: Button
     private lateinit var monitorVersionText: TextView
 
     // Audio device management
-    private var audioDeviceAdapter: ArrayAdapter<AudioDeviceItem>? = null
     private var availableDevices = mutableListOf<AudioDeviceItem>()
-    private var isUpdatingSpinner = false
-    private var userInitiatedAudioSelection = false
+    private var selectedAudioIndex = 0
     private var lastSelectedAudioDeviceId = -1
 
     // Frequency management
@@ -140,11 +136,6 @@ class MonitorFragment : Fragment() {
             requireContext().startService(intent)
         }
 
-    }
-
-    override fun onPause() {
-        super.onPause()
-        userInitiatedAudioSelection = false
     }
 
     override fun onResume() {
@@ -251,7 +242,7 @@ class MonitorFragment : Fragment() {
             action = JS8EngineService.ACTION_START
             // Pass selected device ID if any
             if (availableDevices.isNotEmpty()) {
-                val selectedPos = audioDeviceSpinner.selectedItemPosition
+                val selectedPos = selectedAudioIndex
                 if (selectedPos >= 0 && selectedPos < availableDevices.size) {
                     var selectedDevice = availableDevices[selectedPos]
                     if (rigType == "trusdx_serial" &&
@@ -321,54 +312,34 @@ class MonitorFragment : Fragment() {
     }
 
     private fun setupAudioDeviceSpinner() {
-        // Create adapter
-        audioDeviceAdapter = ArrayAdapter(
-            requireContext(),
-            android.R.layout.simple_spinner_item,
-            availableDevices
-        )
-        audioDeviceAdapter?.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        audioDeviceSpinner.adapter = audioDeviceAdapter
+        // The dropdown only fires this on a user tap, never on programmatic setText.
+        audioDeviceSpinner.setOnItemClickListener { _, _, position, _ ->
+            if (position < 0 || position >= availableDevices.size) return@setOnItemClickListener
+            selectedAudioIndex = position
 
-        audioDeviceSpinner.setOnTouchListener { _, _ ->
-            userInitiatedAudioSelection = true
-            false
-        }
-        audioDeviceSpinner.setOnFocusChangeListener { _, hasFocus ->
-            if (!hasFocus) {
-                userInitiatedAudioSelection = false
-            }
-        }
+            val selectedDevice = availableDevices[position]
+            android.util.Log.d("MonitorFragment", "Audio device selected: ${selectedDevice.name} (ID: ${selectedDevice.id})")
 
-        // Set up selection listener
-        audioDeviceSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                val userInitiated = userInitiatedAudioSelection
-                userInitiatedAudioSelection = false
-                if (!userInitiated) return
-                if (isUpdatingSpinner) return
-                if (position < 0 || position >= availableDevices.size) return
-
-                val selectedDevice = availableDevices[position]
-                android.util.Log.d("MonitorFragment", "Audio device selected: ${selectedDevice.name} (ID: ${selectedDevice.id})")
-
-                // Only switch if engine is running
-                if (viewModel.isRunning.value == true) {
-                    if (selectedDevice.id == lastSelectedAudioDeviceId) return
-                    lastSelectedAudioDeviceId = selectedDevice.id
-                    val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext())
-                    prefs.edit().putInt(PREF_LAST_AUDIO_DEVICE_ID, selectedDevice.id).apply()
-                    switchAudioDevice(selectedDevice.id)
-                }
-            }
-
-            override fun onNothingSelected(parent: AdapterView<*>?) {
-                // Do nothing
+            // Only switch if engine is running
+            if (viewModel.isRunning.value == true) {
+                if (selectedDevice.id == lastSelectedAudioDeviceId) return@setOnItemClickListener
+                lastSelectedAudioDeviceId = selectedDevice.id
+                val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext())
+                prefs.edit().putInt(PREF_LAST_AUDIO_DEVICE_ID, selectedDevice.id).apply()
+                switchAudioDevice(selectedDevice.id)
             }
         }
 
         // Populate with available devices
         refreshAudioDevices()
+    }
+
+    private fun applyAudioDeviceSelection(index: Int) {
+        if (index < 0 || index >= availableDevices.size) return
+        selectedAudioIndex = index
+        lastSelectedAudioDeviceId = availableDevices[index].id
+        audioDeviceSpinner.setSimpleItems(availableDevices.map { it.name }.toTypedArray())
+        audioDeviceSpinner.setText(availableDevices[index].name, false)
     }
 
     private fun refreshAudioDevices() {
@@ -378,15 +349,11 @@ class MonitorFragment : Fragment() {
             availableDevices.clear()
             availableDevices.add(AudioDeviceItem(JS8EngineService.TRUSDX_AUDIO_SERIAL_ID, "TruSDX Serial"))
             availableDevices.add(AudioDeviceItem(JS8EngineService.TRUSDX_AUDIO_SPEAKER_ID, "TruSDX Speaker"))
-            audioDeviceAdapter?.notifyDataSetChanged()
 
             val savedDeviceId = prefs.getInt(PREF_LAST_AUDIO_DEVICE_ID, JS8EngineService.TRUSDX_AUDIO_SERIAL_ID)
             val selectedIndex = availableDevices.indexOfFirst { it.id == savedDeviceId }
                 .takeIf { it >= 0 } ?: 0
-            isUpdatingSpinner = true
-            audioDeviceSpinner.setSelection(selectedIndex)
-            isUpdatingSpinner = false
-            lastSelectedAudioDeviceId = availableDevices[selectedIndex].id
+            applyAudioDeviceSelection(selectedIndex)
             return
         }
 
@@ -394,7 +361,7 @@ class MonitorFragment : Fragment() {
             // Fallback for older versions
             availableDevices.clear()
             availableDevices.add(AudioDeviceItem(-1, "Default Microphone"))
-            audioDeviceAdapter?.notifyDataSetChanged()
+            applyAudioDeviceSelection(0)
             return
         }
 
@@ -429,17 +396,10 @@ class MonitorFragment : Fragment() {
             availableDevices.add(AudioDeviceItem(-1, "Default Microphone"))
         }
 
-        audioDeviceAdapter?.notifyDataSetChanged()
-
-        if (availableDevices.isNotEmpty()) {
-            val savedDeviceId = prefs.getInt(PREF_LAST_AUDIO_DEVICE_ID, -1)
-            val selectedIndex = availableDevices.indexOfFirst { it.id == savedDeviceId }
-                .takeIf { it >= 0 } ?: 0
-            isUpdatingSpinner = true
-            audioDeviceSpinner.setSelection(selectedIndex)
-            isUpdatingSpinner = false
-            lastSelectedAudioDeviceId = availableDevices[selectedIndex].id
-        }
+        val savedDeviceId = prefs.getInt(PREF_LAST_AUDIO_DEVICE_ID, -1)
+        val selectedIndex = availableDevices.indexOfFirst { it.id == savedDeviceId }
+            .takeIf { it >= 0 } ?: 0
+        applyAudioDeviceSelection(selectedIndex)
     }
 
     private fun switchAudioDevice(deviceId: Int) {
@@ -470,14 +430,13 @@ class MonitorFragment : Fragment() {
             }
         }
 
-        // Update spinner if we found a reasonable match (within 100 kHz)
+        // Update the dropdown if we found a reasonable match (within 100 kHz)
         if (closestDiff < 100000) {
-            val currentIndex = frequencySpinner.selectedItemPosition
-            if (currentIndex == closestIndex) {
+            if (appliedFrequencyIndex == closestIndex) {
                 return
             }
             appliedFrequencyIndex = closestIndex
-            frequencySpinner.setSelection(closestIndex)
+            frequencySpinner.setText(frequencyEntries[closestIndex], false)
 
             val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext())
             prefs.edit().putString("last_frequency", frequencyValues[closestIndex]).apply()
@@ -510,14 +469,7 @@ class MonitorFragment : Fragment() {
             frequencyValues.add(customFrequencyHz.toString())
         }
 
-        // Create adapter
-        val adapter = ArrayAdapter(
-            requireContext(),
-            android.R.layout.simple_spinner_item,
-            frequencyEntries
-        )
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        frequencySpinner.adapter = adapter
+        frequencySpinner.setSimpleItems(frequencyEntries.toTypedArray())
 
         val defaultFrequency = baseValues.getOrNull(3) ?: "14078000"
         val savedFrequency = prefs.getString("last_frequency", defaultFrequency) ?: defaultFrequency
@@ -527,43 +479,37 @@ class MonitorFragment : Fragment() {
 
         // Set initial selection
         appliedFrequencyIndex = savedIndex
-        frequencySpinner.setSelection(savedIndex, false)
+        frequencySpinner.setText(frequencyEntries[savedIndex], false)
 
-        // Set up selection listener
-        frequencySpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                if (position == appliedFrequencyIndex) return
-                if (position < 0 || position >= frequencyValues.size) return
-                appliedFrequencyIndex = position
+        // The dropdown only fires this on a user tap, never on programmatic setText.
+        frequencySpinner.setOnItemClickListener { _, _, position, _ ->
+            if (position == appliedFrequencyIndex) return@setOnItemClickListener
+            if (position < 0 || position >= frequencyValues.size) return@setOnItemClickListener
+            appliedFrequencyIndex = position
 
-                val frequencyHz = frequencyValues[position].toLongOrNull() ?: return
-                android.util.Log.d("MonitorFragment", "Frequency selected: ${frequencyEntries[position]} ($frequencyHz Hz)")
+            val frequencyHz = frequencyValues[position].toLongOrNull() ?: return@setOnItemClickListener
+            android.util.Log.d("MonitorFragment", "Frequency selected: ${frequencyEntries[position]} ($frequencyHz Hz)")
 
-                // Save frequency preference
-                prefs.edit().putString("last_frequency", frequencyValues[position]).apply()
+            // Save frequency preference
+            prefs.edit().putString("last_frequency", frequencyValues[position]).apply()
 
-                // Check if rig control is enabled
-                val rigControlEnabled = prefs.getBoolean("rig_control_enabled", false)
-                val rigType = prefs.getString("rig_type", "none")
+            // Check if rig control is enabled
+            val rigControlEnabled = prefs.getBoolean("rig_control_enabled", false)
+            val rigType = prefs.getString("rig_type", "none")
 
-                if (rigControlEnabled && (rigType == "network" || rigType == "hamlib_usb" || rigType == "trusdx_serial")) {
-                    // Send frequency change to service
-                    val intent = Intent(requireContext(), JS8EngineService::class.java).apply {
-                        action = JS8EngineService.ACTION_SET_FREQUENCY
-                        putExtra(JS8EngineService.EXTRA_FREQUENCY_HZ, frequencyHz)
-                    }
-                    requireContext().startService(intent)
-
-                    Snackbar.make(requireView(), "Setting frequency to ${frequencyEntries[position]}", Snackbar.LENGTH_SHORT).show()
-                } else if (rigControlEnabled && rigType == "rts_ptt") {
-                    android.util.Log.d("MonitorFragment", "RTS PTT mode does not support frequency control")
-                } else {
-                    android.util.Log.d("MonitorFragment", "Rig control not enabled or not supported type, skipping frequency change")
+            if (rigControlEnabled && (rigType == "network" || rigType == "hamlib_usb" || rigType == "trusdx_serial")) {
+                // Send frequency change to service
+                val intent = Intent(requireContext(), JS8EngineService::class.java).apply {
+                    action = JS8EngineService.ACTION_SET_FREQUENCY
+                    putExtra(JS8EngineService.EXTRA_FREQUENCY_HZ, frequencyHz)
                 }
-            }
+                requireContext().startService(intent)
 
-            override fun onNothingSelected(parent: AdapterView<*>?) {
-                // Do nothing
+                Snackbar.make(requireView(), "Setting frequency to ${frequencyEntries[position]}", Snackbar.LENGTH_SHORT).show()
+            } else if (rigControlEnabled && rigType == "rts_ptt") {
+                android.util.Log.d("MonitorFragment", "RTS PTT mode does not support frequency control")
+            } else {
+                android.util.Log.d("MonitorFragment", "Rig control not enabled or not supported type, skipping frequency change")
             }
         }
     }
