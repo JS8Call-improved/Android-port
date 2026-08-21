@@ -160,6 +160,8 @@
     <string name="settings_autoreply_summary">Automatically respond to heartbeats with SNR</string>
     <string name="settings_relay">Enable Relay</string>
     <string name="settings_relay_summary">Automatically relay messages using CALL&gt;</string>
+    <string name="settings_mailbox">Enable Mailbox</string>
+    <string name="settings_mailbox_summary">Hold messages other stations deposit with MSG TO: and serve them on request. Check your local rules on third-party traffic before enabling.</string>
 
     <string name="settings_category_heartbeat">Heartbeat</string>
     <string name="settings_category_timing">Timing</string>

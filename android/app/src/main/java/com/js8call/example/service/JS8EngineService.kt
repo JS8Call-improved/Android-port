@@ -33,6 +33,8 @@ import com.js8call.example.MainActivity
 import com.js8call.example.MessageLogWriter
 import com.js8call.example.R
 import com.js8call.example.BuildConfig
+import com.js8call.example.data.MailboxEntity
+import com.js8call.example.data.MailboxRepository
 import com.js8call.example.network.PskReporterClient
 import com.js8call.example.util.CallsignValidator
 import com.js8call.example.util.Js8Commands
@@ -43,6 +45,11 @@ import java.util.TimeZone
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.LinkedBlockingDeque
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 internal fun assembleMsgPayload(parts: List<String>): String = parts.joinToString(separator = "")
 
@@ -56,6 +63,12 @@ class JS8EngineService : Service() {
 
     private var engine: JS8Engine? = null
     private var audioHelper: JS8AudioHelper? = null
+
+    // Mailbox replies come off the decode path, but their DB reads must not
+    // block it. Main dispatcher so replies queue from the same thread the
+    // rest of the handlers run on.
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val mailboxRepository by lazy { MailboxRepository(this) }
     private var rigCtlClient: RigCtlClient? = null
     private var rigCtlConnected: Boolean = false
     private var rigCtlErrorShown: Boolean = false
@@ -396,7 +409,8 @@ class JS8EngineService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         Log.i(TAG, "Service destroyed")
-        
+        serviceScope.cancel()
+
         val prefs = PreferenceManager.getDefaultSharedPreferences(this)
         prefs.unregisterOnSharedPreferenceChangeListener(preferenceChangeListener)
         heartbeatHandler.removeCallbacksAndMessages(null)
@@ -2607,11 +2621,19 @@ class JS8EngineService : Service() {
      * Broadcast a request to queue a TX message.
      * The UI layer (TransmitViewModel) will handle adding it to the TX queue.
      */
-    private fun broadcastQueueTx(text: String, directed: String?, priority: Int = 0) {
+    private fun broadcastQueueTx(
+        text: String,
+        directed: String?,
+        priority: Int = 0,
+        mailboxId: Long? = null,
+        mailboxRecipient: String? = null
+    ) {
         val intent = Intent(ACTION_QUEUE_TX).apply {
             putExtra(EXTRA_QUEUE_TX_TEXT, text)
             directed?.let { putExtra(EXTRA_QUEUE_TX_DIRECTED, it) }
             putExtra(EXTRA_QUEUE_TX_PRIORITY, priority)
+            mailboxId?.let { putExtra(EXTRA_QUEUE_TX_MAILBOX_ID, it) }
+            mailboxRecipient?.let { putExtra(EXTRA_QUEUE_TX_MAILBOX_RECIPIENT, it) }
         }
         LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
         Log.d(TAG, "Broadcast queue TX: text='$text' directed=$directed priority=$priority")
@@ -2881,7 +2903,14 @@ class JS8EngineService : Service() {
         
         // Try parsing as a directed command (MSG header frame)
         val directed = parseDirectedCommand(text)
-        
+
+        // MSG TO: is a deposit into our mailbox for a third party, and must
+        // be caught before the MSG branch below would read it as mail for us.
+        if (directed != null && directed.command.uppercase() == Js8Commands.CMD_MSG_TO) {
+            handleMailboxDeposit(directed, snr, freq, type, submode, now)
+            return
+        }
+
         if (directed != null && (directed.command.uppercase() == "MSG" || directed.command.uppercase().startsWith("MSG"))) {
             // This is a MSG command frame
             val isForMe = isSelfCallsign(callsign, directed.to)
@@ -2990,6 +3019,8 @@ class JS8EngineService : Service() {
         val frequency: Float,
         var lastUpdated: Long,
         val timeoutMs: Long,
+        /** MSG for direct mail, MSG TO: for a mailbox deposit */
+        val command: String = Js8Commands.CMD_MSG,
         val parts: MutableList<String> = mutableListOf()
     )
     
@@ -2997,6 +3028,9 @@ class JS8EngineService : Service() {
     private val msgLock = Any()
     // Floor for the per-buffer timeout; slow submodes get four frame periods.
     private val MSG_BUFFER_TIMEOUT_MS = 60_000L
+
+    // One mailbox reply per peer inside this window.
+    private val MAILBOX_REPLY_WINDOW_MS = 60_000L
     
     private fun cleanupMsgBuffers(now: Long) {
         synchronized(msgLock) {
@@ -3018,7 +3052,102 @@ class JS8EngineService : Service() {
         return null
     }
     
+    /**
+     * A MSG TO: command frame: another station asks us to hold mail for a
+     * third party. The destination and text follow in data frames, so this
+     * opens a buffer; [completeMailboxDeposit] runs on the last frame.
+     */
+    private fun handleMailboxDeposit(
+        directed: DirectedCommand, snr: Int, freq: Float, type: Int, submode: Int, now: Long
+    ) {
+        val callsign = getConfiguredCallsign() ?: return
+        if (!isSelfCallsign(callsign, directed.to)) return
+        if (isSelfCallsign(callsign, directed.from)) return
+        if (!isMailboxEnabled()) {
+            Log.i(TAG, "Mailbox deposit from=${directed.from} ignored: mailbox disabled")
+            return
+        }
+
+        if (isLastFrame(type)) {
+            if (directed.payload.isNotBlank()) {
+                completeMailboxDeposit(directed.from.trim().uppercase(), directed.payload, snr, freq)
+            }
+            return
+        }
+
+        val key = findMatchingMsgBufferKey(freq) ?: Math.round(freq)
+        val buffer = MsgBuffer(
+            from = directed.from.trim().uppercase(),
+            to = directed.to.trim().uppercase(),
+            snr = snr,
+            frequency = freq,
+            lastUpdated = now,
+            timeoutMs = maxOf(MSG_BUFFER_TIMEOUT_MS, 4 * framePeriodMs(submode)),
+            command = Js8Commands.CMD_MSG_TO,
+            parts = if (directed.payload.isNotBlank()) mutableListOf(directed.payload) else mutableListOf()
+        )
+        synchronized(msgLock) {
+            msgBuffers[key] = buffer
+        }
+        Log.d(TAG, "handleMailboxDeposit: buffered MSG TO: command, waiting for data frames")
+    }
+
+    /**
+     * The reassembled text of a deposit: "DEST message CHK". Validates the
+     * checksum, stores the message, and confirms with ACK.
+     */
+    private fun completeMailboxDeposit(from: String, payload: String, snr: Int, freq: Float) {
+        val callsign = getConfiguredCallsign() ?: return
+        var text = payload.trim().replace(Regex("\\s*[▪■]+\\s*$"), "").trim()
+
+        // The last token is a 3-character checksum over everything before it.
+        val (checksumOk, checked) = validateRelayChecksum(text)
+        if (!checksumOk) {
+            Log.w(TAG, "Mailbox deposit checksum mismatch from=$from text='$text'")
+            if (isMailboxStrictChecksum()) return
+        }
+        text = if (checksumOk) checked.trim() else stripOptionalRelayChecksum(text).trim()
+
+        // First token is who the mail is for; the rest is the message.
+        val dest = text.substringBefore(' ').trim().uppercase()
+        val body = text.substringAfter(' ', "").trim()
+        if (dest.isBlank() || body.isBlank()) {
+            Log.w(TAG, "Mailbox deposit from=$from missing destination or text, dropping")
+            return
+        }
+
+        // A from of A>B means A originated the message and B relayed it here.
+        val hops = from.split(">").map { it.trim() }.filter { it.isNotEmpty() }
+        val originator = hops.firstOrNull() ?: from
+        val relayPath = if (hops.size > 1) from else null
+
+        serviceScope.launch {
+            val id = mailboxRepository.store(
+                MailboxEntity(
+                    originator = originator,
+                    destination = dest,
+                    text = body,
+                    receivedAt = System.currentTimeMillis(),
+                    relayPath = relayPath,
+                    snr = snr,
+                    offsetHz = freq
+                )
+            )
+            Log.i(TAG, "Mailbox deposit stored: id=$id from=$originator dest=$dest text='$body'")
+            // Accepted mail is confirmed no matter what autoreply says.
+            // Taking the message and refusing to say so is the worst of both.
+            broadcastQueueTx("$callsign: $from ACK", null, priority = 2)
+        }
+    }
+
     private fun processMsgBuffer(buffer: MsgBuffer, myCallsign: String) {
+        if (buffer.command == Js8Commands.CMD_MSG_TO) {
+            val assembled = assembleMsgPayload(buffer.parts).trim()
+            if (assembled.isNotBlank()) {
+                completeMailboxDeposit(buffer.from, assembled, buffer.snr, buffer.frequency)
+            }
+            return
+        }
         // Data frames split at arbitrary byte boundaries, not word boundaries.
         val fullText = assembleMsgPayload(buffer.parts).trim()
         // Remove end-of-message marker if present
@@ -3079,6 +3208,24 @@ class JS8EngineService : Service() {
         }
 
         val directed = parseDirectedCommand(text) ?: return
+
+        // Mailbox queries route before shouldReplyToDirected because a group
+        // query (A: @ALLCALL QUERY MSGS?) is legitimate and that check
+        // rejects every @ destination.
+        val mailboxCmd = directed.command.uppercase()
+        if (mailboxCmd == Js8Commands.CMD_QUERY_MSGS || mailboxCmd == "QUERY MSGS?") {
+            handleQueryMsgs(callsign, directed)
+            return
+        }
+        if (mailboxCmd == Js8Commands.CMD_QUERY) {
+            val idMatch = Regex("^MSG\\s+(\\d+)$", RegexOption.IGNORE_CASE)
+                .matchEntire(directed.payload.trim())
+            if (idMatch != null) {
+                handleQueryMsg(callsign, directed, idMatch.groupValues[1].toLong())
+                return
+            }
+        }
+
         if (!shouldReplyToDirected(callsign, directed)) return
         val cmdUpper = directed.command.uppercase()
         when {
@@ -3124,6 +3271,83 @@ class JS8EngineService : Service() {
             // MSG auto-ACK is handled in maybeHandleIncomingMessage after full message is received
             else -> return
         }
+    }
+
+    /**
+     * A: ME QUERY MSGS — does our mailbox hold anything for A? Reply
+     * YES MSG ID {id} or NO. A group-addressed query gets YES or silence:
+     * every idle station replying NO to an @ALLCALL sweep floods the band.
+     */
+    private fun handleQueryMsgs(callsign: String, directed: DirectedCommand) {
+        if (!isMailboxEnabled()) return
+        val requester = directed.from.trim().uppercase()
+        if (isSelfCallsign(callsign, requester)) return
+        val groupAddressed = directed.to.startsWith("@")
+        if (!groupAddressed && !isSelfCallsign(callsign, directed.to)) return
+        if (!mailboxReplyAllowed(requester, "QUERY MSGS")) return
+        serviceScope.launch {
+            val next = mailboxRepository.nextForRecipient(requester)
+            if (next != null) {
+                Log.i(TAG, "Mailbox query from=$requester: offering MSG ID ${next.id}")
+                broadcastQueueTx("$callsign: $requester YES MSG ID ${next.id}", null, priority = 1)
+            } else if (!groupAddressed) {
+                Log.i(TAG, "Mailbox query from=$requester: nothing held")
+                broadcastQueueTx("$callsign: $requester NO", null, priority = 1)
+            }
+        }
+    }
+
+    /**
+     * A: ME QUERY MSG {id} — deliver it. The reply threads under the
+     * originator on A's side: MSG {text} FROM {originator}, plus
+     * NEXT MSG ID {n} when more mail waits. Delivery is marked when the
+     * transmission finishes, not here; a failed send must stay held.
+     */
+    private fun handleQueryMsg(callsign: String, directed: DirectedCommand, msgId: Long) {
+        if (!isMailboxEnabled()) return
+        val requester = directed.from.trim().uppercase()
+        if (isSelfCallsign(callsign, requester)) return
+        if (!directed.to.startsWith("@") && !isSelfCallsign(callsign, directed.to)) return
+        if (!mailboxReplyAllowed(requester, "QUERY MSG $msgId")) return
+        serviceScope.launch {
+            val msg = mailboxRepository.getEligible(msgId, requester)
+            if (msg == null) {
+                Log.i(TAG, "Mailbox retrieve from=$requester id=$msgId: not eligible")
+                return@launch
+            }
+            val lookahead = mailboxRepository.nextForRecipient(requester, afterId = msg.id)
+            val reply = buildString {
+                append("$callsign: $requester MSG ${msg.text} FROM ${msg.originator}")
+                if (lookahead != null) append(" NEXT MSG ID ${lookahead.id}")
+            }
+            Log.i(TAG, "Mailbox retrieve from=$requester id=${msg.id}, lookahead=${lookahead?.id}")
+            broadcastQueueTx(
+                reply, null, priority = 1,
+                mailboxId = msg.id,
+                // A group message is recorded per collector; individual mail
+                // is marked delivered outright.
+                mailboxRecipient = if (msg.destination.startsWith("@")) requester else null
+            )
+        }
+    }
+
+    // One answer per peer per question inside the window. Keyed on the
+    // question, not the peer alone: the normal retrieval flow is QUERY MSGS,
+    // then QUERY MSG {id} right after our YES, and a per-peer limit would
+    // suppress the very retrieval the YES invited. What this stops is a
+    // stuck station asking the same thing over and over.
+    private val mailboxReplyTimes = mutableMapOf<String, Long>()
+
+    private fun mailboxReplyAllowed(peer: String, query: String): Boolean {
+        val now = System.currentTimeMillis()
+        val key = "$peer $query"
+        val last = mailboxReplyTimes[key]
+        if (last != null && now - last < MAILBOX_REPLY_WINDOW_MS) {
+            Log.d(TAG, "Mailbox reply to $peer for '$query' suppressed: rate limit")
+            return false
+        }
+        mailboxReplyTimes[key] = now
+        return true
     }
 
     private fun handleRelayFrame(text: String, snr: Int, mode: Int, freq: Float, type: Int) {
@@ -3287,6 +3511,19 @@ class JS8EngineService : Service() {
     private fun isRelayEnabled(): Boolean {
         val prefs = PreferenceManager.getDefaultSharedPreferences(this)
         return prefs.getBoolean(PREF_RELAY_ENABLED, false)
+    }
+
+    // Off by default and separate from autoreply: holding and forwarding
+    // third-party traffic is a regulatory question in some jurisdictions,
+    // so an operator opts into it deliberately.
+    private fun isMailboxEnabled(): Boolean {
+        val prefs = PreferenceManager.getDefaultSharedPreferences(this)
+        return prefs.getBoolean(PREF_MAILBOX_ENABLED, false)
+    }
+
+    private fun isMailboxStrictChecksum(): Boolean {
+        val prefs = PreferenceManager.getDefaultSharedPreferences(this)
+        return prefs.getBoolean(PREF_MAILBOX_STRICT_CHECKSUM, false)
     }
 
     private fun getPreferredTxSubmode(): Int {
@@ -3927,6 +4164,10 @@ class JS8EngineService : Service() {
         private const val TAG = "JS8EngineService"
         private const val PREF_AUTOREPLY_ENABLED = "autoreply_enabled"
         private const val PREF_RELAY_ENABLED = "relay_enabled"
+        private const val PREF_MAILBOX_ENABLED = "mailbox_enabled"
+        // No UI yet: a diagnostic gate for rejecting deposits whose checksum
+        // fails, in case our reassembly disagrees with the desktop's spacing.
+        private const val PREF_MAILBOX_STRICT_CHECKSUM = "mailbox_strict_checksum"
         private const val PREF_TX_SUBMODE = "tx_submode"
         private const val PREF_MY_INFO = "my_info"
         private const val PREF_MY_STATUS = "my_status"
@@ -4033,6 +4274,10 @@ class JS8EngineService : Service() {
         const val EXTRA_QUEUE_TX_TEXT = "queue_tx_text"
         const val EXTRA_QUEUE_TX_DIRECTED = "queue_tx_directed"
         const val EXTRA_QUEUE_TX_PRIORITY = "queue_tx_priority"
+        // A mailbox delivery in flight: the row to mark once the send finishes.
+        // A recipient callsign means a group message, recorded per callsign.
+        const val EXTRA_QUEUE_TX_MAILBOX_ID = "queue_tx_mailbox_id"
+        const val EXTRA_QUEUE_TX_MAILBOX_RECIPIENT = "queue_tx_mailbox_recipient"
         const val PREF_TRANSMIT_MODE = "transmit_mode"
         const val PREF_HEARTBEAT_INTERVAL = "heartbeat_interval"
         const val PREF_TIME_SYNC_AUTO = "time_sync_auto"

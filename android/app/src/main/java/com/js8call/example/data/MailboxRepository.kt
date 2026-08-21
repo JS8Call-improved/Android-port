@@ -46,6 +46,44 @@ class MailboxRepository(context: Context) {
         )
     }
 
+    /**
+     * The next message [callsign] may collect, individual or group, with id
+     * above [afterId]. Drives QUERY MSGS and the NEXT MSG ID lookahead.
+     */
+    suspend fun nextForRecipient(
+        callsign: String,
+        afterId: Long = 0,
+        now: Long = System.currentTimeMillis()
+    ): MailboxEntity? = withContext(Dispatchers.IO) {
+        mailboxDao.nextForRecipient(
+            callsign.trim().uppercase(),
+            now - GROUP_RETRIEVAL_WINDOW_MS,
+            afterId
+        )
+    }
+
+    /**
+     * The message behind a QUERY MSG {id}, or null when [callsign] may not
+     * collect it: unknown id, delivered already, someone else's mail, or a
+     * group message outside the retrieval window or collected before.
+     */
+    suspend fun getEligible(
+        id: Long,
+        callsign: String,
+        now: Long = System.currentTimeMillis()
+    ): MailboxEntity? = withContext(Dispatchers.IO) {
+        val call = callsign.trim().uppercase()
+        val msg = mailboxDao.getById(id) ?: return@withContext null
+        if (msg.state != MailboxEntity.STATE_HELD) return@withContext null
+        when {
+            msg.destination == call -> msg
+            msg.destination.startsWith("@") &&
+                msg.receivedAt >= now - GROUP_RETRIEVAL_WINDOW_MS &&
+                mailboxDao.hasGroupDelivery(id, call) == 0 -> msg
+            else -> null
+        }
+    }
+
     suspend fun markDelivered(id: Long, at: Long = System.currentTimeMillis()) {
         withContext(Dispatchers.IO) { mailboxDao.markDelivered(id, at) }
     }

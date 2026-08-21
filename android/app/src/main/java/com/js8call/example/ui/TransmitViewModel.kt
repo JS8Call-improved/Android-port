@@ -52,14 +52,23 @@ class TransmitViewModel(application: Application) : AndroidViewModel(application
     /**
      * Queue a message for transmission.
      */
-    fun queueMessage(text: String, directed: String? = null, priority: Int = 0, dbId: Long? = null) {
+    fun queueMessage(
+        text: String,
+        directed: String? = null,
+        priority: Int = 0,
+        dbId: Long? = null,
+        mailboxId: Long? = null,
+        mailboxRecipient: String? = null
+    ) {
         if (text.isBlank()) return
 
         val message = TransmitMessage(
             text = text.trim(),
             directed = directed?.takeIf { it.isNotBlank() },
             priority = priority,
-            dbId = dbId
+            dbId = dbId,
+            mailboxId = mailboxId,
+            mailboxRecipient = mailboxRecipient
         )
 
         txQueue.add(message)

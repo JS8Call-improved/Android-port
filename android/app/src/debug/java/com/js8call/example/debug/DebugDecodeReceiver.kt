@@ -3,6 +3,7 @@ package com.js8call.example.debug
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 import com.js8call.example.service.JS8EngineService
 
 /**
@@ -25,6 +26,12 @@ class DebugDecodeReceiver : BroadcastReceiver() {
             action = JS8EngineService.ACTION_DEBUG_INJECT_DECODE
             intent.extras?.let { putExtras(it) }
         }
-        context.startService(forward)
+        try {
+            context.startService(forward)
+        } catch (e: Exception) {
+            // A background start is refused; without this catch the crash
+            // takes the whole process down and the app appears broken.
+            Log.w("DebugDecodeReceiver", "Injection refused, app not foregrounded: $e")
+        }
     }
 }

@@ -231,6 +231,13 @@
             app:iconSpaceReserved="false" />
 
         <SwitchPreferenceCompat
+            app:key="mailbox_enabled"
+            app:title="@string/settings_mailbox"
+            app:summary="@string/settings_mailbox_summary"
+            app:defaultValue="false"
+            app:iconSpaceReserved="false" />
+
+        <SwitchPreferenceCompat
             app:key="keep_screen_on"
             app:title="@string/settings_keep_screen_on"
             app:summary="@string/settings_keep_screen_on_summary"

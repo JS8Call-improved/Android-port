@@ -14,7 +14,9 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.lifecycleScope
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
+import kotlinx.coroutines.launch
 import androidx.navigation.NavController
 import androidx.navigation.fragment.NavHostFragment
 import androidx.navigation.ui.NavigationUI
@@ -22,7 +24,9 @@ import androidx.navigation.ui.setupWithNavController
 import androidx.preference.PreferenceManager
 import com.google.android.material.navigation.NavigationBarView
 import com.google.android.material.snackbar.Snackbar
+import com.js8call.example.data.MailboxRepository
 import com.js8call.example.model.EngineState
+import com.js8call.example.model.TransmitMessage
 import com.js8call.example.service.JS8EngineService
 import com.js8call.example.ui.DecodeViewModel
 import com.js8call.example.ui.MessagesViewModel
@@ -37,6 +41,7 @@ class MainActivity : AppCompatActivity() {
     private var spectrumBroadcastCount: Long = 0
     private lateinit var messagesViewModel: MessagesViewModel
     private lateinit var transmitViewModel: TransmitViewModel
+    private val mailboxRepository by lazy { MailboxRepository(this) }
 
     private val decodeReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -67,7 +72,14 @@ class MainActivity : AppCompatActivity() {
                     val text = intent.getStringExtra(JS8EngineService.EXTRA_QUEUE_TX_TEXT) ?: return
                     val directed = intent.getStringExtra(JS8EngineService.EXTRA_QUEUE_TX_DIRECTED)
                     val priority = intent.getIntExtra(JS8EngineService.EXTRA_QUEUE_TX_PRIORITY, 0)
-                    transmitViewModel.queueMessage(text, directed, priority)
+                    val mailboxId = intent.getLongExtra(JS8EngineService.EXTRA_QUEUE_TX_MAILBOX_ID, -1L)
+                        .takeIf { it > 0 }
+                    val mailboxRecipient =
+                        intent.getStringExtra(JS8EngineService.EXTRA_QUEUE_TX_MAILBOX_RECIPIENT)
+                    transmitViewModel.queueMessage(
+                        text, directed, priority,
+                        mailboxId = mailboxId, mailboxRecipient = mailboxRecipient
+                    )
                     // Trigger queue processing
                     processNextTxIfIdle()
                 }
@@ -78,12 +90,17 @@ class MainActivity : AppCompatActivity() {
                             // Update ViewModel state first; a finished send that
                             // belongs to a conversation gets its bubble updated.
                             if (state == JS8EngineService.TX_STATE_FINISHED) {
-                                transmitViewModel.transmissionComplete()?.dbId?.let { dbId ->
+                                val finished = transmitViewModel.transmissionComplete()
+                                finished?.dbId?.let { dbId ->
                                     messagesViewModel.updateMessageStatus(
                                         dbId,
                                         com.js8call.example.data.MessageEntity.STATUS_SENT
                                     )
                                 }
+                                // Mailbox mail counts as delivered only once
+                                // its transmission finished; a failed send
+                                // stays held for the next query.
+                                finished?.let { markMailboxDelivered(it) }
                             } else {
                                 transmitViewModel.transmissionFailed()?.dbId?.let { dbId ->
                                     messagesViewModel.updateMessageStatus(
@@ -302,6 +319,23 @@ class MainActivity : AppCompatActivity() {
     /**
      * Process the next message in the TX queue if not currently transmitting.
      */
+    /**
+     * A finished send that delivered mailbox mail: mark the row. A recipient
+     * callsign means group mail, recorded per collector; without one the
+     * message itself is marked delivered.
+     */
+    private fun markMailboxDelivered(finished: TransmitMessage) {
+        val mailboxId = finished.mailboxId ?: return
+        lifecycleScope.launch {
+            val recipient = finished.mailboxRecipient
+            if (recipient != null) {
+                mailboxRepository.recordGroupDelivery(mailboxId, recipient)
+            } else {
+                mailboxRepository.markDelivered(mailboxId)
+            }
+        }
+    }
+
     private fun processNextTxIfIdle() {
         // Don't send if already transmitting
         val state = transmitViewModel.txState.value

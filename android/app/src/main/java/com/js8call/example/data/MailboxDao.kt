@@ -52,6 +52,35 @@ interface MailboxDao {
         afterId: Long = 0
     ): MailboxEntity?
 
+    /**
+     * The next message [callsign] may collect, individual or group. This is
+     * the query behind QUERY MSGS and the NEXT MSG ID lookahead: their own
+     * mail by destination, plus any group message inside the retrieval
+     * window they have not collected yet.
+     */
+    @Query(
+        """
+        SELECT m.* FROM mailbox_messages m
+        LEFT JOIN mailbox_group_delivery d
+            ON d.msgId = m.id AND d.callsign = :callsign
+        WHERE m.state = 0 AND m.id > :afterId AND (
+            m.destination = :callsign
+            OR (m.destination LIKE '@%' AND m.receivedAt >= :since
+                AND d.callsign IS NULL)
+        )
+        ORDER BY m.id ASC LIMIT 1
+        """
+    )
+    suspend fun nextForRecipient(callsign: String, since: Long, afterId: Long = 0): MailboxEntity?
+
+    @Query("SELECT * FROM mailbox_messages WHERE id = :id")
+    suspend fun getById(id: Long): MailboxEntity?
+
+    @Query(
+        "SELECT COUNT(*) FROM mailbox_group_delivery WHERE msgId = :msgId AND callsign = :callsign"
+    )
+    suspend fun hasGroupDelivery(msgId: Long, callsign: String): Int
+
     // ---- state changes ----
 
     @Insert
