@@ -27,12 +27,17 @@
         android:gravity="center_vertical"
         android:orientation="horizontal">
 
-        <View
+        <!-- Carries a dot for every ordinary state and a warning glyph for an
+             error, since transmitting is also red and the two hues alone are
+             too close to tell apart. -->
+        <ImageView
             android:id="@+id/state_dot"
-            android:layout_width="10dp"
-            android:layout_height="10dp"
-            android:background="@drawable/status_dot"
-            android:backgroundTint="@color/message_pending" />
+            android:layout_width="12dp"
+            android:layout_height="12dp"
+            android:contentDescription="@null"
+            android:scaleType="fitCenter"
+            android:src="@drawable/status_dot"
+            android:tint="@color/message_pending" />
 
         <TextView
             android:id="@+id/status_text"

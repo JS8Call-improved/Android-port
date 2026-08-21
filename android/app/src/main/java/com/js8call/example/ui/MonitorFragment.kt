@@ -33,7 +33,7 @@ class MonitorFragment : Fragment() {
     private lateinit var transmitViewModel: TransmitViewModel
 
     private lateinit var waterfallView: WaterfallView
-    private lateinit var stateDot: View
+    private lateinit var stateDot: ImageView
     private lateinit var statusText: TextView
     private lateinit var rigIndicator: ImageView
     private lateinit var frequencyButton: MaterialButton
@@ -166,7 +166,13 @@ class MonitorFragment : Fragment() {
         }
 
         statusText.setText(labelRes)
-        stateDot.backgroundTintList =
+        // Transmitting and Error are both red, so an error changes the mark
+        // itself rather than relying on a shade the eye has to measure.
+        stateDot.setImageResource(
+            if (engineState == EngineState.ERROR) R.drawable.ic_error_outline
+            else R.drawable.status_dot
+        )
+        stateDot.imageTintList =
             ColorStateList.valueOf(ContextCompat.getColor(requireContext(), colorRes))
 
         val shouldBeOn = engineState == EngineState.RUNNING || engineState == EngineState.STARTING
