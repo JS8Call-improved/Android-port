@@ -53,6 +53,13 @@ class MessagesFragment : Fragment() {
             findNavController().navigate(R.id.action_messages_to_everything)
         }
 
+        // Newest band activity as the thread preview, like a DM row
+        val everythingPreview = view.findViewById<android.widget.TextView>(R.id.everything_preview)
+        decodeViewModel.decodes.observe(viewLifecycleOwner) { decodes ->
+            everythingPreview.text = decodes.lastOrNull()?.text
+                ?: getString(R.string.everything_subtitle)
+        }
+
         adapter = ConversationListAdapter().apply {
             onItemClick = { conversation ->
                 navigateToConversation(conversation.callsign)

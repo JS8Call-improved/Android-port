@@ -212,7 +212,7 @@
     <string name="messages_title">Messages</string>
     <string name="messages_empty">No conversations yet</string>
     <string name="messages_empty_hint">Start one with the + button</string>
-    <string name="everything_title">Everything</string>
+    <string name="everything_title">All activity</string>
     <string name="everything_subtitle">All activity on the band</string>
     <string name="messages_new_hint">Callsign</string>
     <string name="conversation_empty">No messages yet</string>
