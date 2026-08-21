@@ -28,6 +28,9 @@ data class ContactEntity(
     /** Maidenhead grid, kept from the newest message that carried one */
     val grid: String? = null,
 
+    /** Station info text, kept from the newest INFO reply heard */
+    val info: String? = null,
+
     /** True once the station has sent a message directed at our callsign */
     val heardUs: Boolean = false,
 

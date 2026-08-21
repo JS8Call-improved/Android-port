@@ -48,6 +48,7 @@ class ContactRepository(context: Context) {
 
         val grid = tokens.lastOrNull()?.uppercase()
             ?.takeIf { it != "RR73" && gridRegex.matches(it) }
+        val info = parseInfoReply(tokens)
 
         withContext(Dispatchers.IO) {
             val inserted = contactDao.insertIgnore(
@@ -56,11 +57,12 @@ class ContactRepository(context: Context) {
                     lastHeard = timestamp,
                     snr = snr,
                     offset = offsetHz,
-                    grid = grid
+                    grid = grid,
+                    info = info
                 )
             )
             if (inserted == -1L) {
-                contactDao.updateHeard(sender, timestamp, snr, offsetHz, grid)
+                contactDao.updateHeard(sender, timestamp, snr, offsetHz, grid, info)
             }
 
             // "SENDER: MYCALL ..." means the station copied us.
@@ -71,6 +73,17 @@ class ContactRepository(context: Context) {
                 contactDao.markHeardUs(sender)
             }
         }
+    }
+
+    /**
+     * Station info from an INFO reply: "SENDER: TARGET INFO <text>".
+     * The INFO? query itself carries no text and does not match.
+     */
+    private fun parseInfoReply(tokens: List<String>): String? {
+        if (tokens.size < 4) return null
+        if (!tokens[0].endsWith(":")) return null
+        if (tokens[2].uppercase() != "INFO") return null
+        return tokens.drop(3).joinToString(" ").takeIf { it.isNotBlank() }
     }
 
     private fun isCallsignLike(token: String): Boolean {

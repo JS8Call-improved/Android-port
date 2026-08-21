@@ -35,6 +35,7 @@ class ContactListAdapter : ListAdapter<ContactEntity, ContactListAdapter.Contact
         private val callsignText: TextView = itemView.findViewById(R.id.callsign_text)
         private val hearsUsIcon: ImageView = itemView.findViewById(R.id.hears_us_icon)
         private val detailText: TextView = itemView.findViewById(R.id.detail_text)
+        private val infoText: TextView = itemView.findViewById(R.id.info_text)
         private val commentText: TextView = itemView.findViewById(R.id.comment_text)
         private val ageText: TextView = itemView.findViewById(R.id.age_text)
         private val starButton: MaterialButton = itemView.findViewById(R.id.star_button)
@@ -51,6 +52,13 @@ class ContactListAdapter : ListAdapter<ContactEntity, ContactListAdapter.Contact
             contact.grid?.let { parts.add(it) }
             detailText.text = parts.joinToString("  ·  ")
             detailText.visibility = if (parts.isEmpty()) View.GONE else View.VISIBLE
+
+            if (contact.info.isNullOrBlank()) {
+                infoText.visibility = View.GONE
+            } else {
+                infoText.visibility = View.VISIBLE
+                infoText.text = contact.info
+            }
 
             if (contact.comment.isNullOrBlank()) {
                 commentText.visibility = View.GONE

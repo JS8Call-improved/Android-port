@@ -100,6 +100,25 @@
         app:layout_constraintTop_toBottomOf="@id/callsign_text"
         tools:text="SNR -8 dB  ·  1500 Hz  ·  EM73" />
 
+    <!-- Station info from an INFO reply -->
+    <TextView
+        android:id="@+id/info_text"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="16dp"
+        android:layout_marginTop="2dp"
+        android:layout_marginEnd="8dp"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:textAppearance="?attr/textAppearanceBodySmall"
+        android:textColor="?attr/colorOnSurfaceVariant"
+        android:visibility="gone"
+        app:layout_constraintEnd_toStartOf="@id/star_button"
+        app:layout_constraintStart_toEndOf="@id/avatar_frame"
+        app:layout_constraintTop_toBottomOf="@id/detail_text"
+        tools:text="QRP 5W VERTICAL OHIO"
+        tools:visibility="visible" />
+
     <!-- User note -->
     <TextView
         android:id="@+id/comment_text"
@@ -116,7 +135,7 @@
         android:visibility="gone"
         app:layout_constraintEnd_toStartOf="@id/star_button"
         app:layout_constraintStart_toEndOf="@id/avatar_frame"
-        app:layout_constraintTop_toBottomOf="@id/detail_text"
+        app:layout_constraintTop_toBottomOf="@id/info_text"
         tools:text="Regular sked partner, QRP from Ohio"
         tools:visibility="visible" />
 

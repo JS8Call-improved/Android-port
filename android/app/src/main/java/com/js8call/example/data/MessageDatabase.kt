@@ -44,6 +44,7 @@ abstract class MessageDatabase : RoomDatabase() {
                         `snr` INTEGER,
                         `offset` REAL,
                         `grid` TEXT,
+                        `info` TEXT,
                         `heardUs` INTEGER NOT NULL DEFAULT 0,
                         `starred` INTEGER NOT NULL DEFAULT 0,
                         `comment` TEXT,

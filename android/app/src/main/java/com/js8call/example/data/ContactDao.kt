@@ -27,10 +27,18 @@ interface ContactDao {
         SET lastHeard = :timestamp,
             snr = :snr,
             offset = :offset,
-            grid = COALESCE(:grid, grid)
+            grid = COALESCE(:grid, grid),
+            info = COALESCE(:info, info)
         WHERE callsign = :callsign
     """)
-    suspend fun updateHeard(callsign: String, timestamp: Long, snr: Int?, offset: Float?, grid: String?)
+    suspend fun updateHeard(
+        callsign: String,
+        timestamp: Long,
+        snr: Int?,
+        offset: Float?,
+        grid: String?,
+        info: String?
+    )
 
     @Query("UPDATE contacts SET heardUs = 1 WHERE callsign = :callsign")
     suspend fun markHeardUs(callsign: String)
