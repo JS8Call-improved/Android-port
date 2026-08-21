@@ -34,6 +34,7 @@ import com.js8call.example.MessageLogWriter
 import com.js8call.example.R
 import com.js8call.example.BuildConfig
 import com.js8call.example.network.PskReporterClient
+import com.js8call.example.util.CallsignValidator
 import com.js8call.example.util.TxMessageClassifier
 import java.util.Calendar
 import java.util.Locale
@@ -3177,7 +3178,7 @@ class JS8EngineService : Service() {
         currentCallsign = callsign
         currentGrid = grid
         if (!enabled || callsign.isBlank() || grid.isBlank()) {
-            pskReporterClient?.stop(flush = false)
+            pskReporterClient?.stop(flush = false, discardPending = true)
             pskReporterEnabled = false
             return
         }
@@ -3207,7 +3208,11 @@ class JS8EngineService : Service() {
             Log.d(TAG, "PSKReporter skip: self call=$call")
             return
         }
-        val grid = extractGrid(text).orEmpty()
+        val grid = extractGrid(text)
+        if (grid == null) {
+            Log.d(TAG, "PSKReporter skip: no grid in '$text'")
+            return
+        }
         val rfHz = currentDialHz + freq.toInt()
         if (rfHz <= 0) {
             Log.d(TAG, "PSKReporter skip: rfHz=$rfHz dialHz=$currentDialHz freq=$freq")
@@ -3383,11 +3388,7 @@ class JS8EngineService : Service() {
     }
 
     private fun isCallsignLike(token: String): Boolean {
-        if (token.length < 3 || token.length > 12) return false
-        val callsignRegex = Regex("^[A-Z0-9/]+$")
-        if (!callsignRegex.matches(token)) return false
-        if (!token.any { it.isDigit() } || !token.any { it.isLetter() }) return false
-        return true
+        return CallsignValidator.isAmateurCallsign(token)
     }
 
     private fun parseRelayPathCallsigns(from: String, text: String): List<String> {
@@ -3644,10 +3645,7 @@ class JS8EngineService : Service() {
         }
         if (token.startsWith("@")) return null
         if (token in HEARD_EXCLUDE_TOKENS) return null
-        val callsignRegex = Regex("^[A-Z0-9/]{3,12}$")
-        if (!callsignRegex.matches(token)) return null
-        if (!token.any { it.isLetter() } || !token.any { it.isDigit() }) return null
-        return token
+        return token.takeIf(CallsignValidator::isAmateurCallsign)
     }
 
     private fun updateLastTxMessage(

@@ -64,7 +64,13 @@ class PskReporterClient(
         scheduleDescriptorRefresh()
     }
 
-    fun stop(flush: Boolean) {
+    fun stop(flush: Boolean, discardPending: Boolean = false) {
+        if (discardPending) {
+            synchronized(lock) {
+                spots.clear()
+                callsCache.clear()
+            }
+        }
         val localHandler = handler
         if (localHandler == null) {
             started = false
@@ -166,6 +172,7 @@ class PskReporterClient(
         ensureSocket()
         val udpSocket = socket ?: return
         if (rxCall.isBlank() || rxGrid.isBlank()) return
+        if (!flush && synchronized(lock) { spots.isEmpty() }) return
 
         while (true) {
             val header = createBaseMessage()
@@ -193,7 +200,7 @@ class PskReporterClient(
             if (addedSpots.isEmpty()) {
                 if (!flush) return
                 if (txData.size <= txHeaderSize) {
-                    finalizeAndSend(baseMessage, header.lengthOffset, header.exportTimeOffset, header.sequenceOffset, udpSocket, 0)
+                    finalizeAndSend(baseMessage, header, udpSocket, 0)
                     return
                 }
             }
@@ -216,7 +223,7 @@ class PskReporterClient(
                 baseMessage.writeBytes(txData.toByteArray())
             }
 
-            finalizeAndSend(baseMessage, header.lengthOffset, header.exportTimeOffset, header.sequenceOffset, udpSocket, addedSpots.size)
+            finalizeAndSend(baseMessage, header, udpSocket, addedSpots.size)
 
             if (!flush && synchronized(lock) { spots.isEmpty() }) return
             if (!flush && ++flushCounter % FLUSH_INTERVAL == 0) {
@@ -237,43 +244,42 @@ class PskReporterClient(
         message.writeInt(0)
         message.writeInt(observationId)
 
-        if (sendDescriptors > 0) {
+        val includesDescriptors = sendDescriptors > 0
+        if (includesDescriptors) {
             val sid = buildSenderInfoDescriptor()
             message.writeBytes(sid)
             val rid = buildReceiverInfoDescriptor()
             message.writeBytes(rid)
-            sendDescriptors -= 1
         }
 
         val receiver = buildReceiverRecord()
         message.writeBytes(receiver)
-        return MessageHeader(message, lengthOffset, exportTimeOffset, sequenceOffset)
+        return MessageHeader(message, lengthOffset, exportTimeOffset, sequenceOffset, includesDescriptors)
     }
 
     private fun finalizeAndSend(
         message: PacketWriter,
-        lengthOffset: Int,
-        exportTimeOffset: Int,
-        sequenceOffset: Int,
+        header: MessageHeader,
         udpSocket: DatagramSocket,
         reportCount: Int
-    ) {
+    ): Boolean {
         message.padTo4()
         val length = message.size
-        message.setShort(lengthOffset, length)
-        if (reportCount > 0) {
-            sequenceNumber += reportCount
-        }
-        message.setInt(sequenceOffset, sequenceNumber)
+        message.setShort(header.lengthOffset, length)
+        message.setInt(header.sequenceOffset, sequenceNumber + reportCount)
         val exportTime = (System.currentTimeMillis() / 1000).toInt()
-        message.setInt(exportTimeOffset, exportTime)
+        message.setInt(header.exportTimeOffset, exportTime)
         val payload = message.toByteArray()
         try {
             val packet = DatagramPacket(payload, payload.size)
             udpSocket.send(packet)
+            if (header.includesDescriptors) sendDescriptors -= 1
+            sequenceNumber += reportCount
             Log.d(TAG, "PSKReporter sent ${payload.size} bytes")
+            return true
         } catch (e: Exception) {
             Log.w(TAG, "PSKReporter send failed", e)
+            return false
         }
     }
 
@@ -487,7 +493,8 @@ class PskReporterClient(
         val writer: PacketWriter,
         val lengthOffset: Int,
         val exportTimeOffset: Int,
-        val sequenceOffset: Int
+        val sequenceOffset: Int,
+        val includesDescriptors: Boolean
     )
 
     companion object {
