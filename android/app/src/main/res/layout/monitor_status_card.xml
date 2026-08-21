@@ -182,6 +182,28 @@
                     android:text="@string/monitor_time_drift_reset" />
             </LinearLayout>
 
+            <!-- Start / Stop -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/start_stop_button"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:minHeight="56dp"
+                android:text="@string/monitor_start"
+                android:textSize="16sp"
+                app:icon="@drawable/ic_play_arrow"
+                app:iconGravity="textStart" />
+
+            <TextView
+                android:id="@+id/monitor_version"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_horizontal"
+                android:layout_marginTop="6dp"
+                android:text="@string/monitor_version"
+                android:textColor="?attr/colorOnSurfaceVariant"
+                android:textSize="12sp" />
+
         </LinearLayout>
 
     </LinearLayout>

@@ -1,15 +1,18 @@
 package com.js8call.example.ui
 
 import android.app.Application
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
+import androidx.preference.PreferenceManager
 import com.js8call.example.model.TransmitMessage
 import com.js8call.example.model.TransmitState
 
 /**
- * ViewModel for the Transmit screen.
- * Manages message composition and TX queue.
+ * ViewModel for the TX queue and transmit state.
  */
 class TransmitViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -19,54 +22,53 @@ class TransmitViewModel(application: Application) : AndroidViewModel(application
     private val _queue = MutableLiveData<List<TransmitMessage>>(emptyList())
     val queue: LiveData<List<TransmitMessage>> = _queue
 
-    private val _composedMessage = MutableLiveData<String>("")
-    val composedMessage: LiveData<String> = _composedMessage
-
-    private val _directedTo = MutableLiveData<String>("")
-    val directedTo: LiveData<String> = _directedTo
-
     private val _txOffsetHz = MutableLiveData<Float>(1500f)
     val txOffsetHz: LiveData<Float> = _txOffsetHz
 
+    // Seconds left in the current TX frame, or null when not transmitting.
+    // The frame period comes from the selected mode (Slow/Normal/Fast/Turbo).
+    private val _txCountdownSeconds = MutableLiveData<Int?>(null)
+    val txCountdownSeconds: LiveData<Int?> = _txCountdownSeconds
+
+    // (current frame, total frames) of the transmission in progress, or null when idle.
+    private val _txFrameProgress = MutableLiveData<Pair<Int, Int>?>(null)
+    val txFrameProgress: LiveData<Pair<Int, Int>?> = _txFrameProgress
+
     private val txQueue = mutableListOf<TransmitMessage>()
+
+    private val countdownHandler = Handler(Looper.getMainLooper())
+    private var txStartedAt = 0L
+    private val countdownRunnable = object : Runnable {
+        override fun run() {
+            val periodMs = framePeriodMs()
+            val elapsed = SystemClock.elapsedRealtime() - txStartedAt
+            // A message can span several frames; the countdown restarts each frame.
+            val leftMs = periodMs - (elapsed % periodMs)
+            _txCountdownSeconds.value = ((leftMs + 999) / 1000).toInt()
+            countdownHandler.postDelayed(this, 1000)
+        }
+    }
 
     /**
      * Queue a message for transmission.
-     * @param clearComposed If true, clears the composed message field (for user-initiated sends)
      */
-    fun queueMessage(text: String, directed: String? = null, priority: Int = 0, clearComposed: Boolean = true) {
+    fun queueMessage(text: String, directed: String? = null, priority: Int = 0, dbId: Long? = null) {
         if (text.isBlank()) return
 
         val message = TransmitMessage(
             text = text.trim(),
             directed = directed?.takeIf { it.isNotBlank() },
-            priority = priority
+            priority = priority,
+            dbId = dbId
         )
 
         txQueue.add(message)
         txQueue.sortByDescending { it.priority }
 
         _queue.value = txQueue.toList()
-        _txState.value = TransmitState.QUEUED
-
-        // Clear composed message after queuing (only for user-initiated sends)
-        if (clearComposed) {
-            _composedMessage.value = ""
+        if (_txState.value != TransmitState.TRANSMITTING) {
+            _txState.value = TransmitState.QUEUED
         }
-    }
-
-    /**
-     * Set composed message text.
-     */
-    fun setComposedMessage(text: String) {
-        _composedMessage.value = text
-    }
-
-    /**
-     * Set directed callsign.
-     */
-    fun setDirectedTo(callsign: String) {
-        _directedTo.value = callsign.uppercase()
     }
 
     /**
@@ -81,20 +83,6 @@ class TransmitViewModel(application: Application) : AndroidViewModel(application
      */
     fun getTxOffset(): Float {
         return _txOffsetHz.value ?: 1500f
-    }
-
-    /**
-     * Send CQ.
-     */
-    fun sendCQ() {
-        queueMessage("CQ CQ CQ", priority = 1)
-    }
-
-    /**
-     * Send SNR report to specific station.
-     */
-    fun sendSnrReport(callsign: String, snr: Int) {
-        queueMessage("$callsign SNR $snr", directed = callsign, priority = 2)
     }
 
     /**
@@ -116,6 +104,7 @@ class TransmitViewModel(application: Application) : AndroidViewModel(application
         txQueue.clear()
         _queue.value = emptyList()
         _txState.value = TransmitState.IDLE
+        stopCountdown()
     }
 
     /**
@@ -123,6 +112,7 @@ class TransmitViewModel(application: Application) : AndroidViewModel(application
      */
     fun startTransmitting() {
         _txState.value = TransmitState.TRANSMITTING
+        startCountdown()
     }
 
     fun setQueued() {
@@ -130,28 +120,56 @@ class TransmitViewModel(application: Application) : AndroidViewModel(application
     }
 
     /**
-     * Transmission complete (called when engine finishes TX).
+     * Frame progress from the engine. The index advances when the engine
+     * queues the next frame, ~2s before its audio starts; the countdown
+     * restarts only on the audio-start edge (TX_STATE_STARTED), so it runs
+     * one full cycle per frame without a mid-gap reset.
      */
-    fun transmissionComplete() {
-        // Remove first item from queue
-        if (txQueue.isNotEmpty()) {
-            txQueue.removeAt(0)
-            _queue.value = txQueue.toList()
-        }
-
-        _txState.value = if (txQueue.isEmpty()) {
-            TransmitState.IDLE
+    fun setTxProgress(frameIndex: Int, frameCount: Int) {
+        _txFrameProgress.value = if (frameIndex > 0 && frameCount > 0) {
+            frameIndex to frameCount
         } else {
-            TransmitState.QUEUED
+            null
         }
     }
 
-    fun transmissionFailed() {
+    /**
+     * Transmission complete (called when engine finishes TX).
+     * @return the message that finished, or null if the queue was empty.
+     */
+    fun transmissionComplete(): TransmitMessage? {
+        stopCountdown()
+        val finished = if (txQueue.isNotEmpty()) {
+            txQueue.removeAt(0).also { _queue.value = txQueue.toList() }
+        } else {
+            null
+        }
+
         _txState.value = if (txQueue.isEmpty()) {
             TransmitState.IDLE
         } else {
             TransmitState.QUEUED
         }
+        return finished
+    }
+
+    /**
+     * Transmission failed.
+     * @return the message that failed, or null if the queue was empty.
+     */
+    fun transmissionFailed(): TransmitMessage? {
+        stopCountdown()
+        val failed = if (txQueue.isNotEmpty()) {
+            txQueue.removeAt(0).also { _queue.value = txQueue.toList() }
+        } else {
+            null
+        }
+        _txState.value = if (txQueue.isEmpty()) {
+            TransmitState.IDLE
+        } else {
+            TransmitState.QUEUED
+        }
+        return failed
     }
 
     /**
@@ -159,5 +177,40 @@ class TransmitViewModel(application: Application) : AndroidViewModel(application
      */
     fun getNextMessage(): TransmitMessage? {
         return txQueue.firstOrNull()
+    }
+
+    private fun startCountdown() {
+        txStartedAt = SystemClock.elapsedRealtime()
+        countdownHandler.removeCallbacks(countdownRunnable)
+        countdownRunnable.run()
+    }
+
+    private fun stopCountdown() {
+        countdownHandler.removeCallbacks(countdownRunnable)
+        _txCountdownSeconds.value = null
+        _txFrameProgress.value = null
+    }
+
+    private fun framePeriodMs(): Long {
+        val prefs = PreferenceManager.getDefaultSharedPreferences(getApplication())
+        return when (prefs.getInt(PREF_TX_SUBMODE, SUBMODE_NORMAL)) {
+            SUBMODE_SLOW -> 30000L
+            SUBMODE_FAST -> 10000L
+            SUBMODE_TURBO -> 6000L
+            else -> 15000L
+        }
+    }
+
+    override fun onCleared() {
+        countdownHandler.removeCallbacks(countdownRunnable)
+        super.onCleared()
+    }
+
+    companion object {
+        const val PREF_TX_SUBMODE = "tx_submode"
+        const val SUBMODE_NORMAL = 0
+        const val SUBMODE_FAST = 1
+        const val SUBMODE_TURBO = 2
+        const val SUBMODE_SLOW = 4
     }
 }

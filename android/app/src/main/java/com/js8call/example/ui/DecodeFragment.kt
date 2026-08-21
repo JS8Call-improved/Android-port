@@ -13,14 +13,15 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import com.google.android.material.navigation.NavigationBarView
 import com.google.android.material.snackbar.Snackbar
 import com.js8call.example.R
 
 /**
  * Fragment showing list of decoded messages.
  */
-class DecodeFragment : Fragment() {
+open class DecodeFragment : Fragment() {
+
+    protected open val layoutRes: Int = R.layout.fragment_decodes
 
     private lateinit var viewModel: DecodeViewModel
     private lateinit var transmitViewModel: TransmitViewModel
@@ -28,16 +29,20 @@ class DecodeFragment : Fragment() {
 
     private lateinit var recyclerView: RecyclerView
     private lateinit var emptyText: TextView
-    private lateinit var clearFab: View
+    private var clearFab: View? = null
 
     private var myGroups: Set<String> = emptySet()
+
+    // Row that currently carries the live TX label, so it can be cleared
+    // when a newer outgoing bubble arrives.
+    private var labeledPosition = -1
 
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
         savedInstanceState: Bundle?
     ): View? {
-        return inflater.inflate(R.layout.fragment_decodes, container, false)
+        return inflater.inflate(layoutRes, container, false)
     }
 
     override fun onStart() {
@@ -80,9 +85,12 @@ class DecodeFragment : Fragment() {
         recyclerView.adapter = adapter
         // Pin content to the bottom, texting style
         (recyclerView.layoutManager as? androidx.recyclerview.widget.LinearLayoutManager)?.stackFromEnd = true
+        // No cross-fade on rebinds; the TX label ticks every second
+        (recyclerView.itemAnimator as? androidx.recyclerview.widget.SimpleItemAnimator)
+            ?.supportsChangeAnimations = false
 
-        // Set up FAB
-        clearFab.setOnClickListener {
+        // Set up the clear button (absent in the bare layout)
+        clearFab?.setOnClickListener {
             confirmClearDecodes()
         }
 
@@ -95,6 +103,8 @@ class DecodeFragment : Fragment() {
             // submitList diffs on a background thread; scroll in its commit
             // callback so the new row exists when the scroll runs.
             adapter.submitList(decodes) {
+                // The newest-outgoing position may have shifted; move the TX label with it
+                updateTxLabel()
                 if (decodes.isNotEmpty() && (wasAtBottom || firstLoad)) {
                     if (firstLoad) {
                         recyclerView.scrollToPosition(decodes.size - 1)
@@ -113,6 +123,34 @@ class DecodeFragment : Fragment() {
                 recyclerView.visibility = View.VISIBLE
             }
         }
+
+        // TX frame countdown and progress on the newest outgoing bubble
+        transmitViewModel.txCountdownSeconds.observe(viewLifecycleOwner) { updateTxLabel() }
+        transmitViewModel.txFrameProgress.observe(viewLifecycleOwner) { updateTxLabel() }
+    }
+
+    private fun updateTxLabel() {
+        val countdown = transmitViewModel.txCountdownSeconds.value
+        val progress = transmitViewModel.txFrameProgress.value
+        val label = when {
+            countdown == null -> null
+            progress != null && progress.second > 1 ->
+                getString(R.string.decodes_tx_countdown_frames, progress.first, progress.second, countdown)
+            else -> getString(R.string.decodes_tx_countdown, countdown)
+        }
+        val position = adapter.lastOutgoingPosition()
+        if (label == adapter.txLabel && position == labeledPosition) return
+        adapter.txLabel = label
+        // Clear the label off the bubble that used to be newest
+        if (labeledPosition >= 0 && labeledPosition != position &&
+            labeledPosition < adapter.itemCount
+        ) {
+            adapter.notifyItemChanged(labeledPosition, DecodeListAdapter.PAYLOAD_TX_LABEL)
+        }
+        if (position >= 0) {
+            adapter.notifyItemChanged(position, DecodeListAdapter.PAYLOAD_TX_LABEL)
+        }
+        labeledPosition = if (label != null) position else -1
     }
 
     private fun showDecodeOptions(decode: com.js8call.example.model.DecodedMessage) {
@@ -161,13 +199,9 @@ class DecodeFragment : Fragment() {
             Snackbar.make(requireView(), "No callsign found", Snackbar.LENGTH_SHORT).show()
             return
         }
-        transmitViewModel.setDirectedTo(callsign)
-        val bottomNav = activity?.findViewById<NavigationBarView>(R.id.bottom_navigation)
-        if (bottomNav != null) {
-            bottomNav.selectedItemId = R.id.navigation_transmit
-        } else {
-            findNavController().navigate(R.id.navigation_transmit)
-        }
+        // Open the DM thread with this station
+        val bundle = Bundle().apply { putString("callsign", callsign) }
+        findNavController().navigate(R.id.navigation_conversation, bundle)
     }
 
     private fun extractCallsign(text: String): String? {

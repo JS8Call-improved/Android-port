@@ -130,6 +130,10 @@ public:
   virtual bool is_transmitting() const = 0;
   virtual bool is_transmitting_audio() const = 0;
   virtual int tx_milliseconds_until_audio() const = 0;
+  // 1-based index of the frame now being sent, 0 when idle or tuning.
+  virtual int tx_frame_index() const = 0;
+  // Total frames in the current message, 0 when idle or tuning.
+  virtual int tx_frame_count() const = 0;
   virtual void set_tx_ready(bool ready) = 0;
   virtual void set_tx_boost_enabled(bool enabled) = 0;
   virtual void set_submodes(int submodes) = 0;

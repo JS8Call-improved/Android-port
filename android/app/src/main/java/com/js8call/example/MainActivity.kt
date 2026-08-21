@@ -64,7 +64,7 @@ class MainActivity : AppCompatActivity() {
                     val text = intent.getStringExtra(JS8EngineService.EXTRA_QUEUE_TX_TEXT) ?: return
                     val directed = intent.getStringExtra(JS8EngineService.EXTRA_QUEUE_TX_DIRECTED)
                     val priority = intent.getIntExtra(JS8EngineService.EXTRA_QUEUE_TX_PRIORITY, 0)
-                    transmitViewModel.queueMessage(text, directed, priority, clearComposed = false)
+                    transmitViewModel.queueMessage(text, directed, priority)
                     // Trigger queue processing
                     processNextTxIfIdle()
                 }
@@ -72,11 +72,22 @@ class MainActivity : AppCompatActivity() {
                     val state = intent.getStringExtra(JS8EngineService.EXTRA_TX_STATE)
                     when (state) {
                         JS8EngineService.TX_STATE_FINISHED, JS8EngineService.TX_STATE_FAILED -> {
-                            // Update ViewModel state first
+                            // Update ViewModel state first; a finished send that
+                            // belongs to a conversation gets its bubble updated.
                             if (state == JS8EngineService.TX_STATE_FINISHED) {
-                                transmitViewModel.transmissionComplete()
+                                transmitViewModel.transmissionComplete()?.dbId?.let { dbId ->
+                                    messagesViewModel.updateMessageStatus(
+                                        dbId,
+                                        com.js8call.example.data.MessageEntity.STATUS_SENT
+                                    )
+                                }
                             } else {
-                                transmitViewModel.transmissionFailed()
+                                transmitViewModel.transmissionFailed()?.dbId?.let { dbId ->
+                                    messagesViewModel.updateMessageStatus(
+                                        dbId,
+                                        com.js8call.example.data.MessageEntity.STATUS_FAILED
+                                    )
+                                }
                             }
                             // Process next item in queue after TX completes
                             processNextTxIfIdle()
@@ -88,6 +99,11 @@ class MainActivity : AppCompatActivity() {
                             transmitViewModel.startTransmitting()
                         }
                     }
+                }
+                JS8EngineService.ACTION_TX_PROGRESS -> {
+                    val frameIndex = intent.getIntExtra(JS8EngineService.EXTRA_TX_FRAME_INDEX, 0)
+                    val frameCount = intent.getIntExtra(JS8EngineService.EXTRA_TX_FRAME_COUNT, 0)
+                    transmitViewModel.setTxProgress(frameIndex, frameCount)
                 }
                 JS8EngineService.ACTION_TX_SENT -> {
                     val text = intent.getStringExtra(JS8EngineService.EXTRA_TX_SENT_TEXT) ?: return
@@ -182,8 +198,17 @@ class MainActivity : AppCompatActivity() {
 
         bottomNav.setupWithNavController(navController)
         navController.addOnDestinationChangedListener { _, destination, _ ->
-            if (destination.id == R.id.navigation_conversation) {
+            if (destination.id == R.id.navigation_conversation ||
+                destination.id == R.id.navigation_everything
+            ) {
                 bottomNav.menu.findItem(R.id.navigation_messages).isChecked = true
+            }
+        }
+        // Inside a thread the Messages item is already checked, so a tap on it
+        // fires reselect; pop back to the tab's root screen.
+        bottomNav.setOnItemReselectedListener { item ->
+            if (!navController.popBackStack(item.itemId, false)) {
+                androidx.navigation.ui.NavigationUI.onNavDestinationSelected(item, navController)
             }
         }
 
@@ -222,6 +247,7 @@ class MainActivity : AppCompatActivity() {
             addAction(JS8EngineService.ACTION_QUEUE_TX)
             addAction(JS8EngineService.ACTION_TX_STATE)
             addAction(JS8EngineService.ACTION_TX_SENT)
+            addAction(JS8EngineService.ACTION_TX_PROGRESS)
             addAction(ACTION_PROCESS_TX_QUEUE)
         }
         LocalBroadcastManager.getInstance(this)

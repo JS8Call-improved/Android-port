@@ -129,6 +129,8 @@ class JS8EngineService : Service() {
     private var callsignWarningShown = false
     private var lastTxMessage: String = ""
     private var lastTxDirected: String = ""
+    private var lastTxFrameIndex: Int = 0
+    private var lastTxFrameCount: Int = 0
     private var lastTxSubmode: Int = SUBMODE_NORMAL
     private var lastTxFrequencyHz: Double = DEFAULT_AUDIO_FREQUENCY_HZ
     private var messageLogger: MessageLogWriter? = null
@@ -153,6 +155,18 @@ class JS8EngineService : Service() {
             val millisecondsUntilAudio = activeEngine.txMillisecondsUntilAudio()
             txSessionActive = sessionActive
             txAudioActive = audioActive
+            if (sessionActive) {
+                val frameIndex = activeEngine.txFrameIndex()
+                val frameCount = activeEngine.txFrameCount()
+                if (frameIndex != lastTxFrameIndex || frameCount != lastTxFrameCount) {
+                    lastTxFrameIndex = frameIndex
+                    lastTxFrameCount = frameCount
+                    broadcastTxProgress(frameIndex, frameCount)
+                }
+            } else {
+                lastTxFrameIndex = 0
+                lastTxFrameCount = 0
+            }
             if (!sessionActive) {
                 txMonitorActive = false
                 txMonitorWasAudioActive = false
@@ -399,10 +413,10 @@ class JS8EngineService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(getString(R.string.notification_title))
             .setContentText(getString(R.string.notification_text))
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setSmallIcon(R.drawable.ic_graphic_eq)
             .setContentIntent(pendingIntent)
             .addAction(
-                android.R.drawable.ic_media_pause,
+                R.drawable.ic_pause,
                 getString(R.string.notification_action_stop),
                 stopPendingIntent
             )
@@ -2480,6 +2494,14 @@ class JS8EngineService : Service() {
         LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
     }
 
+    private fun broadcastTxProgress(frameIndex: Int, frameCount: Int) {
+        val intent = Intent(ACTION_TX_PROGRESS).apply {
+            putExtra(EXTRA_TX_FRAME_INDEX, frameIndex)
+            putExtra(EXTRA_TX_FRAME_COUNT, frameCount)
+        }
+        LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
+    }
+
     private fun broadcastTxSent(text: String, frequencyHz: Double) {
         if (text.isBlank()) return
         val intent = Intent(ACTION_TX_SENT).apply {
@@ -3863,6 +3885,7 @@ class JS8EngineService : Service() {
         const val ACTION_TRANSMIT_MESSAGE = "com.js8call.example.ACTION_TRANSMIT_MESSAGE"
         const val ACTION_TX_STATE = "com.js8call.example.ACTION_TX_STATE"
         const val ACTION_TX_SENT = "com.js8call.example.ACTION_TX_SENT"
+        const val ACTION_TX_PROGRESS = "com.js8call.example.ACTION_TX_PROGRESS"
         const val ACTION_RADIO_FREQUENCY = "com.js8call.example.ACTION_RADIO_FREQUENCY"
         const val ACTION_MESSAGE_RECEIVED = "com.js8call.example.ACTION_MESSAGE_RECEIVED"
         const val ACTION_QUEUE_TX = "com.js8call.example.ACTION_QUEUE_TX"
@@ -3907,6 +3930,8 @@ class JS8EngineService : Service() {
         const val EXTRA_TX_FORCE_IDENTIFY = "tx_force_identify"
         const val EXTRA_TX_FORCE_DATA = "tx_force_data"
         const val EXTRA_TX_STATE = "tx_state"
+        const val EXTRA_TX_FRAME_INDEX = "tx_frame_index"
+        const val EXTRA_TX_FRAME_COUNT = "tx_frame_count"
         const val EXTRA_TX_SENT_TEXT = "tx_sent_text"
         const val EXTRA_TX_SENT_FREQ = "tx_sent_freq"
         const val EXTRA_RADIO_FREQUENCY_HZ = "radio_frequency_hz"

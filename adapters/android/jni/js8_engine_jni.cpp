@@ -43,6 +43,8 @@ JNIEXPORT void JNICALL Java_com_js8call_core_JS8Engine_nativeStopTransmit(JNIEnv
 JNIEXPORT jboolean JNICALL Java_com_js8call_core_JS8Engine_nativeIsTransmitting(JNIEnv*, jobject, jlong);
 JNIEXPORT jboolean JNICALL Java_com_js8call_core_JS8Engine_nativeIsTransmittingAudio(JNIEnv*, jobject, jlong);
 JNIEXPORT jint JNICALL Java_com_js8call_core_JS8Engine_nativeTxMillisecondsUntilAudio(JNIEnv*, jobject, jlong);
+JNIEXPORT jint JNICALL Java_com_js8call_core_JS8Engine_nativeTxFrameIndex(JNIEnv*, jobject, jlong);
+JNIEXPORT jint JNICALL Java_com_js8call_core_JS8Engine_nativeTxFrameCount(JNIEnv*, jobject, jlong);
 JNIEXPORT void JNICALL Java_com_js8call_core_JS8Engine_nativeSetTxReady(JNIEnv*, jobject, jlong, jboolean);
 JNIEXPORT void JNICALL Java_com_js8call_core_JS8Engine_nativeSetTimeDriftMs(JNIEnv*, jobject, jlong, jlong);
 JNIEXPORT jlong JNICALL Java_com_js8call_core_JS8Engine_nativeGetTimeDriftMs(JNIEnv*, jobject, jlong);
@@ -888,6 +890,16 @@ int js8_engine_tx_milliseconds_until_audio(JS8Engine_Native* engine) {
   return engine->engine->tx_milliseconds_until_audio();
 }
 
+int js8_engine_tx_frame_index(JS8Engine_Native* engine) {
+  if (!engine || !engine->engine) return 0;
+  return engine->engine->tx_frame_index();
+}
+
+int js8_engine_tx_frame_count(JS8Engine_Native* engine) {
+  if (!engine || !engine->engine) return 0;
+  return engine->engine->tx_frame_count();
+}
+
 void js8_engine_set_tx_ready(JS8Engine_Native* engine, bool ready) {
   if (!engine || !engine->engine) return;
   engine->engine->set_tx_ready(ready);
@@ -945,6 +957,10 @@ int js8_register_natives(JavaVM* vm, JNIEnv* env) {
       (void*)Java_com_js8call_core_JS8Engine_nativeIsTransmittingAudio},
     {"nativeTxMillisecondsUntilAudio", "(J)I",
      (void*)Java_com_js8call_core_JS8Engine_nativeTxMillisecondsUntilAudio},
+    {"nativeTxFrameIndex", "(J)I",
+     (void*)Java_com_js8call_core_JS8Engine_nativeTxFrameIndex},
+    {"nativeTxFrameCount", "(J)I",
+     (void*)Java_com_js8call_core_JS8Engine_nativeTxFrameCount},
     {"nativeSetTxReady", "(JZ)V",
      (void*)Java_com_js8call_core_JS8Engine_nativeSetTxReady},
     {"nativeSetTimeDriftMs", "(JJ)V",

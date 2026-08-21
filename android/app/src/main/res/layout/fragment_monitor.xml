@@ -29,35 +29,4 @@
         android:layout_height="0dp"
         android:layout_weight="1" />
 
-    <!-- Control Buttons -->
-    <LinearLayout
-        android:id="@+id/control_buttons"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_margin="16dp"
-        android:gravity="center"
-        android:orientation="vertical">
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/start_stop_button"
-            style="@style/Widget.Material3.Button.ElevatedButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:minHeight="56dp"
-            android:text="@string/monitor_start"
-            android:textSize="16sp"
-            app:icon="@android:drawable/ic_media_play"
-            app:iconGravity="textStart" />
-
-        <TextView
-            android:id="@+id/monitor_version"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:text="@string/monitor_version"
-            android:textColor="?attr/colorOnSurfaceVariant"
-            android:textSize="12sp" />
-
-    </LinearLayout>
-
 </LinearLayout>

@@ -36,7 +36,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:contentDescription="@string/decodes_clear"
-                app:icon="@android:drawable/ic_menu_delete"
+                app:icon="@drawable/ic_delete"
                 app:iconTint="?attr/colorOnSurfaceVariant" />
         </LinearLayout>
 

@@ -54,6 +54,8 @@ void js8_engine_stop_transmit(JS8Engine_Native* engine);
 int js8_engine_is_transmitting(JS8Engine_Native* engine);
 int js8_engine_is_transmitting_audio(JS8Engine_Native* engine);
 int js8_engine_tx_milliseconds_until_audio(JS8Engine_Native* engine);
+int js8_engine_tx_frame_index(JS8Engine_Native* engine);
+int js8_engine_tx_frame_count(JS8Engine_Native* engine);
 void js8_engine_set_tx_ready(JS8Engine_Native* engine, bool ready);
 
 // Status queries

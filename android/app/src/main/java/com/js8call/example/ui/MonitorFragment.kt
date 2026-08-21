@@ -208,10 +208,10 @@ class MonitorFragment : Fragment() {
     private fun updateButtonState(isRunning: Boolean) {
         if (isRunning) {
             startStopButton.text = getString(R.string.monitor_stop)
-            startStopButton.setCompoundDrawablesWithIntrinsicBounds(android.R.drawable.ic_media_pause, 0, 0, 0)
+            startStopButton.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_pause, 0, 0, 0)
         } else {
             startStopButton.text = getString(R.string.monitor_start)
-            startStopButton.setCompoundDrawablesWithIntrinsicBounds(android.R.drawable.ic_media_play, 0, 0, 0)
+            startStopButton.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_play_arrow, 0, 0, 0)
         }
     }
 

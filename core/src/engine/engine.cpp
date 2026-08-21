@@ -239,6 +239,8 @@ public:
       tx_settings_.tx_delay_s = request.tx_delay_s;
       tx_settings_.tuning = false;
       tx_active_ = true;
+      tx_frames_total_ = static_cast<int>(tx_queue_.size());
+      tx_frames_started_ = 0;
 
       tx_modulator_.stop();
       tx_resampler_.reset();
@@ -272,6 +274,8 @@ public:
       tx_settings_.tx_delay_s = request.tx_delay_s;
       tx_settings_.tuning = false;
       tx_active_ = true;
+      tx_frames_total_ = 1;
+      tx_frames_started_ = 0;
 
       tx_modulator_.stop();
       tx_resampler_.reset();
@@ -297,6 +301,8 @@ public:
       tx_settings_.tx_delay_s = tx_delay_s;
       tx_settings_.tuning = true;
       tx_active_ = true;
+      tx_frames_total_ = 0;
+      tx_frames_started_ = 0;
 
       tx_resampler_.reset();
       std::array<int, protocol::kJs8NumSymbols> tones{};
@@ -320,6 +326,8 @@ public:
     std::lock_guard<std::mutex> lock(tx_mutex_);
     tx_active_ = false;
     tx_queue_.clear();
+    tx_frames_total_ = 0;
+    tx_frames_started_ = 0;
     tx_settings_.tuning = false;
     tx_modulator_.stop();
     tx_resampler_.reset();
@@ -339,6 +347,14 @@ public:
 
   int tx_milliseconds_until_audio() const override {
     return tx_modulator_.milliseconds_until_active();
+  }
+
+  int tx_frame_index() const override {
+    return tx_frames_started_.load();
+  }
+
+  int tx_frame_count() const override {
+    return tx_frames_total_.load();
   }
 
   void set_tx_ready(bool ready) override {
@@ -853,6 +869,8 @@ public:
           start_next_frame_locked();
         } else if (!tx_settings_.tuning) {
           tx_active_ = false;
+          tx_frames_total_ = 0;
+          tx_frames_started_ = 0;
           return 0.0f;
         }
       }
@@ -873,6 +891,7 @@ public:
 
       TxFrame frame = std::move(tx_queue_.front());
       tx_queue_.pop_front();
+      tx_frames_started_.fetch_add(1);
 
       tx_modulator_.start(frame.tones,
                           sm->symbol_samples,
@@ -1018,6 +1037,8 @@ public:
     int tx_log_counter_ = 0;
     bool tx_output_logged_ = false;
     std::atomic<bool> tx_active_{false};
+    std::atomic<int> tx_frames_total_{0};
+    std::atomic<int> tx_frames_started_{0};
     bool tx_output_started_{false};
     std::atomic<bool> tx_ready_{true};
     static constexpr auto kSpectrumInterval = std::chrono::milliseconds(100);

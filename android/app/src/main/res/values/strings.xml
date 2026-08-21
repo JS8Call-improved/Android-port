@@ -210,7 +210,24 @@
     <!-- Messages screen -->
     <string name="messages_title">Messages</string>
     <string name="messages_empty">No conversations yet</string>
-    <string name="messages_empty_hint">Direct messages (MSG) will appear here</string>
+    <string name="messages_empty_hint">Start one with the + button</string>
+    <string name="everything_title">Everything</string>
+    <string name="everything_subtitle">All activity on the band</string>
+    <string name="messages_new_hint">Callsign</string>
+    <string name="conversation_empty">No messages yet</string>
+    <string name="compose_commands">Commands</string>
+    <string name="compose_send">Send</string>
+    <string name="cmd_snr">SNR? · Signal report</string>
+    <string name="cmd_grid">GRID? · Grid square</string>
+    <string name="cmd_info">INFO? · Station info</string>
+    <string name="cmd_status">STATUS? · Station status</string>
+    <string name="cmd_hearing">HEARING? · Stations heard</string>
+    <string name="cmd_agn">AGN? · Repeat last message</string>
+    <string name="msg_status_queued">Queued</string>
+    <string name="msg_status_sending">Sending %1$ds</string>
+    <string name="msg_status_sending_frames">Sending %1$d/%2$d · %3$ds</string>
+    <string name="decodes_tx_countdown">TX %1$ds</string>
+    <string name="decodes_tx_countdown_frames">TX %1$d/%2$d · %3$ds</string>
     <string name="messages_compose_hint">Type message...</string>
     <string name="messages_send">Send</string>
     <string name="messages_new">New Message</string>
