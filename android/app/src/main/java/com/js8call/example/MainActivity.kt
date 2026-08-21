@@ -8,13 +8,16 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.view.MenuItem
 import android.view.WindowManager
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModelProvider
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
+import androidx.navigation.NavController
 import androidx.navigation.fragment.NavHostFragment
+import androidx.navigation.ui.NavigationUI
 import androidx.navigation.ui.setupWithNavController
 import androidx.preference.PreferenceManager
 import com.google.android.material.navigation.NavigationBarView
@@ -204,13 +207,11 @@ class MainActivity : AppCompatActivity() {
                 bottomNav.menu.findItem(R.id.navigation_messages).isChecked = true
             }
         }
-        // Inside a thread the Messages item is already checked, so a tap on it
-        // fires reselect; pop back to the tab's root screen.
-        bottomNav.setOnItemReselectedListener { item ->
-            if (!navController.popBackStack(item.itemId, false)) {
-                androidx.navigation.ui.NavigationUI.onNavDestinationSelected(item, navController)
-            }
-        }
+        // Both listeners share one handler. A tab is checked only when its own
+        // destination is showing, so a tap arrives as select or reselect
+        // depending on where the user is.
+        bottomNav.setOnItemSelectedListener { item -> onNavItemTapped(navController, item) }
+        bottomNav.setOnItemReselectedListener { item -> onNavItemTapped(navController, item) }
 
         decodeViewModel = ViewModelProvider(this)[DecodeViewModel::class.java]
         monitorViewModel = ViewModelProvider(this)[MonitorViewModel::class.java]
@@ -277,6 +278,20 @@ class MainActivity : AppCompatActivity() {
             stopEngineService()
         }
         super.onStop()
+    }
+
+    /**
+     * Handle a tap on a bottom navigation or navigation rail item.
+     *
+     * Pops back to the destination when it is already on the back stack.
+     * NavigationUI navigates with popUpTo(start) and saveState instead, which
+     * leaves the current fragment on screen when the target is the start
+     * destination sitting under it: the controller moves but the view does not.
+     * Opening All activity from the Monitor header lands in exactly that case.
+     */
+    private fun onNavItemTapped(navController: NavController, item: MenuItem): Boolean {
+        if (navController.popBackStack(item.itemId, false)) return true
+        return NavigationUI.onNavDestinationSelected(item, navController)
     }
 
     /**
