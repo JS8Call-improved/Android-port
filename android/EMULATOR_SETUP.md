@@ -65,6 +65,24 @@ echo no | $SDK/cmdline-tools/latest/bin/avdmanager create avd -n firehd10 \
 
 Then apply the `config.ini` overrides listed above. Warnings about `devices.xml` are noise.
 
+There is also a phone AVD named `phone`, on the Pixel 7 profile (1080x2400 at 420 dpi). It shares the API 34 system image:
+
+```sh
+$SDK/cmdline-tools/latest/bin/avdmanager create avd -n phone \
+  -k "system-images;android-34;google_apis;arm64-v8a" -d pixel_7
+```
+
+Set `hw.keyboard=yes` in `~/.android/avd/phone.avd/config.ini` so `adb shell input text` works.
+
+Both AVDs run at the same time on different ports:
+
+```sh
+$SDK/emulator/emulator -avd firehd10 -port 5554 &
+$SDK/emulator/emulator -avd phone -port 5556 &
+```
+
+Target them as `adb -s emulator-5554` (tablet) and `adb -s emulator-5556` (phone).
+
 ## Daily use
 
 Start the emulator:
@@ -90,6 +108,6 @@ adb -e exec-out screencap -p > screen.png
 
 ## Limits
 
-- No audio decode and no radio hardware. The emulator is for layout and interaction work only.
+- No radio hardware. But TX audio plays through the host speakers, and the host microphone feeds the waterfall, so a speaker-to-microphone loop can decode the app's own transmissions. If the microphone reads near silence (RMS ~2 in the logs), re-enable host audio with `adb emu avd hostmicon`.
 - The image is 64-bit Android 14. The tablet is 32-bit Fire OS. Test release candidates on the tablet.
 - The app and its native engine start without problems on the emulator.
