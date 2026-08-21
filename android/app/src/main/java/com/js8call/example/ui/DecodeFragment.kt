@@ -78,6 +78,8 @@ class DecodeFragment : Fragment() {
             }
         }
         recyclerView.adapter = adapter
+        // Pin content to the bottom, texting style
+        (recyclerView.layoutManager as? androidx.recyclerview.widget.LinearLayoutManager)?.stackFromEnd = true
 
         // Set up FAB
         clearFab.setOnClickListener {
@@ -86,7 +88,21 @@ class DecodeFragment : Fragment() {
 
         // Observe decodes
         viewModel.decodes.observe(viewLifecycleOwner) { decodes ->
-            adapter.submitList(decodes)
+            // Stick to the newest message unless the user scrolled up to read history.
+            val wasAtBottom = !recyclerView.canScrollVertically(1)
+            val firstLoad = adapter.itemCount == 0
+
+            // submitList diffs on a background thread; scroll in its commit
+            // callback so the new row exists when the scroll runs.
+            adapter.submitList(decodes) {
+                if (decodes.isNotEmpty() && (wasAtBottom || firstLoad)) {
+                    if (firstLoad) {
+                        recyclerView.scrollToPosition(decodes.size - 1)
+                    } else {
+                        recyclerView.smoothScrollToPosition(decodes.size - 1)
+                    }
+                }
+            }
 
             // Show/hide empty state
             if (decodes.isEmpty()) {
@@ -95,9 +111,6 @@ class DecodeFragment : Fragment() {
             } else {
                 emptyText.visibility = View.GONE
                 recyclerView.visibility = View.VISIBLE
-
-                // Auto-scroll to top for new messages
-                recyclerView.scrollToPosition(0)
             }
         }
     }

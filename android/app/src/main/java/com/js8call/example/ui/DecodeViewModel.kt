@@ -85,11 +85,11 @@ class DecodeViewModel(application: Application) : AndroidViewModel(application) 
      * Add a new decoded message.
      */
     fun addDecode(message: DecodedMessage) {
-        allDecodes.add(0, message) // Add to beginning
+        allDecodes.add(message) // Newest at the end, like a texting thread
 
-        // Limit size
+        // Limit size by dropping the oldest
         if (allDecodes.size > maxDecodes) {
-            allDecodes.removeAt(allDecodes.size - 1)
+            allDecodes.removeAt(0)
         }
 
         applyFilter()
@@ -142,7 +142,8 @@ class DecodeViewModel(application: Application) : AndroidViewModel(application) 
 
         if (loaded.isEmpty()) return
         allDecodes.clear()
-        allDecodes.addAll(loaded.take(maxDecodes))
+        // Sort oldest to newest so files saved before the newest-last change load correctly.
+        allDecodes.addAll(loaded.sortedBy { it.timestamp }.takeLast(maxDecodes))
         applyFilter()
     }
 
@@ -260,11 +261,11 @@ class DecodeViewModel(application: Application) : AndroidViewModel(application) 
      * Add a decoded message directly to the display list.
      */
     private fun addDecodeToDisplay(message: DecodedMessage) {
-        allDecodes.add(0, message) // Add to beginning
+        allDecodes.add(message) // Newest at the end, like a texting thread
 
-        // Limit size
+        // Limit size by dropping the oldest
         if (allDecodes.size > maxDecodes) {
-            allDecodes.removeAt(allDecodes.size - 1)
+            allDecodes.removeAt(0)
         }
 
         applyFilter()
@@ -442,9 +443,10 @@ class DecodeViewModel(application: Application) : AndroidViewModel(application) 
 
     /**
      * Sender callsigns from the in-memory decode list, newest first.
+     * The list stores newest last, so iterate in reverse.
      */
     fun heardCallsigns(): List<String> {
-        return allDecodes.mapNotNull { senderCallsign(it.text) }.distinct()
+        return allDecodes.asReversed().mapNotNull { senderCallsign(it.text) }.distinct()
     }
 
     private fun senderCallsign(text: String): String? {

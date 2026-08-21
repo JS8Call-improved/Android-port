@@ -80,7 +80,6 @@
     <color name="tx_button_queued">#F9A825</color>
     <color name="tx_button_transmitting">#D32F2F</color>
     <color name="highlight_group">#E040FB</color>
-    <color name="decode_outgoing">#FF8F00</color>  <!-- Amber, own transmissions -->
 
     <!-- Message bubble colors -->
     <color name="bubble_incoming">#E8E8E8</color>
