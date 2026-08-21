@@ -1463,6 +1463,47 @@ class JS8EngineService : Service() {
             putExtra(EXTRA_STATE, state)
         }
         LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
+
+        // The rig indicator on the Monitor strip needs the link state, and the
+        // connected flags are set in too many places to broadcast from each one.
+        // Poll while the engine runs instead, and report only on a change.
+        if (state == STATE_RUNNING || state == STATE_STARTING) {
+            startRigStatusPolling()
+        } else {
+            stopRigStatusPolling()
+        }
+    }
+
+    private val rigStatusHandler = Handler(Looper.getMainLooper())
+    private var rigStatusPolling = false
+    private var lastRigConnected: Boolean? = null
+    private val rigStatusRunnable = object : Runnable {
+        override fun run() {
+            if (!rigStatusPolling) return
+            broadcastRigStatus(isRigControlConnected())
+            rigStatusHandler.postDelayed(this, RIG_STATUS_POLL_INTERVAL_MS)
+        }
+    }
+
+    private fun startRigStatusPolling() {
+        if (rigStatusPolling) return
+        rigStatusPolling = true
+        rigStatusHandler.post(rigStatusRunnable)
+    }
+
+    private fun stopRigStatusPolling() {
+        rigStatusPolling = false
+        rigStatusHandler.removeCallbacks(rigStatusRunnable)
+        broadcastRigStatus(false)
+    }
+
+    private fun broadcastRigStatus(connected: Boolean) {
+        if (lastRigConnected == connected) return
+        lastRigConnected = connected
+        val intent = Intent(ACTION_RIG_STATUS).apply {
+            putExtra(EXTRA_RIG_CONNECTED, connected)
+        }
+        LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
     }
 
     private fun broadcastDecode(
@@ -3892,6 +3933,7 @@ class JS8EngineService : Service() {
         const val ACTION_TIME_SYNC_ONCE = "com.js8call.example.ACTION_TIME_SYNC_ONCE"
         const val ACTION_SET_TIME_DRIFT = "com.js8call.example.ACTION_SET_TIME_DRIFT"
         const val ACTION_TIME_DRIFT = "com.js8call.example.ACTION_TIME_DRIFT"
+        const val ACTION_RIG_STATUS = "com.js8call.example.ACTION_RIG_STATUS"
 
         // Engine states
         const val STATE_STOPPED = "stopped"
@@ -3911,6 +3953,7 @@ class JS8EngineService : Service() {
         const val EXTRA_MODE = "mode"
         const val EXTRA_DRIFT_MS = "drift_ms"
         const val EXTRA_TIME_DRIFT_MS = "time_drift_ms"
+        const val EXTRA_RIG_CONNECTED = "rig_connected"
         const val EXTRA_BINS = "bins"
         const val EXTRA_BIN_HZ = "bin_hz"
         const val EXTRA_POWER_DB = "power_db"
@@ -3971,6 +4014,7 @@ class JS8EngineService : Service() {
         private const val PTT_COMMAND_RETRIES = 1
         private const val TX_PREKEY_MONITOR_INTERVAL_MS = 25L
         private const val TX_MONITOR_INTERVAL_MS = 250L
+        private const val RIG_STATUS_POLL_INTERVAL_MS = 2000L
         private const val SCO_START_WAIT_INTERVAL_MS = 200L
         private const val SCO_START_MAX_ATTEMPTS = 10
         private const val SCO_SILENCE_CHECK_DELAY_MS = 2000L

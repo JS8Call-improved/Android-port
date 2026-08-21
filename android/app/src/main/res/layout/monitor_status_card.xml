@@ -1,216 +1,126 @@
 <?xml version="1.0" encoding="utf-8"?>
-<com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
+<!--
+  Status strip for the Monitor screen. Not a card: it reads as the waterfall's
+  control bar, so it sits edge to edge between the waterfall and the decode list.
+
+  One switchable thing lives here, the engine. Everything else on the strip is
+  either a live readout or a menu item, because nothing else can be toggled:
+  transmit happens per message, and the rig connects when the engine starts.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/status_card"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    app:cardElevation="2dp">
+    android:background="?attr/colorSurface"
+    android:orientation="vertical"
+    android:paddingStart="16dp"
+    android:paddingTop="4dp"
+    android:paddingEnd="8dp"
+    android:paddingBottom="6dp">
 
+    <!-- State, rig link, band, power -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical">
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
 
-        <!-- Header strip, same idiom as the Transmit tab's Queue card -->
+        <View
+            android:id="@+id/state_dot"
+            android:layout_width="10dp"
+            android:layout_height="10dp"
+            android:background="@drawable/status_dot"
+            android:backgroundTint="@color/message_pending" />
+
         <TextView
             android:id="@+id/status_text"
-            android:layout_width="match_parent"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:background="?attr/colorSurfaceVariant"
-            android:padding="8dp"
-            android:text="@string/monitor_status_stopped"
+            android:layout_marginStart="8dp"
+            android:text="@string/monitor_state_off"
             android:textAppearance="?attr/textAppearanceTitleMedium"
-            tools:text="STOPPED" />
+            tools:text="Receiving" />
 
-        <LinearLayout
-            android:layout_width="match_parent"
+        <!-- Only shown when rig control is switched on in Settings -->
+        <ImageView
+            android:id="@+id/rig_indicator"
+            android:layout_width="18dp"
+            android:layout_height="18dp"
+            android:layout_marginStart="8dp"
+            android:contentDescription="@string/monitor_rig_disconnected"
+            android:src="@drawable/ic_sync_alt"
+            android:visibility="gone"
+            tools:visibility="visible" />
+
+        <Space
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/frequency_button"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:padding="12dp">
+            android:ellipsize="end"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:maxLines="1"
+            android:minWidth="0dp"
+            android:paddingStart="8dp"
+            android:paddingEnd="4dp"
+            android:textColor="?attr/colorOnSurfaceVariant"
+            app:icon="@drawable/ic_arrow_drop_down"
+            app:iconGravity="textEnd"
+            app:iconPadding="0dp"
+            app:iconTint="?attr/colorOnSurfaceVariant"
+            tools:text="20m · 14.078" />
 
-            <!-- Signal stat tiles -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:baselineAligned="false"
-                android:orientation="horizontal">
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:orientation="vertical">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/monitor_snr"
-                        android:textAppearance="?attr/textAppearanceLabelMedium"
-                        android:textColor="?attr/colorOnSurfaceVariant" />
-
-                    <TextView
-                        android:id="@+id/snr_value"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="--"
-                        android:textAppearance="?attr/textAppearanceTitleMedium"
-                        tools:text="+5 dB" />
-                </LinearLayout>
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:orientation="vertical">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/monitor_power"
-                        android:textAppearance="?attr/textAppearanceLabelMedium"
-                        android:textColor="?attr/colorOnSurfaceVariant" />
-
-                    <TextView
-                        android:id="@+id/power_value"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="--"
-                        android:textAppearance="?attr/textAppearanceTitleMedium"
-                        tools:text="-45 dB" />
-                </LinearLayout>
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:orientation="vertical">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/monitor_tx_offset"
-                        android:textAppearance="?attr/textAppearanceLabelMedium"
-                        android:textColor="?attr/colorOnSurfaceVariant" />
-
-                    <TextView
-                        android:id="@+id/tx_offset_value"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="1500 Hz"
-                        android:textAppearance="?attr/textAppearanceTitleMedium" />
-                </LinearLayout>
-            </LinearLayout>
-
-            <!-- Audio device -->
-            <com.google.android.material.textfield.TextInputLayout
-                android:id="@+id/audio_device_layout"
-                style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
-                android:hint="@string/monitor_audio_device">
-
-                <!-- No saved view state: the restore re-runs the adapter filter
-                     against the restored text, leaving one item in the dropdown.
-                     onViewCreated repopulates the list and selection anyway. -->
-                <com.google.android.material.textfield.MaterialAutoCompleteTextView
-                    android:id="@+id/audio_device_spinner"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:inputType="none"
-                    android:saveEnabled="false" />
-
-            </com.google.android.material.textfield.TextInputLayout>
-
-            <!-- Radio frequency -->
-            <com.google.android.material.textfield.TextInputLayout
-                android:id="@+id/frequency_layout"
-                style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:hint="@string/monitor_radio_frequency">
-
-                <com.google.android.material.textfield.MaterialAutoCompleteTextView
-                    android:id="@+id/frequency_spinner"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:inputType="none"
-                    android:saveEnabled="false" />
-
-            </com.google.android.material.textfield.TextInputLayout>
-
-            <!-- Time drift -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="@string/monitor_time_drift"
-                    android:textAppearance="?attr/textAppearanceLabelMedium"
-                    android:textColor="?attr/colorOnSurfaceVariant" />
-
-                <TextView
-                    android:id="@+id/time_drift_value"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="8dp"
-                    android:layout_weight="1"
-                    android:text="0 ms"
-                    android:textAppearance="?attr/textAppearanceBodyMedium"
-                    tools:text="+1200 ms" />
-
-                <Button
-                    android:id="@+id/time_sync_button"
-                    style="@style/Widget.Material3.Button.TextButton"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:minWidth="0dp"
-                    android:minHeight="32dp"
-                    android:paddingHorizontal="8dp"
-                    android:text="@string/monitor_time_sync" />
-
-                <Button
-                    android:id="@+id/time_drift_reset_button"
-                    style="@style/Widget.Material3.Button.TextButton"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:minWidth="0dp"
-                    android:minHeight="32dp"
-                    android:paddingHorizontal="8dp"
-                    android:text="@string/monitor_time_drift_reset" />
-            </LinearLayout>
-
-            <!-- Start / Stop -->
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/start_stop_button"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
-                android:minHeight="56dp"
-                android:text="@string/monitor_start"
-                android:textSize="16sp"
-                app:icon="@drawable/ic_play_arrow"
-                app:iconGravity="textStart" />
-
-            <TextView
-                android:id="@+id/monitor_version"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_gravity="center_horizontal"
-                android:layout_marginTop="6dp"
-                android:text="@string/monitor_version"
-                android:textColor="?attr/colorOnSurfaceVariant"
-                android:textSize="12sp" />
-
-        </LinearLayout>
-
+        <!-- No saved view state: restoring a checked switch calls setChecked,
+             which fires the listener as though the user had tapped it and
+             starts the engine a second time. The engine state is the source
+             of truth here, and the ViewModel replays it on the way back in. -->
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/power_switch"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:contentDescription="@string/monitor_toggle"
+            android:minHeight="48dp"
+            android:saveEnabled="false" />
     </LinearLayout>
 
-</com.google.android.material.card.MaterialCardView>
+    <!-- Live readouts, plus the actions that are too rare to earn a button -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/telemetry_text"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textAppearance="?attr/textAppearanceLabelMedium"
+            android:textColor="?attr/colorOnSurfaceVariant"
+            tools:text="-18.0 dB · TX 1500 Hz · +12 ms" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/monitor_overflow"
+            style="@style/Widget.Material3.Button.IconButton"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:contentDescription="@string/monitor_more"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            app:icon="@drawable/ic_more_vert"
+            app:iconSize="20dp"
+            app:iconTint="?attr/colorOnSurfaceVariant" />
+    </LinearLayout>
+
+</LinearLayout>

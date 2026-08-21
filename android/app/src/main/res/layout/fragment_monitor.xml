@@ -14,12 +14,11 @@
         android:layout_weight="1.1"
         android:background="@color/waterfall_background" />
 
-    <!-- Status Card -->
+    <!-- Status strip, edge to edge under the waterfall -->
     <include
         layout="@layout/monitor_status_card"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_margin="8dp" />
+        android:layout_height="wrap_content" />
 
     <!-- Embedded decode list -->
     <androidx.fragment.app.FragmentContainerView
