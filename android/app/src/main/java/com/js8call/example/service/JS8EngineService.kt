@@ -2257,6 +2257,30 @@ class JS8EngineService : Service() {
         }
     }
 
+    /**
+     * True for messages that belong in the heartbeat sub-band: heartbeats
+     * themselves and heartbeat SNR acknowledgements.
+     */
+    private fun isHeartbeatTraffic(text: String): Boolean {
+        if (TxMessageClassifier.isHeartbeatMessage(text)) return true
+        return heartbeatAckTxRegex.containsMatchIn(text)
+    }
+
+    /**
+     * Random audio offset inside the heartbeat sub-band. The upper bound backs
+     * off by the submode bandwidth so the whole signal stays under 1000 Hz.
+     */
+    private fun heartbeatOffsetHz(submode: Int): Float {
+        val bandwidthHz = when (submode) {
+            SUBMODE_SLOW -> 25
+            SUBMODE_FAST -> 80
+            SUBMODE_TURBO -> 160
+            else -> 50
+        }
+        val high = HB_SUBBAND_HIGH_HZ - bandwidthHz
+        return (HB_SUBBAND_LOW_HZ + Math.random() * (high - HB_SUBBAND_LOW_HZ)).toFloat()
+    }
+
     private fun sendHeartbeat() {
         if (isTransmitActive()) {
             Log.i(TAG, "Skipping heartbeat due to active transmission, rescheduling")
@@ -2268,10 +2292,7 @@ class JS8EngineService : Service() {
         val callsign = getConfiguredCallsign() ?: return
         val grid = prefs.getString("grid", "")?.trim().orEmpty().uppercase()
 
-        // 500 - 1000 Hz
-        val low = 500
-        val high = 1000
-        val freq = (low + Math.random() * (high - low)).toFloat()
+        val freq = heartbeatOffsetHz(getPreferredTxSubmode())
         
         // Message format: CALL: @HB HEARTBEAT GRID
         // Note: JS8Call desktop constructs it as: CALL: @HB HEARTBEAT GRID
@@ -2372,7 +2393,15 @@ class JS8EngineService : Service() {
         } else {
             prefs.getInt(PREF_TX_SUBMODE, SUBMODE_NORMAL)
         }
-        val audioFrequencyHz = intent.getDoubleExtra(EXTRA_TX_FREQ_HZ, DEFAULT_AUDIO_FREQUENCY_HZ)
+        // Heartbeat traffic belongs in the 500-1000 Hz sub-band, away from QSOs.
+        // This covers manual HB sends and auto HB ACKs; the scheduled heartbeat
+        // picks its own offset in sendHeartbeat().
+        val requestedFrequencyHz = intent.getDoubleExtra(EXTRA_TX_FREQ_HZ, DEFAULT_AUDIO_FREQUENCY_HZ)
+        val audioFrequencyHz = if (isHeartbeatTraffic(text)) {
+            heartbeatOffsetHz(submode).toDouble()
+        } else {
+            requestedFrequencyHz
+        }
         val txDelaySec = intent.getDoubleExtra(EXTRA_TX_DELAY_S, 0.0)
         val forceIdentify = intent.getBooleanExtra(EXTRA_TX_FORCE_IDENTIFY, false)
         val forceData = intent.getBooleanExtra(EXTRA_TX_FORCE_DATA, false)
@@ -3797,6 +3826,14 @@ class JS8EngineService : Service() {
         private const val SUBMODE_TURBO = 2
         private const val SUBMODE_SLOW = 4
         private const val RX_SUBMODES_BASE = SUBMODE_NORMAL or SUBMODE_FAST or SUBMODE_SLOW
+
+        // Heartbeat sub-band, matching the desktop app
+        private const val HB_SUBBAND_LOW_HZ = 500
+        private const val HB_SUBBAND_HIGH_HZ = 1000
+
+        // Outgoing HB ACK: "MYCALL: TARGET HEARTBEAT SNR +NN"
+        private val heartbeatAckTxRegex =
+            Regex("^\\s*[A-Z0-9/]+:\\s+\\S+\\s+HEARTBEAT\\s+SNR\\b", RegexOption.IGNORE_CASE)
         private const val CHECKSUM_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ+-./?"
         private const val CHECKSUM_BASE = 41
 
