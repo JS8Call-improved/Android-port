@@ -35,6 +35,7 @@ import com.js8call.example.R
 import com.js8call.example.BuildConfig
 import com.js8call.example.network.PskReporterClient
 import com.js8call.example.util.CallsignValidator
+import com.js8call.example.util.Js8Commands
 import com.js8call.example.util.TxMessageClassifier
 import java.util.Calendar
 import java.util.Locale
@@ -3183,25 +3184,33 @@ class JS8EngineService : Service() {
         }
 
         var to = toToken
-        var command: String
-        var payloadStart = index + 1
+        val command: String
+        val payload: String
 
         if (toToken.endsWith(">")) {
             to = toToken.trimEnd('>')
             command = ">"
+            payload = tokens.drop(index + 1).joinToString(" ")
         } else {
             if (index + 1 >= tokens.size) return null
-            command = tokens[index + 1]
-            payloadStart = index + 2
+            // Match the command table rather than taking one token, so the
+            // two-word names survive: MSG TO: and QUERY MSGS would otherwise
+            // split at the space and arrive as MSG and QUERY.
+            val remainder = tokens.drop(index + 1).joinToString(" ")
+            val match = Js8Commands.matchAt(remainder)
+            if (match != null) {
+                command = match.command
+                payload = match.payload
+            } else {
+                // Unknown text keeps the old single-token shape, so free-text
+                // frames reach callers exactly as they did before.
+                command = tokens[index + 1]
+                payload = tokens.drop(index + 2).joinToString(" ")
+            }
         }
 
         if (to.isBlank() || command.isBlank()) return null
         if (from.isBlank() && command != ">") return null
-        val payload = if (payloadStart < tokens.size) {
-            tokens.subList(payloadStart, tokens.size).joinToString(" ")
-        } else {
-            ""
-        }
         return DirectedCommand(from, to, command, payload)
     }
 
