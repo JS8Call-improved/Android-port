@@ -36,6 +36,11 @@
     </fragment>
 
     <fragment
+        android:id="@+id/navigation_contacts"
+        android:name="com.js8call.example.ui.ContactsFragment"
+        android:label="@string/nav_contacts" />
+
+    <fragment
         android:id="@+id/navigation_settings"
         android:name="com.js8call.example.ui.SettingsFragment"
         android:label="@string/nav_settings" />

@@ -7,6 +7,7 @@
     <string name="nav_decodes">Decodes</string>
     <string name="nav_messages">Messages</string>
     <string name="nav_transmit">Transmit</string>
+    <string name="nav_contacts">Contacts</string>
     <string name="nav_settings">Settings</string>
 
     <!-- Monitor screen -->
@@ -241,6 +242,22 @@
     <string name="messages_failed">Failed to send</string>
     <string name="messages_today">Today</string>
     <string name="messages_yesterday">Yesterday</string>
+
+    <!-- Contacts screen -->
+    <string name="contacts_empty">No stations heard</string>
+    <string name="contacts_empty_hint">Stations appear here as they are decoded</string>
+    <string name="contact_snr">SNR %1$d dB</string>
+    <string name="contact_offset">%1$d Hz</string>
+    <string name="contact_age_now">now</string>
+    <string name="contact_hears_us">Hears you</string>
+    <string name="contact_star">Favorite</string>
+    <string name="contact_action_message">Message</string>
+    <string name="contact_action_comment">Edit comment</string>
+    <string name="contact_action_delete">Delete</string>
+    <string name="contact_comment_hint">Comment</string>
+    <string name="contact_comment_save">Save</string>
+    <string name="contact_delete_title">Delete %s?</string>
+    <string name="contact_delete_message">The star and comment are removed. The station returns on its next decode.</string>
 
     <!-- Message notifications -->
     <string name="notification_message_channel_name">Messages</string>

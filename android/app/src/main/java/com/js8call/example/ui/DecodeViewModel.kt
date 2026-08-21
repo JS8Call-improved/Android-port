@@ -5,9 +5,12 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
+import androidx.lifecycle.viewModelScope
 import androidx.preference.PreferenceManager
+import com.js8call.example.data.ContactRepository
 import com.js8call.example.model.DecodedMessage
 import com.js8call.example.model.MessageBuffer
+import kotlinx.coroutines.launch
 import java.io.File
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -261,6 +264,22 @@ class DecodeViewModel(application: Application) : AndroidViewModel(application) 
      * Add a decoded message directly to the display list.
      */
     private fun addDecodeToDisplay(message: DecodedMessage) {
+        // Every heard station lands in the contact list
+        if (!message.outgoing) {
+            val app = getApplication<Application>()
+            val myCallsign = PreferenceManager.getDefaultSharedPreferences(app)
+                .getString("callsign", null)
+            viewModelScope.launch {
+                ContactRepository.getInstance(app).recordDecode(
+                    text = message.text,
+                    snr = message.snr,
+                    offsetHz = message.frequency,
+                    timestamp = message.timestamp,
+                    myCallsign = myCallsign
+                )
+            }
+        }
+
         allDecodes.add(message) // Newest at the end, like a texting thread
 
         // Limit size by dropping the oldest

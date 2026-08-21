@@ -100,4 +100,8 @@
     <!-- Unread badge -->
     <color name="unread_badge">#F44336</color>
     <color name="unread_badge_text">#FFFFFF</color>
+
+    <!-- Contact star -->
+    <color name="star_active">#FFB300</color>
+    <color name="star_inactive">#72787E</color>
 </resources>
