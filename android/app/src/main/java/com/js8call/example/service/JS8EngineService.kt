@@ -491,7 +491,7 @@ class JS8EngineService : Service() {
                         updateHeardCallsign(text)
                         broadcastDecode(utc, snr, dt, freq, text, type, quality, mode, driftMs)
                         handleRelayFrame(text, snr, mode, freq, type)
-                        maybeHandleIncomingMessage(text, snr, freq, type)
+                        maybeHandleIncomingMessage(text, snr, freq, type, mode)
                         maybeHandleAutoReply(text, snr, mode)
                         maybeReportToPskReporter(utc, snr, freq, text)
                     }
@@ -2303,8 +2303,8 @@ class JS8EngineService : Service() {
         heartbeatHandler.postDelayed(heartbeatRunnable, waitMs)
     }
 
-    private fun getFrameDurationMs(): Long {
-        return when (getPreferredTxSubmode()) {
+    private fun framePeriodMs(submode: Int): Long {
+        return when (submode) {
             SUBMODE_SLOW -> 30000L
             SUBMODE_NORMAL -> 15000L
             SUBMODE_FAST -> 10000L
@@ -2312,6 +2312,8 @@ class JS8EngineService : Service() {
             else -> 15000L
         }
     }
+
+    private fun getFrameDurationMs(): Long = framePeriodMs(getPreferredTxSubmode())
 
     /**
      * True for messages that belong in the heartbeat sub-band: heartbeats
@@ -2840,7 +2842,7 @@ class JS8EngineService : Service() {
      *   FROM: TO MSG            (multi-frame: command frame)
      *   payload...              (multi-frame: data frames follow)
      */
-    private fun maybeHandleIncomingMessage(text: String, snr: Int, freq: Float, type: Int) {
+    private fun maybeHandleIncomingMessage(text: String, snr: Int, freq: Float, type: Int, submode: Int) {
         val callsign = getConfiguredCallsign()
         Log.d(TAG, "maybeHandleIncomingMessage: text='$text' type=$type callsign=$callsign")
         if (callsign == null) {
@@ -2909,6 +2911,11 @@ class JS8EngineService : Service() {
                 snr = snr,
                 frequency = freq,
                 lastUpdated = now,
+                // Four frame periods of the submode the command arrived in.
+                // A flat 60 seconds expires a Slow-mode message between its
+                // own 30-second frames if one decode runs late or one frame
+                // is missed.
+                timeoutMs = maxOf(MSG_BUFFER_TIMEOUT_MS, 4 * framePeriodMs(submode)),
                 parts = if (initialPayload.isNotBlank()) mutableListOf(initialPayload) else mutableListOf()
             )
             synchronized(msgLock) {
@@ -2956,17 +2963,19 @@ class JS8EngineService : Service() {
         val snr: Int,
         val frequency: Float,
         var lastUpdated: Long,
+        val timeoutMs: Long,
         val parts: MutableList<String> = mutableListOf()
     )
     
     private val msgBuffers = mutableMapOf<Int, MsgBuffer>()
     private val msgLock = Any()
+    // Floor for the per-buffer timeout; slow submodes get four frame periods.
     private val MSG_BUFFER_TIMEOUT_MS = 60_000L
     
     private fun cleanupMsgBuffers(now: Long) {
         synchronized(msgLock) {
             msgBuffers.entries.removeIf { (_, buffer) ->
-                now - buffer.lastUpdated > MSG_BUFFER_TIMEOUT_MS
+                now - buffer.lastUpdated > buffer.timeoutMs
             }
         }
     }
