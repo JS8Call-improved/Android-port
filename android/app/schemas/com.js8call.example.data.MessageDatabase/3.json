@@ -1,0 +1,200 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 3,
+    "identityHash": "8cf935dc1d9ce0bb48c5ed45d52923b2",
+    "entities": [
+      {
+        "tableName": "messages",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `conversationId` TEXT NOT NULL, `direction` INTEGER NOT NULL, `senderCallsign` TEXT, `text` TEXT NOT NULL, `timestamp` INTEGER NOT NULL, `snr` INTEGER, `frequency` REAL, `status` INTEGER NOT NULL, `isRead` INTEGER NOT NULL, `relayPath` TEXT)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "conversationId",
+            "columnName": "conversationId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "direction",
+            "columnName": "direction",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "senderCallsign",
+            "columnName": "senderCallsign",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "text",
+            "columnName": "text",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timestamp",
+            "columnName": "timestamp",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "snr",
+            "columnName": "snr",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "frequency",
+            "columnName": "frequency",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isRead",
+            "columnName": "isRead",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "relayPath",
+            "columnName": "relayPath",
+            "affinity": "TEXT",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_messages_conversationId",
+            "unique": false,
+            "columnNames": [
+              "conversationId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_messages_conversationId` ON `${TABLE_NAME}` (`conversationId`)"
+          },
+          {
+            "name": "index_messages_timestamp",
+            "unique": false,
+            "columnNames": [
+              "timestamp"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_messages_timestamp` ON `${TABLE_NAME}` (`timestamp`)"
+          },
+          {
+            "name": "index_messages_isRead",
+            "unique": false,
+            "columnNames": [
+              "isRead"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_messages_isRead` ON `${TABLE_NAME}` (`isRead`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "contacts",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`callsign` TEXT NOT NULL, `lastHeard` INTEGER NOT NULL, `snr` INTEGER, `offset` REAL, `grid` TEXT, `info` TEXT, `heardUs` INTEGER NOT NULL, `starred` INTEGER NOT NULL, `comment` TEXT, PRIMARY KEY(`callsign`))",
+        "fields": [
+          {
+            "fieldPath": "callsign",
+            "columnName": "callsign",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastHeard",
+            "columnName": "lastHeard",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "snr",
+            "columnName": "snr",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "offset",
+            "columnName": "offset",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "grid",
+            "columnName": "grid",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "info",
+            "columnName": "info",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "heardUs",
+            "columnName": "heardUs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "starred",
+            "columnName": "starred",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "comment",
+            "columnName": "comment",
+            "affinity": "TEXT",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "callsign"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_contacts_lastHeard",
+            "unique": false,
+            "columnNames": [
+              "lastHeard"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_contacts_lastHeard` ON `${TABLE_NAME}` (`lastHeard`)"
+          }
+        ],
+        "foreignKeys": []
+      }
+    ],
+    "views": [],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '8cf935dc1d9ce0bb48c5ed45d52923b2')"
+    ]
+  }
+}
