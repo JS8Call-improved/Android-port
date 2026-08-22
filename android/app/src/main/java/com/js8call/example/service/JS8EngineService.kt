@@ -38,6 +38,7 @@ import com.js8call.example.data.MailboxRepository
 import com.js8call.example.network.PskReporterClient
 import com.js8call.example.util.CallsignValidator
 import com.js8call.example.util.Js8Commands
+import com.js8call.example.util.RelayPath
 import com.js8call.example.util.TxMessageClassifier
 import java.util.Calendar
 import java.util.Locale
@@ -3156,7 +3157,14 @@ class JS8EngineService : Service() {
      * The reassembled text of a deposit: "DEST message CHK". Validates the
      * checksum, stores the message, and confirms with ACK.
      */
-    private fun completeMailboxDeposit(from: String, payload: String, snr: Int, freq: Float) {
+    private fun completeMailboxDeposit(
+        from: String,
+        payload: String,
+        snr: Int,
+        freq: Float,
+        originatorOverride: String? = null,
+        replyPath: String? = null
+    ) {
         val callsign = getConfiguredCallsign() ?: return
         var text = payload.trim().replace(Regex("\\s*[▪■]+\\s*$"), "").trim()
 
@@ -3177,9 +3185,12 @@ class JS8EngineService : Service() {
         }
 
         // A from of A>B means A originated the message and B relayed it here.
+        // A deposit that arrived over a relay path has both already resolved
+        // by the caller, whose path runs the other way round.
         val hops = from.split(">").map { it.trim() }.filter { it.isNotEmpty() }
-        val originator = hops.firstOrNull() ?: from
-        val relayPath = if (hops.size > 1) from else null
+        val originator = originatorOverride ?: hops.firstOrNull() ?: from
+        val relayPath = replyPath ?: if (hops.size > 1) from else null
+        val ackTarget = replyPath ?: from
 
         serviceScope.launch {
             val id = mailboxRepository.store(
@@ -3196,7 +3207,8 @@ class JS8EngineService : Service() {
             Log.i(TAG, "Mailbox deposit stored: id=$id from=$originator dest=$dest text='$body'")
             // Accepted mail is confirmed no matter what autoreply says.
             // Taking the message and refusing to say so is the worst of both.
-            broadcastQueueTx("$callsign: $from ACK", null, priority = 2)
+            val ack = if (replyPath != null) "$ackTarget ACK" else "$callsign: $ackTarget ACK"
+            broadcastQueueTx(ack, null, priority = 2)
         }
     }
 
@@ -3418,20 +3430,35 @@ class JS8EngineService : Service() {
      * every idle station replying NO to an @ALLCALL sweep floods the band.
      */
     private fun handleQueryMsgs(callsign: String, directed: DirectedCommand) {
-        if (!isMailboxEnabled()) return
         val requester = directed.from.trim().uppercase()
-        if (isSelfCallsign(callsign, requester)) return
         val groupAddressed = directed.to.startsWith("@")
         if (!groupAddressed && !isSelfCallsign(callsign, directed.to)) return
+        serveQueryMsgs(callsign, requester, groupAddressed, replyPath = null)
+    }
+
+    /**
+     * A reply goes straight back to the asker, or down [replyPath] when the
+     * question came over a relay. The path already reads nearest hop first,
+     * which is the order a reply needs.
+     */
+    private fun serveQueryMsgs(
+        callsign: String,
+        requester: String,
+        groupAddressed: Boolean,
+        replyPath: String?
+    ) {
+        if (!isMailboxEnabled()) return
+        if (isSelfCallsign(callsign, requester)) return
         if (!mailboxReplyAllowed(requester, "QUERY MSGS")) return
+        val prefix = replyPath ?: "$callsign: $requester"
         serviceScope.launch {
             val next = mailboxRepository.nextForRecipient(requester)
             if (next != null) {
                 Log.i(TAG, "Mailbox query from=$requester: offering MSG ID ${next.id}")
-                broadcastQueueTx("$callsign: $requester YES MSG ID ${next.id}", null, priority = 1)
+                broadcastQueueTx("$prefix YES MSG ID ${next.id}", null, priority = 1)
             } else if (!groupAddressed) {
                 Log.i(TAG, "Mailbox query from=$requester: nothing held")
-                broadcastQueueTx("$callsign: $requester NO", null, priority = 1)
+                broadcastQueueTx("$prefix NO", null, priority = 1)
             }
         }
     }
@@ -3443,11 +3470,21 @@ class JS8EngineService : Service() {
      * transmission finishes, not here; a failed send must stay held.
      */
     private fun handleQueryMsg(callsign: String, directed: DirectedCommand, msgId: Long) {
-        if (!isMailboxEnabled()) return
         val requester = directed.from.trim().uppercase()
-        if (isSelfCallsign(callsign, requester)) return
         if (!directed.to.startsWith("@") && !isSelfCallsign(callsign, directed.to)) return
+        serveQueryMsg(callsign, requester, msgId, replyPath = null)
+    }
+
+    private fun serveQueryMsg(
+        callsign: String,
+        requester: String,
+        msgId: Long,
+        replyPath: String?
+    ) {
+        if (!isMailboxEnabled()) return
+        if (isSelfCallsign(callsign, requester)) return
         if (!mailboxReplyAllowed(requester, "QUERY MSG $msgId")) return
+        val prefix = replyPath ?: "$callsign: $requester"
         serviceScope.launch {
             val msg = mailboxRepository.getEligible(msgId, requester)
             if (msg == null) {
@@ -3456,7 +3493,7 @@ class JS8EngineService : Service() {
             }
             val lookahead = mailboxRepository.nextForRecipient(requester, afterId = msg.id)
             val reply = buildString {
-                append("$callsign: $requester MSG ${msg.text} FROM ${msg.originator}")
+                append("$prefix MSG ${msg.text} FROM ${msg.originator}")
                 if (lookahead != null) append(" NEXT MSG ID ${lookahead.id}")
             }
             Log.i(TAG, "Mailbox retrieve from=$requester id=${msg.id}, lookahead=${lookahead?.id}")
@@ -3478,21 +3515,44 @@ class JS8EngineService : Service() {
 
     private fun recordMailQuery(text: String, directed: String) {
         val trimmed = text.trim().uppercase()
-        val peer = if (directed.isNotBlank()) {
-            if (!trimmed.startsWith("QUERY MSG")) return
-            directed.trim().uppercase()
-        } else {
-            val m = Regex("^\\S+:\\s+(\\S+)\\s+QUERY MSG").find(trimmed) ?: return
-            m.groupValues[1]
+
+        // A relay carries the destination in the payload rather than the
+        // directed field, so the station we are asking is the last callsign
+        // of the ">" chain, not the first. Reading the first would arm the
+        // window against the nearest hop and the reply would be ignored.
+        val relayMatch = Regex("^((?:[A-Z0-9/]+>)+)([A-Z0-9/]+)\\s+QUERY MSG").find(trimmed)
+        val peer = when {
+            relayMatch != null -> {
+                mailRetrievalHops = relayMatch.groupValues[1].count { it == '>' }
+                relayMatch.groupValues[2]
+            }
+            directed.isNotBlank() -> {
+                if (!trimmed.startsWith("QUERY MSG")) return
+                mailRetrievalHops = 0
+                directed.trim().uppercase()
+            }
+            else -> {
+                val m = Regex("^\\S+:\\s+(\\S+)\\s+QUERY MSG").find(trimmed) ?: return
+                mailRetrievalHops = 0
+                m.groupValues[1]
+            }
         }
         if (peer.startsWith("@")) return
         pendingMailRetrievals[peer] = System.currentTimeMillis()
-        Log.d(TAG, "Expecting mailbox replies from $peer")
+        Log.d(TAG, "Expecting mailbox replies from $peer (hops=$mailRetrievalHops)")
     }
+
+    /**
+     * Hops on the path of the last query. Every hop is a full retransmission,
+     * so a two-hop exchange in a slow submode will not finish inside the
+     * direct window.
+     */
+    private var mailRetrievalHops = 0
 
     private fun expectingMailFrom(peer: String): Boolean {
         val asked = pendingMailRetrievals[peer.trim().uppercase()] ?: return false
-        return System.currentTimeMillis() - asked < MAIL_RETRIEVAL_WINDOW_MS
+        val window = MAIL_RETRIEVAL_WINDOW_MS * (mailRetrievalHops + 1)
+        return System.currentTimeMillis() - asked < window
     }
 
     /** Ask [station] for held message [id], guarding against reply loops. */
@@ -3522,8 +3582,11 @@ class JS8EngineService : Service() {
         return true
     }
 
+    // Relayed traffic addressed to us is always taken in. The relay_enabled
+    // preference governs carrying other people's traffic onward, which is
+    // the choice an operator actually makes, and it is checked at the point
+    // of forwarding in processRelayBuffer.
     private fun handleRelayFrame(text: String, snr: Int, mode: Int, freq: Float, type: Int) {
-        if (!isRelayEnabled()) return
         val callsign = getConfiguredCallsign() ?: return
         val now = System.currentTimeMillis()
         cleanupRelayBuffers(now)
@@ -3910,6 +3973,12 @@ class JS8EngineService : Service() {
 
         val forwardPayload = buildRelayForwardPayload(payload)
         if (forwardPayload != null) {
+            // Carrying somebody else's traffic is the part an operator opts
+            // into. Mail addressed to us is delivered below either way.
+            if (!isRelayEnabled()) {
+                Log.i(TAG, "Relay forwarding disabled, dropping transit traffic")
+                return
+            }
             val forwardText = if (buffer.from.isNotBlank()) {
                 "$forwardPayload *DE* ${buffer.from}"
             } else {
@@ -3919,18 +3988,172 @@ class JS8EngineService : Service() {
             return
         }
 
-        val trimmed = payload.trimStart()
-        if (trimmed.startsWith("ACK", ignoreCase = true)) {
-            return
-        }
-
         val relayPath = parseRelayPathCallsigns(buffer.from, payload).joinToString(">")
         if (relayPath.isBlank()) return
 
-        val handled = maybeHandleRelayedAutoreply(payload, relayPath, buffer.snr, buffer.submode)
-        if (!handled) {
-            sendRelayMessage("$relayPath ACK", buffer.submode)
+        handleRelayedArrival(payload, relayPath, buffer.snr, buffer.frequency, buffer.submode)
+    }
+
+    /**
+     * A relayed message that reached its destination, which is us. The path
+     * runs nearest hop first, so the station we are really talking to is at
+     * the far end of it. Everything here answers back down the same path.
+     */
+    private fun handleRelayedArrival(
+        payload: String,
+        relayPath: String,
+        snr: Int,
+        freq: Float,
+        submode: Int
+    ) {
+        val callsign = getConfiguredCallsign() ?: return
+        val originator = RelayPath.originatorOfReturnPath(relayPath) ?: return
+
+        // Every hop appended itself, and that trail is what the return path
+        // was built from. It is not part of what the operator wrote, so it
+        // comes off before anything reads the text as a command or a message.
+        val trimmed = stripRelayAttribution(payload)
+        if (trimmed.isBlank()) return
+
+        if (trimmed.equals("ACK", ignoreCase = true) ||
+            trimmed.startsWith("ACK ", ignoreCase = true)
+        ) {
+            Log.i(TAG, "Relayed ACK from $originator via $relayPath")
+            broadcastMessageAcked(originator)
+            return
         }
+
+        if (handleRelayedMailboxReply(originator, relayPath, trimmed, snr, freq)) return
+        if (handleRelayedMailboxQuery(callsign, originator, relayPath, trimmed, snr, freq)) return
+        if (maybeHandleRelayedAutoreply(trimmed, relayPath, snr, submode)) return
+
+        // A question we have no answer for stays a question. Storing "SNR?"
+        // as a chat message would just be noise in the thread.
+        if (trimmed.substringBefore(' ').endsWith("?")) {
+            Log.d(TAG, "Relayed query '$trimmed' from $originator went unanswered")
+            return
+        }
+
+        // Not a command, so it is a message. Thread it under the station that
+        // wrote it rather than the neighbor that handed it over.
+        Log.i(TAG, "Relayed message from $originator via $relayPath: '$trimmed'")
+        broadcastMessageReceived(
+            originator, trimmed, snr, freq, carriersOf(relayPath, endIsOriginator = true), originator
+        )
+        broadcastQueueTx("$relayPath ACK", null, priority = 2)
+    }
+
+    /**
+     * The stations that carried a message, in the order it travelled, which
+     * is what a thread shows. A return path runs the other way and ends at
+     * the station we were talking to, so it is reversed and, when that far
+     * end wrote the message rather than carrying it, trimmed.
+     */
+    private fun carriersOf(relayPath: String, endIsOriginator: Boolean): String? {
+        val hops = RelayPath.parse(relayPath)
+        val carriers = if (endIsOriginator) hops.dropLast(1) else hops
+        return RelayPath.format(carriers.reversed())
+    }
+
+    /** Remove the "*DE* CALL" trail each hop appends, leaving the original text. */
+    private fun stripRelayAttribution(payload: String): String {
+        return relayPathRegex.replace(payload, "").trim()
+    }
+
+    /**
+     * An answer to a mailbox question we asked over this path. Keyed on the
+     * originator, because the station handing it to us is only the near hop.
+     */
+    private fun handleRelayedMailboxReply(
+        originator: String,
+        relayPath: String,
+        payload: String,
+        snr: Int,
+        freq: Float
+    ): Boolean {
+        if (!expectingMailFrom(originator)) return false
+
+        Regex("^YES\\s+MSG\\s+ID\\s+(\\d+)", RegexOption.IGNORE_CASE).find(payload)?.let {
+            val id = it.groupValues[1].toLong()
+            if (!mailboxReplyAllowed(originator, "FETCH $id")) return true
+            pendingMailRetrievals[originator] = System.currentTimeMillis()
+            Log.i(TAG, "Fetching mailbox message $id from $originator via $relayPath")
+            broadcastQueueTx("$relayPath QUERY MSG $id", null, priority = 1)
+            return true
+        }
+
+        if (payload.equals("NO", ignoreCase = true)) {
+            Log.i(TAG, "No mail waiting at $originator (via $relayPath)")
+            broadcastMailboxEmpty(originator)
+            return true
+        }
+
+        if (payload.startsWith("MSG ", ignoreCase = true)) {
+            val body = payload.substring(4).trim()
+            val delivered = parseDeliveredMail(originator, body) ?: return false
+            Log.i(
+                TAG,
+                "Mailbox mail collected via relay: originator=${delivered.originator} " +
+                    "path=$relayPath next=${delivered.nextId}"
+            )
+            // The far end here is the mailbox that held the message, so it
+            // carried it and stays in the list. The author is separate.
+            broadcastMessageReceived(
+                delivered.originator, delivered.text, snr, freq,
+                carriersOf(relayPath, endIsOriginator = false), delivered.originator
+            )
+            delivered.nextId?.let { next ->
+                if (mailboxReplyAllowed(originator, "FETCH $next")) {
+                    pendingMailRetrievals[originator] = System.currentTimeMillis()
+                    broadcastQueueTx("$relayPath QUERY MSG $next", null, priority = 1)
+                }
+            }
+            return true
+        }
+
+        return false
+    }
+
+    /** A mailbox question asked of us over a path. Answers ride back down it. */
+    private fun handleRelayedMailboxQuery(
+        callsign: String,
+        originator: String,
+        relayPath: String,
+        payload: String,
+        snr: Int,
+        freq: Float
+    ): Boolean {
+        if (isSelfCallsign(callsign, originator)) return false
+
+        if (payload.equals("QUERY MSGS", ignoreCase = true) ||
+            payload.equals("QUERY MSGS?", ignoreCase = true)
+        ) {
+            serveQueryMsgs(callsign, originator, groupAddressed = false, replyPath = relayPath)
+            return true
+        }
+
+        Regex("^QUERY\\s+MSG\\s+(\\d+)$", RegexOption.IGNORE_CASE).matchEntire(payload)?.let {
+            serveQueryMsg(callsign, originator, it.groupValues[1].toLong(), replyPath = relayPath)
+            return true
+        }
+
+        if (payload.startsWith("MSG TO:", ignoreCase = true)) {
+            if (!isMailboxEnabled()) {
+                Log.i(TAG, "Relayed mailbox deposit from=$originator ignored: mailbox disabled")
+                return true
+            }
+            completeMailboxDeposit(
+                from = originator,
+                payload = payload.substring("MSG TO:".length).trim(),
+                snr = snr,
+                freq = freq,
+                originatorOverride = originator,
+                replyPath = relayPath
+            )
+            return true
+        }
+
+        return false
     }
 
     private fun buildRelayForwardPayload(message: String): String? {
