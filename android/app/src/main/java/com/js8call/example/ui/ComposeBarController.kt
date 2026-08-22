@@ -58,6 +58,7 @@ class ComposeBarController(
                 R.id.cmd_status -> "STATUS?"
                 R.id.cmd_hearing -> "HEARING?"
                 R.id.cmd_agn -> "AGN?"
+                R.id.cmd_query_msgs -> "QUERY MSGS?"
                 else -> return@setOnMenuItemClickListener false
             }
             onCommand(command)

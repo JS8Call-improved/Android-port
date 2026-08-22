@@ -68,7 +68,8 @@ class MessageRepository(context: Context) {
         text: String,
         snr: Int?,
         frequency: Float?,
-        relayPath: String? = null
+        relayPath: String? = null,
+        markRead: Boolean = false
     ): Long {
         val message = MessageEntity(
             conversationId = if (conversationId.startsWith("@")) conversationId.uppercase() else normalizeCallsign(conversationId),
@@ -79,7 +80,7 @@ class MessageRepository(context: Context) {
             snr = snr,
             frequency = frequency,
             status = MessageEntity.STATUS_SENT,
-            isRead = false,
+            isRead = markRead,
             relayPath = relayPath
         )
         return insertMessage(message)
@@ -104,6 +105,18 @@ class MessageRepository(context: Context) {
             relayPath = relayPath
         )
         return insertMessage(message)
+    }
+
+    /**
+     * Prune unsubscribed group traffic older than [cutoff]. It is stored
+     * speculatively so a later Join reveals history; it is not the
+     * operator's data and must not grow the database forever.
+     */
+    suspend fun deleteOldGroupMessages(cutoff: Long, subscribed: List<String>) {
+        withContext(Dispatchers.IO) {
+            // NOT IN () matches nothing in SQLite, so guarantee one element.
+            messageDao.deleteOldGroupMessages(cutoff, subscribed.ifEmpty { listOf("@") })
+        }
     }
 
     /** Take an inbound ACK as the receipt for the newest sent message. */

@@ -62,10 +62,13 @@ class MessagesViewModel(application: Application) : AndroidViewModel(application
         text: String,
         snr: Int? = null,
         frequency: Float? = null,
-        relayPath: String? = null
+        relayPath: String? = null,
+        markRead: Boolean = false
     ) {
         viewModelScope.launch {
-            repository.insertIncomingMessage(conversationId, from, text, snr, frequency, relayPath)
+            repository.insertIncomingMessage(
+                conversationId, from, text, snr, frequency, relayPath, markRead
+            )
         }
     }
 

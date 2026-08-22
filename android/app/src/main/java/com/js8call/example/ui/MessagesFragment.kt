@@ -91,13 +91,34 @@ class MessagesFragment : Fragment() {
             showNewMessageDialog()
         }
 
+        val otherGroupsButton = view.findViewById<View>(R.id.other_groups_button)
+        otherGroupsButton.setOnClickListener {
+            findNavController().navigate(R.id.action_messages_to_other_groups)
+        }
+
         // Observe conversations
         viewModel.conversations.observe(viewLifecycleOwner) { conversations ->
-            adapter.submitList(conversations)
-            conversationCallsigns = conversations.map { it.callsign }
+            // Group traffic the operator has not subscribed to lives behind
+            // the Other groups entry, not in the main thread list. Groups
+            // they have subscribed to appear even before any traffic.
+            val subscribed = subscribedGroups()
+            val (other, mine) = conversations.partition {
+                it.callsign.startsWith("@") && it.callsign.uppercase() !in subscribed
+            }
+            val emptyGroups = subscribed
+                .filter { group -> mine.none { it.callsign.equals(group, true) } }
+                .map {
+                    com.js8call.example.data.ConversationSummary(
+                        it, getString(R.string.group_no_traffic), 0L, 0
+                    )
+                }
+            val shown = mine + emptyGroups
+            adapter.submitList(shown)
+            conversationCallsigns = shown.map { it.callsign }
+            otherGroupsButton.visibility = if (other.isEmpty()) View.GONE else View.VISIBLE
 
             // Show/hide empty state
-            if (conversations.isEmpty()) {
+            if (shown.isEmpty()) {
                 emptyState.visibility = View.VISIBLE
                 recyclerView.visibility = View.GONE
             } else {
@@ -107,12 +128,24 @@ class MessagesFragment : Fragment() {
         }
     }
 
+    private fun subscribedGroups(): List<String> {
+        val prefs = androidx.preference.PreferenceManager
+            .getDefaultSharedPreferences(requireContext())
+        return (prefs.getString("my_groups", "") ?: "")
+            .split(",").map { it.trim().uppercase() }.filter { it.isNotEmpty() }
+    }
+
     private fun showNewMessageDialog() {
         val dialogView = layoutInflater.inflate(R.layout.dialog_new_message, null)
         val input = dialogView.findViewById<MaterialAutoCompleteTextView>(R.id.callsign_input)
 
-        // Suggest stations from conversation history and this session's decodes
-        val suggestions = (conversationCallsigns + decodeViewModel.heardCallsigns()).distinct()
+        // Suggest stations from conversation history, this session's
+        // decodes, and the well-known groups from the protocol table
+        val suggestions = (
+            conversationCallsigns +
+                decodeViewModel.heardCallsigns() +
+                com.js8call.example.util.Js8Groups.SUGGESTED
+            ).distinct()
         input.setAdapter(
             ArrayAdapter(requireContext(), android.R.layout.simple_list_item_1, suggestions)
         )

@@ -180,6 +180,13 @@
     <string name="relay_station_hint">Relay station</string>
     <string name="relay_message_hint">Message</string>
     <string name="relay_send">Send</string>
+    <string name="other_groups_title">Other groups</string>
+    <string name="other_groups_hint">Groups heard on the band. Long-press to join.</string>
+    <string name="group_no_traffic">No messages yet</string>
+    <string name="join_group">Join group</string>
+    <string name="join_group_confirm">Join %1$s? The thread moves to your Messages list and new traffic notifies you.</string>
+    <string name="group_joined">Joined %1$s</string>
+    <string name="cmd_query_msgs">Query messages (QUERY MSGS?)</string>
     <plurals name="mailbox_destination_summary">
         <item quantity="one">%1$d message, oldest %2$s</item>
         <item quantity="other">%1$d messages, oldest %2$s</item>

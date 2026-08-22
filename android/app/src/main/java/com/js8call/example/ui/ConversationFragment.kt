@@ -56,7 +56,8 @@ class ConversationFragment : Fragment() {
         toolbar.setNavigationOnClickListener { findNavController().navigateUp() }
         SpeedChip.bind(view.findViewById(R.id.speed_chip))
 
-        // Mailbox actions make sense toward a station, not a group.
+        // Mailbox actions make sense toward a station, not a group. A group
+        // thread the operator has not joined gets a Join action instead.
         if (!callsign.startsWith("@")) {
             toolbar.inflateMenu(R.menu.conversation_menu)
             toolbar.setOnMenuItemClickListener { item ->
@@ -68,6 +69,18 @@ class ConversationFragment : Fragment() {
                     }
                     R.id.action_send_via_relay -> {
                         showSendViaRelayDialog()
+                        true
+                    }
+                    else -> false
+                }
+            }
+        } else if (!isSubscribedGroup()) {
+            toolbar.inflateMenu(R.menu.group_menu)
+            toolbar.setOnMenuItemClickListener { item ->
+                when (item.itemId) {
+                    R.id.action_join_group -> {
+                        joinGroup()
+                        toolbar.menu.removeItem(R.id.action_join_group)
                         true
                     }
                     else -> false
@@ -86,7 +99,12 @@ class ConversationFragment : Fragment() {
 
         ComposeBarController(
             root = view,
-            commandMenuRes = R.menu.directed_command_menu,
+            // Per-station queries are meaningless aimed at a group
+            commandMenuRes = if (callsign.startsWith("@")) {
+                R.menu.group_command_menu
+            } else {
+                R.menu.directed_command_menu
+            },
             onSend = { text -> sendMessage(text) },
             // Directed queries ride the normal send path, so they get
             // bubble states and TX tracking like any other message.
@@ -174,6 +192,26 @@ class ConversationFragment : Fragment() {
     private fun hasCallsignConfigured(): Boolean {
         val prefs = PreferenceManager.getDefaultSharedPreferences(requireContext())
         return prefs.getString("callsign", "")?.isNotBlank() == true
+    }
+
+    private fun isSubscribedGroup(): Boolean {
+        val prefs = PreferenceManager.getDefaultSharedPreferences(requireContext())
+        val groups = (prefs.getString("my_groups", "") ?: "")
+            .split(",").map { it.trim().uppercase() }.filter { it.isNotEmpty() }
+        return callsign.uppercase() in groups
+    }
+
+    private fun joinGroup() {
+        val prefs = PreferenceManager.getDefaultSharedPreferences(requireContext())
+        val groups = (prefs.getString("my_groups", "") ?: "")
+            .split(",").map { it.trim().uppercase() }.filter { it.isNotEmpty() }
+        if (callsign.uppercase() !in groups) {
+            prefs.edit()
+                .putString("my_groups", (groups + callsign.uppercase()).joinToString(","))
+                .apply()
+        }
+        Snackbar.make(requireView(), getString(R.string.group_joined, callsign), Snackbar.LENGTH_SHORT)
+            .show()
     }
 
     /**

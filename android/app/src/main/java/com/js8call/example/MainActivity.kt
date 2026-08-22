@@ -66,7 +66,13 @@ class MainActivity : AppCompatActivity() {
                     val freq = intent.getFloatExtra(JS8EngineService.EXTRA_MESSAGE_FREQ, 0f)
                     val relayPath = intent.getStringExtra(JS8EngineService.EXTRA_MESSAGE_RELAY_PATH)
                     val conversationId = intent.getStringExtra(JS8EngineService.EXTRA_MESSAGE_CONVERSATION_ID) ?: from
-                    messagesViewModel.insertIncomingMessage(conversationId, from, msgText, snr, freq, relayPath)
+                    val silent = intent.getBooleanExtra(JS8EngineService.EXTRA_MESSAGE_SILENT, false)
+                    messagesViewModel.insertIncomingMessage(
+                        conversationId, from, msgText, snr, freq, relayPath,
+                        // Other-group traffic arrives read, so it never
+                        // counts toward the tab badge.
+                        markRead = silent
+                    )
                 }
                 JS8EngineService.ACTION_MESSAGE_ACKED -> {
                     val from = intent.getStringExtra(JS8EngineService.EXTRA_MESSAGE_FROM) ?: return
@@ -246,6 +252,8 @@ class MainActivity : AppCompatActivity() {
         bottomNav.setOnItemSelectedListener { item -> onNavItemTapped(navController, item) }
         bottomNav.setOnItemReselectedListener { item -> onNavItemTapped(navController, item) }
 
+        openThreadFromNotification(intent, navController)
+
         decodeViewModel = ViewModelProvider(this)[DecodeViewModel::class.java]
         monitorViewModel = ViewModelProvider(this)[MonitorViewModel::class.java]
         messagesViewModel = ViewModelProvider(this)[MessagesViewModel::class.java]
@@ -325,6 +333,27 @@ class MainActivity : AppCompatActivity() {
      * destination sitting under it: the controller moves but the view does not.
      * Opening All activity from the Monitor header lands in exactly that case.
      */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        val navHostFragment = supportFragmentManager
+            .findFragmentById(R.id.nav_host_fragment) as? NavHostFragment ?: return
+        openThreadFromNotification(intent, navHostFragment.navController)
+    }
+
+    /**
+     * A message notification carries the thread it belongs to. These extras
+     * were written but never read before, so tapping only opened the app.
+     */
+    private fun openThreadFromNotification(intent: Intent?, navController: NavController) {
+        if (intent?.getBooleanExtra("open_messages", false) != true) return
+        val conversationId = intent.getStringExtra("callsign") ?: return
+        intent.removeExtra("open_messages")
+        navController.navigate(
+            R.id.navigation_conversation,
+            Bundle().apply { putString("callsign", conversationId) }
+        )
+    }
+
     private fun onNavItemTapped(navController: NavController, item: MenuItem): Boolean {
         if (navController.popBackStack(item.itemId, false)) return true
         return NavigationUI.onNavDestinationSelected(item, navController)

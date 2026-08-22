@@ -272,6 +272,7 @@ class JS8EngineService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        pruneOtherGroupHistory()
         usbSerialBridge = UsbSerialBridge(applicationContext)
         bluetoothSerialBridge = BluetoothSerialBridge(applicationContext)
         trusdxDirectSerial = TruSdxDirectSerial(applicationContext)
@@ -2602,7 +2603,8 @@ class JS8EngineService : Service() {
         snr: Int,
         freq: Float,
         relayPath: String?,
-        conversationId: String = from
+        conversationId: String = from,
+        silent: Boolean = false
     ) {
         val intent = Intent(ACTION_MESSAGE_RECEIVED).apply {
             putExtra(EXTRA_MESSAGE_FROM, from)
@@ -2610,12 +2612,14 @@ class JS8EngineService : Service() {
             putExtra(EXTRA_MESSAGE_SNR, snr)
             putExtra(EXTRA_MESSAGE_FREQ, freq)
             putExtra(EXTRA_MESSAGE_CONVERSATION_ID, conversationId)
+            putExtra(EXTRA_MESSAGE_SILENT, silent)
             relayPath?.let { putExtra(EXTRA_MESSAGE_RELAY_PATH, it) }
         }
         LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
-        
-        // Also show a notification
-        showMessageNotification(from, text)
+
+        if (!silent) {
+            showMessageNotification(conversationId, from, text)
+        }
     }
     
     /**
@@ -2656,7 +2660,7 @@ class JS8EngineService : Service() {
         LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
     }
 
-    private fun showMessageNotification(from: String, text: String) {
+    private fun showMessageNotification(conversationId: String, from: String, text: String) {
         val notificationManager = getSystemService(NotificationManager::class.java)
         
         // Create message notification channel if it doesn't exist
@@ -2672,13 +2676,15 @@ class JS8EngineService : Service() {
         }
         
         // Create intent to open the app
+        // Tapping opens the thread the message landed in. For a group
+        // message that is the group, not a DM with whoever sent it.
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra("open_messages", true)
-            putExtra("callsign", from)
+            putExtra("callsign", conversationId)
         }
         val pendingIntent = PendingIntent.getActivity(
-            this, from.hashCode(), intent,
+            this, conversationId.hashCode(), intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         
@@ -2966,8 +2972,11 @@ class JS8EngineService : Service() {
             // This is a MSG command frame
             val isForMe = isSelfCallsign(callsign, directed.to)
             val isForMyGroup = isSubscribedGroup(directed.to)
-            
-            if (!isForMe && !isForMyGroup) {
+            // Unsubscribed group traffic is stored too, silently, so the
+            // history is already there if the operator joins the group later.
+            val isOtherGroup = !isForMyGroup && isStorableGroup(directed.to)
+
+            if (!isForMe && !isForMyGroup && !isOtherGroup) {
                 Log.d(TAG, "maybeHandleIncomingMessage: MSG not for me ($callsign) or my groups, skipping")
                 return
             }
@@ -2992,7 +3001,7 @@ class JS8EngineService : Service() {
             
             // If this is the last frame and we have payload, deliver immediately
             if (isLastFrame(type) && initialPayload.isNotBlank()) {
-                val conversationId = if (isForMyGroup) directed.to else directed.from
+                val conversationId = if (isForMyGroup || isOtherGroup) directed.to else directed.from
                 // Strip checksum (3 uppercase alphanumeric chars at end, preceded by space)
                 val cleanPayload = initialPayload.trim()
                     .replace(Regex("\\s*[▪■]+\\s*$"), "")
@@ -3079,6 +3088,9 @@ class JS8EngineService : Service() {
 
     // How long a QUERY MSGS keeps mailbox replies from that station expected.
     private val MAIL_RETRIEVAL_WINDOW_MS = 10 * 60_000L
+
+    // Retention for stored traffic of groups the operator is not in.
+    private val OTHER_GROUP_RETENTION_MS = 30L * 24 * 60 * 60 * 1000
     
     private fun cleanupMsgBuffers(now: Long) {
         synchronized(msgLock) {
@@ -3210,8 +3222,8 @@ class JS8EngineService : Service() {
             return
         }
         
-        val isForMyGroup = isSubscribedGroup(buffer.to)
-        val conversationId = if (isForMyGroup) buffer.to else buffer.from
+        val groupConversation = buffer.to.startsWith("@")
+        val conversationId = if (groupConversation) buffer.to else buffer.from
 
         Log.i(TAG, "MSG received (multi-frame): from=${buffer.from} to=${buffer.to} text='$cleanText' conversationId=$conversationId")
         deliverIncomingMsg(myCallsign, buffer.from, cleanText, buffer.snr, buffer.frequency, conversationId)
@@ -3242,11 +3254,16 @@ class JS8EngineService : Service() {
             )
             delivered.nextId?.let { fetchMailboxMessage(callsign, from, it) }
         } else {
-            broadcastMessageReceived(from, cleanText, snr, freq, null, conversationId)
+            // Traffic for a group we are not in is stored without sound:
+            // no notification, and it arrives already read.
+            val silent = conversationId.startsWith("@") && !isSubscribedGroup(conversationId)
+            broadcastMessageReceived(from, cleanText, snr, freq, null, conversationId, silent)
         }
 
-        // Queue auto-ACK now that full message is received (if autoreply enabled)
-        if (isAutoreplyEnabled()) {
+        // Queue auto-ACK now that full message is received (if autoreply
+        // enabled). Never for a group: every subscriber ACKing at once
+        // would pile the band with confirmations.
+        if (isAutoreplyEnabled() && !conversationId.startsWith("@")) {
             Log.i(TAG, "Auto ACK for MSG from=$from")
             broadcastQueueTx("$callsign: $from ACK", null, priority = 2)
         }
@@ -3282,6 +3299,29 @@ class JS8EngineService : Service() {
         val groupsStr = prefs.getString("my_groups", "") ?: ""
         val groups = groupsStr.split(",").map { it.trim().uppercase() }.filter { it.isNotEmpty() }
         return groups.contains(target.uppercase())
+    }
+
+    /** Drop unsubscribed group traffic older than 30 days. */
+    private fun pruneOtherGroupHistory() {
+        val prefs = PreferenceManager.getDefaultSharedPreferences(this)
+        val subscribed = (prefs.getString("my_groups", "") ?: "")
+            .split(",").map { it.trim().uppercase() }.filter { it.isNotEmpty() }
+        val cutoff = System.currentTimeMillis() - OTHER_GROUP_RETENTION_MS
+        serviceScope.launch {
+            com.js8call.example.data.MessageRepository(this@JS8EngineService)
+                .deleteOldGroupMessages(cutoff, subscribed)
+        }
+    }
+
+    /**
+     * Groups whose traffic is stored even without a subscription, so the
+     * history exists when the operator joins later. @ALLCALL and @HB are
+     * broadcast addresses, not communities; storing them would bury the
+     * real groups under every heartbeat on the band.
+     */
+    private fun isStorableGroup(target: String): Boolean {
+        if (!target.startsWith("@")) return false
+        return target.uppercase() !in setOf("@ALLCALL", "@HB")
     }
 
     private fun maybeHandleAutoReply(text: String, snr: Int, mode: Int) {
@@ -4347,6 +4387,7 @@ class JS8EngineService : Service() {
         const val ACTION_RADIO_FREQUENCY = "com.js8call.example.ACTION_RADIO_FREQUENCY"
         const val ACTION_MESSAGE_RECEIVED = "com.js8call.example.ACTION_MESSAGE_RECEIVED"
         const val ACTION_MESSAGE_ACKED = "com.js8call.example.ACTION_MESSAGE_ACKED"
+        const val EXTRA_MESSAGE_SILENT = "message_silent"
         const val ACTION_MAILBOX_EMPTY = "com.js8call.example.ACTION_MAILBOX_EMPTY"
         const val ACTION_QUEUE_TX = "com.js8call.example.ACTION_QUEUE_TX"
         const val ACTION_TIME_SYNC_ONCE = "com.js8call.example.ACTION_TIME_SYNC_ONCE"

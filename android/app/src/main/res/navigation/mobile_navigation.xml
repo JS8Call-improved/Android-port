@@ -22,12 +22,20 @@
         <action
             android:id="@+id/action_messages_to_mailbox"
             app:destination="@id/navigation_mailbox" />
+        <action
+            android:id="@+id/action_messages_to_other_groups"
+            app:destination="@id/navigation_other_groups" />
     </fragment>
 
     <fragment
         android:id="@+id/navigation_mailbox"
         android:name="com.js8call.example.ui.MailboxFragment"
         android:label="@string/mailbox_title" />
+
+    <fragment
+        android:id="@+id/navigation_other_groups"
+        android:name="com.js8call.example.ui.OtherGroupsFragment"
+        android:label="@string/other_groups_title" />
 
     <fragment
         android:id="@+id/navigation_everything"

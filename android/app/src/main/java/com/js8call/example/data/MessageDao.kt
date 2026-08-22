@@ -64,6 +64,20 @@ interface MessageDao {
     )
     suspend fun markLatestSentAcked(conversationId: String, sent: Int, acked: Int)
 
+    /**
+     * Prune stored group traffic the operator never subscribed to.
+     * Subscribed groups are passed in [keep] and left alone.
+     */
+    @Query(
+        """
+        DELETE FROM messages
+        WHERE conversationId LIKE '@%'
+            AND conversationId NOT IN (:keep)
+            AND timestamp < :cutoff
+        """
+    )
+    suspend fun deleteOldGroupMessages(cutoff: Long, keep: List<String>)
+
     @Query("UPDATE messages SET isRead = 1 WHERE id = :messageId")
     suspend fun markMessageAsRead(messageId: Long)
 

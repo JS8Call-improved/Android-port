@@ -29,6 +29,18 @@
                 android:text="@string/nav_messages"
                 android:textAppearance="?attr/textAppearanceTitleMedium" />
 
+            <!-- Groups heard on the band that the operator is not in -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/other_groups_button"
+                style="@style/Widget.Material3.Button.IconButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:contentDescription="@string/other_groups_title"
+                android:visibility="gone"
+                app:icon="@drawable/ic_group"
+                app:iconTint="?attr/colorOnSurfaceVariant"
+                tools:visibility="visible" />
+
             <FrameLayout
                 android:id="@+id/mailbox_button_frame"
                 android:layout_width="wrap_content"
