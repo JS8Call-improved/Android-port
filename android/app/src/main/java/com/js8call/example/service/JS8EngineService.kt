@@ -2938,10 +2938,15 @@ class JS8EngineService : Service() {
                 completed.countDown()
             }
         }
-        completed.await()
-        if (!released) {
-            released = setRigPtt(false)
-            if (released) rigPttAsserted = false
+        // Bounded wait, and no retry on the calling thread. This runs on the
+        // main thread during shutdown, and when the radio has disconnected
+        // the TX handler can be wedged inside a rig call that never returns;
+        // an unbounded await here froze the whole app. If the release cannot
+        // be confirmed in time, the link is dead anyway - log and keep
+        // shutting down rather than trading a stuck PTT for a stuck app.
+        if (!completed.await(RIG_SHUTDOWN_PTT_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+            Log.e(TAG, "PTT release timed out during shutdown; rig link presumed dead")
+            return false
         }
         return released
     }
@@ -4675,6 +4680,7 @@ class JS8EngineService : Service() {
         // must exceed the lead or the modulator joins the current frame.
         private const val TX_BOUNDARY_LEAD_MS = 1500L
         private const val TX_BOUNDARY_DELAY_S = 2.0
+        private const val RIG_SHUTDOWN_PTT_TIMEOUT_MS = 3000L
         private const val RELAY_FREQUENCY_TOLERANCE_HZ = 10.0f
         private const val RELAY_EOM_MARKER = "\u2662"
         private const val SUBMODE_NORMAL = 0
