@@ -91,7 +91,8 @@ class MessageRepository(context: Context) {
     suspend fun insertOutgoingMessage(
         to: String,
         text: String,
-        status: Int = MessageEntity.STATUS_PENDING
+        status: Int = MessageEntity.STATUS_PENDING,
+        relayPath: String? = null
     ): Long {
         val message = MessageEntity(
             conversationId = normalizeCallsign(to),
@@ -99,9 +100,21 @@ class MessageRepository(context: Context) {
             text = text,
             timestamp = System.currentTimeMillis(),
             status = status,
-            isRead = true // Outgoing messages are always "read"
+            isRead = true, // Outgoing messages are always "read"
+            relayPath = relayPath
         )
         return insertMessage(message)
+    }
+
+    /** Take an inbound ACK as the receipt for the newest sent message. */
+    suspend fun markLatestSentAcked(conversationId: String) {
+        withContext(Dispatchers.IO) {
+            messageDao.markLatestSentAcked(
+                normalizeCallsign(conversationId),
+                MessageEntity.STATUS_SENT,
+                MessageEntity.STATUS_ACKED
+            )
+        }
     }
 
     suspend fun updateMessage(message: MessageEntity) {

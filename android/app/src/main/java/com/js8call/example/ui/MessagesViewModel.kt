@@ -72,13 +72,22 @@ class MessagesViewModel(application: Application) : AndroidViewModel(application
     /**
      * Insert an outgoing message (when user sends).
      */
-    fun insertOutgoingMessage(to: String, text: String): LiveData<Long> {
+    fun insertOutgoingMessage(to: String, text: String, relayPath: String? = null): LiveData<Long> {
         val result = MutableLiveData<Long>()
         viewModelScope.launch {
-            val id = repository.insertOutgoingMessage(to, text, MessageEntity.STATUS_PENDING)
+            val id = repository.insertOutgoingMessage(
+                to, text, MessageEntity.STATUS_PENDING, relayPath
+            )
             result.postValue(id)
         }
         return result
+    }
+
+    /** An inbound ACK: receipt for the newest sent message in the thread. */
+    fun markLatestSentAcked(conversationId: String) {
+        viewModelScope.launch {
+            repository.markLatestSentAcked(conversationId)
+        }
     }
 
     /**

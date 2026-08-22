@@ -49,6 +49,21 @@ interface MessageDao {
     @Query("UPDATE messages SET isRead = 1 WHERE conversationId = :conversationId AND isRead = 0")
     suspend fun markConversationAsRead(conversationId: String)
 
+    /**
+     * An inbound ACK carries no message id, so it is taken as a receipt
+     * for the newest sent message in that conversation.
+     */
+    @Query(
+        """
+        UPDATE messages SET status = :acked WHERE id = (
+            SELECT id FROM messages
+            WHERE conversationId = :conversationId AND direction = 1 AND status = :sent
+            ORDER BY timestamp DESC LIMIT 1
+        )
+        """
+    )
+    suspend fun markLatestSentAcked(conversationId: String, sent: Int, acked: Int)
+
     @Query("UPDATE messages SET isRead = 1 WHERE id = :messageId")
     suspend fun markMessageAsRead(messageId: Long)
 

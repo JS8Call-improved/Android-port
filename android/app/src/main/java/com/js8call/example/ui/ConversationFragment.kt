@@ -56,6 +56,25 @@ class ConversationFragment : Fragment() {
         toolbar.setNavigationOnClickListener { findNavController().navigateUp() }
         SpeedChip.bind(view.findViewById(R.id.speed_chip))
 
+        // Mailbox actions make sense toward a station, not a group.
+        if (!callsign.startsWith("@")) {
+            toolbar.inflateMenu(R.menu.conversation_menu)
+            toolbar.setOnMenuItemClickListener { item ->
+                when (item.itemId) {
+                    R.id.action_check_messages -> {
+                        // Any mail waiting for us at this station?
+                        sendMessage("QUERY MSGS")
+                        true
+                    }
+                    R.id.action_send_via_relay -> {
+                        showSendViaRelayDialog()
+                        true
+                    }
+                    else -> false
+                }
+            }
+        }
+
         recyclerView = view.findViewById(R.id.messages_recycler_view)
         emptyState = view.findViewById(R.id.empty_state)
 
@@ -155,5 +174,56 @@ class ConversationFragment : Fragment() {
     private fun hasCallsignConfigured(): Boolean {
         val prefs = PreferenceManager.getDefaultSharedPreferences(requireContext())
         return prefs.getString("callsign", "")?.isNotBlank() == true
+    }
+
+    /**
+     * Deposit a message for this station at a third station's mailbox:
+     * MY: RELAY MSG TO:DEST text. The thread row stays under this station,
+     * because the conversation is with the person, not the hop.
+     */
+    private fun showSendViaRelayDialog() {
+        val dialogView = layoutInflater.inflate(R.layout.dialog_send_via_relay, null)
+        val relayInput = dialogView.findViewById<
+            com.google.android.material.textfield.MaterialAutoCompleteTextView>(R.id.relay_input)
+        val messageInput = dialogView.findViewById<
+            com.google.android.material.textfield.TextInputEditText>(R.id.relay_message_input)
+
+        val decodeViewModel = ViewModelProvider(requireActivity())[DecodeViewModel::class.java]
+        val heard = decodeViewModel.heardCallsigns().filterNot { it.equals(callsign, true) }
+        relayInput.setAdapter(
+            android.widget.ArrayAdapter(
+                requireContext(), android.R.layout.simple_list_item_1, heard
+            )
+        )
+        relayInput.threshold = 1
+
+        com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
+            .setTitle(R.string.conversation_send_via_relay)
+            .setView(dialogView)
+            .setPositiveButton(R.string.relay_send) { _, _ ->
+                val relay = relayInput.text?.toString()?.trim()?.uppercase().orEmpty()
+                val text = messageInput.text?.toString()?.trim()?.uppercase().orEmpty()
+                if (relay.isEmpty() || text.isEmpty()) return@setPositiveButton
+                sendViaRelay(relay, text)
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun sendViaRelay(relay: String, text: String) {
+        if (!hasCallsignConfigured()) {
+            Snackbar.make(requireView(), R.string.error_callsign_required, Snackbar.LENGTH_LONG).show()
+            return
+        }
+        viewModel.insertOutgoingMessage(callsign, text, relayPath = relay)
+            .observe(viewLifecycleOwner) { messageId ->
+                // The engine prefixes "MY: RELAY" and appends the checksum
+                // the buffered MSG TO: command requires.
+                transmitViewModel.queueMessage(
+                    "MSG TO:$callsign $text", directed = relay, dbId = messageId
+                )
+                LocalBroadcastManager.getInstance(requireContext())
+                    .sendBroadcast(Intent(MainActivity.ACTION_PROCESS_TX_QUEUE))
+            }
     }
 }

@@ -68,6 +68,18 @@ class MainActivity : AppCompatActivity() {
                     val conversationId = intent.getStringExtra(JS8EngineService.EXTRA_MESSAGE_CONVERSATION_ID) ?: from
                     messagesViewModel.insertIncomingMessage(conversationId, from, msgText, snr, freq, relayPath)
                 }
+                JS8EngineService.ACTION_MESSAGE_ACKED -> {
+                    val from = intent.getStringExtra(JS8EngineService.EXTRA_MESSAGE_FROM) ?: return
+                    messagesViewModel.markLatestSentAcked(from)
+                }
+                JS8EngineService.ACTION_MAILBOX_EMPTY -> {
+                    val station = intent.getStringExtra(JS8EngineService.EXTRA_MESSAGE_FROM) ?: return
+                    Snackbar.make(
+                        findViewById(android.R.id.content),
+                        getString(R.string.mailbox_none_waiting, station),
+                        Snackbar.LENGTH_LONG
+                    ).show()
+                }
                 JS8EngineService.ACTION_QUEUE_TX -> {
                     val text = intent.getStringExtra(JS8EngineService.EXTRA_QUEUE_TX_TEXT) ?: return
                     val directed = intent.getStringExtra(JS8EngineService.EXTRA_QUEUE_TX_DIRECTED)
@@ -266,6 +278,8 @@ class MainActivity : AppCompatActivity() {
         val filter = IntentFilter().apply {
             addAction(JS8EngineService.ACTION_DECODE)
             addAction(JS8EngineService.ACTION_MESSAGE_RECEIVED)
+            addAction(JS8EngineService.ACTION_MESSAGE_ACKED)
+            addAction(JS8EngineService.ACTION_MAILBOX_EMPTY)
             addAction(JS8EngineService.ACTION_QUEUE_TX)
             addAction(JS8EngineService.ACTION_TX_STATE)
             addAction(JS8EngineService.ACTION_TX_SENT)

@@ -2532,6 +2532,7 @@ class JS8EngineService : Service() {
 
         if (ok) {
             Log.i(TAG, "TX request accepted")
+            recordMailQuery(payloadText, directed)
             updateLastTxMessage(payloadText, directed, submode, audioFrequencyHz)
             broadcastTxSent(buildTxMessage(payloadText, directed), audioFrequencyHz)
             broadcastTxState(TX_STATE_QUEUED)
@@ -2637,6 +2638,22 @@ class JS8EngineService : Service() {
         }
         LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
         Log.d(TAG, "Broadcast queue TX: text='$text' directed=$directed priority=$priority")
+    }
+
+    /** An ACK for our traffic arrived: the UI sets the double check. */
+    private fun broadcastMessageAcked(from: String) {
+        val intent = Intent(ACTION_MESSAGE_ACKED).apply {
+            putExtra(EXTRA_MESSAGE_FROM, from)
+        }
+        LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
+    }
+
+    /** A station we queried reported no mail waiting for us. */
+    private fun broadcastMailboxEmpty(station: String) {
+        val intent = Intent(ACTION_MAILBOX_EMPTY).apply {
+            putExtra(EXTRA_MESSAGE_FROM, station)
+        }
+        LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
     }
 
     private fun showMessageNotification(from: String, text: String) {
@@ -2911,6 +2928,40 @@ class JS8EngineService : Service() {
             return
         }
 
+        // Replies to our own traffic.
+        if (directed != null && isSelfCallsign(callsign, directed.to) &&
+            !isSelfCallsign(callsign, directed.from)
+        ) {
+            when (directed.command.uppercase()) {
+                Js8Commands.CMD_ACK -> {
+                    // Receipt for a message we sent: light the double check.
+                    Log.i(TAG, "ACK received from ${directed.from}")
+                    broadcastMessageAcked(directed.from.trim().uppercase())
+                    return
+                }
+                Js8Commands.CMD_YES -> {
+                    // YES MSG ID {n}: mail is waiting for us; go collect it.
+                    val m = Regex("^MSG ID\\s+(\\d+)", RegexOption.IGNORE_CASE)
+                        .find(directed.payload.trim())
+                    if (m != null && expectingMailFrom(directed.from)) {
+                        fetchMailboxMessage(
+                            callsign,
+                            directed.from.trim().uppercase(),
+                            m.groupValues[1].toLong()
+                        )
+                        return
+                    }
+                }
+                Js8Commands.CMD_NO -> {
+                    if (expectingMailFrom(directed.from)) {
+                        Log.i(TAG, "No mail waiting at ${directed.from}")
+                        broadcastMailboxEmpty(directed.from.trim().uppercase())
+                        return
+                    }
+                }
+            }
+        }
+
         if (directed != null && (directed.command.uppercase() == "MSG" || directed.command.uppercase().startsWith("MSG"))) {
             // This is a MSG command frame
             val isForMe = isSelfCallsign(callsign, directed.to)
@@ -2948,13 +2999,7 @@ class JS8EngineService : Service() {
                     .replace(Regex("\\s+[A-Z0-9]{3}$"), "")
                     .trim()
                 Log.i(TAG, "MSG received (single frame): from=${directed.from} to=${directed.to} text='$cleanPayload' conversationId=$conversationId")
-                broadcastMessageReceived(directed.from, cleanPayload, snr, freq, null, conversationId)
-                
-                // Queue auto-ACK now that full message is received (if autoreply enabled)
-                if (isAutoreplyEnabled()) {
-                    Log.i(TAG, "Auto ACK for MSG from=${directed.from}")
-                    broadcastQueueTx("$callsign: ${directed.from} ACK", null, priority = 2)
-                }
+                deliverIncomingMsg(callsign, directed.from.trim().uppercase(), cleanPayload, snr, freq, conversationId)
                 return
             }
             
@@ -3031,6 +3076,9 @@ class JS8EngineService : Service() {
 
     // One mailbox reply per peer inside this window.
     private val MAILBOX_REPLY_WINDOW_MS = 60_000L
+
+    // How long a QUERY MSGS keeps mailbox replies from that station expected.
+    private val MAIL_RETRIEVAL_WINDOW_MS = 10 * 60_000L
     
     private fun cleanupMsgBuffers(now: Long) {
         synchronized(msgLock) {
@@ -3164,15 +3212,66 @@ class JS8EngineService : Service() {
         
         val isForMyGroup = isSubscribedGroup(buffer.to)
         val conversationId = if (isForMyGroup) buffer.to else buffer.from
-        
+
         Log.i(TAG, "MSG received (multi-frame): from=${buffer.from} to=${buffer.to} text='$cleanText' conversationId=$conversationId")
-        broadcastMessageReceived(buffer.from, cleanText, buffer.snr, buffer.frequency, null, conversationId)
-        
+        deliverIncomingMsg(myCallsign, buffer.from, cleanText, buffer.snr, buffer.frequency, conversationId)
+    }
+
+    /**
+     * A complete MSG for us. Collected mailbox mail arrives here too, as
+     * "{text} FROM {originator}" with "NEXT MSG ID {n}" appended while the
+     * mailbox holds more: it threads under the originator with the mailbox
+     * station as the relay hop, and the next message is fetched.
+     */
+    private fun deliverIncomingMsg(
+        callsign: String,
+        from: String,
+        cleanText: String,
+        snr: Int,
+        freq: Float,
+        conversationId: String
+    ) {
+        val delivered = parseDeliveredMail(from, cleanText)
+        if (delivered != null) {
+            Log.i(
+                TAG,
+                "Mailbox mail collected: originator=${delivered.originator} via=$from next=${delivered.nextId}"
+            )
+            broadcastMessageReceived(
+                delivered.originator, delivered.text, snr, freq, from, delivered.originator
+            )
+            delivered.nextId?.let { fetchMailboxMessage(callsign, from, it) }
+        } else {
+            broadcastMessageReceived(from, cleanText, snr, freq, null, conversationId)
+        }
+
         // Queue auto-ACK now that full message is received (if autoreply enabled)
         if (isAutoreplyEnabled()) {
-            Log.i(TAG, "Auto ACK for MSG from=${buffer.from}")
-            broadcastQueueTx("$myCallsign: ${buffer.from} ACK", null, priority = 2)
+            Log.i(TAG, "Auto ACK for MSG from=$from")
+            broadcastQueueTx("$callsign: $from ACK", null, priority = 2)
         }
+    }
+
+    private data class DeliveredMail(val text: String, val originator: String, val nextId: Long?)
+
+    /**
+     * Parse "{text} FROM {originator}[ NEXT MSG ID {n}]", but only when we
+     * asked [sender] for mail. Ordinary messages can end in FROM too.
+     */
+    private fun parseDeliveredMail(sender: String, payload: String): DeliveredMail? {
+        if (!expectingMailFrom(sender)) return null
+        var text = payload.trim()
+        var nextId: Long? = null
+        Regex("\\sNEXT MSG ID\\s+(\\d+)$", RegexOption.IGNORE_CASE).find(text)?.let {
+            nextId = it.groupValues[1].toLong()
+            text = text.removeRange(it.range).trim()
+        }
+        val from = Regex("\\sFROM\\s+([A-Za-z0-9/]+)$", RegexOption.IGNORE_CASE).find(text)
+            ?: return null
+        val originator = from.groupValues[1].uppercase()
+        text = text.removeRange(from.range).trim()
+        if (text.isBlank()) return null
+        return DeliveredMail(text, originator, nextId)
     }
     
     private fun isDataFrame(type: Int): Boolean = (type and 0x4) != 0
@@ -3329,6 +3428,39 @@ class JS8EngineService : Service() {
                 mailboxRecipient = if (msg.destination.startsWith("@")) requester else null
             )
         }
+    }
+
+    // Stations we asked for mail. A "MSG {text} FROM {call}" reply is only
+    // read as mailbox attribution when we actually asked the sender:
+    // ordinary text can end the same way ("GREETINGS FROM W1AW"), and
+    // misreading it would thread the message under the wrong callsign.
+    private val pendingMailRetrievals = mutableMapOf<String, Long>()
+
+    private fun recordMailQuery(text: String, directed: String) {
+        val trimmed = text.trim().uppercase()
+        val peer = if (directed.isNotBlank()) {
+            if (!trimmed.startsWith("QUERY MSG")) return
+            directed.trim().uppercase()
+        } else {
+            val m = Regex("^\\S+:\\s+(\\S+)\\s+QUERY MSG").find(trimmed) ?: return
+            m.groupValues[1]
+        }
+        if (peer.startsWith("@")) return
+        pendingMailRetrievals[peer] = System.currentTimeMillis()
+        Log.d(TAG, "Expecting mailbox replies from $peer")
+    }
+
+    private fun expectingMailFrom(peer: String): Boolean {
+        val asked = pendingMailRetrievals[peer.trim().uppercase()] ?: return false
+        return System.currentTimeMillis() - asked < MAIL_RETRIEVAL_WINDOW_MS
+    }
+
+    /** Ask [station] for held message [id], guarding against reply loops. */
+    private fun fetchMailboxMessage(callsign: String, station: String, id: Long) {
+        if (!mailboxReplyAllowed(station, "FETCH $id")) return
+        pendingMailRetrievals[station.trim().uppercase()] = System.currentTimeMillis()
+        Log.i(TAG, "Fetching mailbox message $id from $station")
+        broadcastQueueTx("$callsign: $station QUERY MSG $id", null, priority = 1)
     }
 
     // One answer per peer per question inside the window. Keyed on the
@@ -4214,6 +4346,8 @@ class JS8EngineService : Service() {
         const val ACTION_TX_PROGRESS = "com.js8call.example.ACTION_TX_PROGRESS"
         const val ACTION_RADIO_FREQUENCY = "com.js8call.example.ACTION_RADIO_FREQUENCY"
         const val ACTION_MESSAGE_RECEIVED = "com.js8call.example.ACTION_MESSAGE_RECEIVED"
+        const val ACTION_MESSAGE_ACKED = "com.js8call.example.ACTION_MESSAGE_ACKED"
+        const val ACTION_MAILBOX_EMPTY = "com.js8call.example.ACTION_MAILBOX_EMPTY"
         const val ACTION_QUEUE_TX = "com.js8call.example.ACTION_QUEUE_TX"
         const val ACTION_TIME_SYNC_ONCE = "com.js8call.example.ACTION_TIME_SYNC_ONCE"
         const val ACTION_SET_TIME_DRIFT = "com.js8call.example.ACTION_SET_TIME_DRIFT"
