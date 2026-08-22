@@ -350,6 +350,7 @@
     <string name="contact_detail_snr_label">Signal</string>
     <string name="contact_detail_offset_label">Offset</string>
     <string name="contact_detail_grid_label">Grid</string>
+    <string name="contact_detail_distance_label">Distance</string>
     <string name="contact_detail_info_label">Station info</string>
     <string name="contact_detail_never_heard">Not heard on the air yet</string>
     <string name="contact_detail_unfavorite">Remove favorite</string>

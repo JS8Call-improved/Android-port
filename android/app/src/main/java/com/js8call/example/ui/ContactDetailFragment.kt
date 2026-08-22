@@ -21,6 +21,7 @@ import com.js8call.example.R
 import com.js8call.example.data.ContactEntity
 import com.js8call.example.util.AvatarColor
 import com.js8call.example.util.DisplayName
+import com.js8call.example.util.Maidenhead
 import com.js8call.example.util.RelayPath
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -203,7 +204,14 @@ class ContactDetailFragment : Fragment() {
         entity.offset?.let {
             addRow(R.string.contact_detail_offset_label, getString(R.string.contact_offset, it.toInt()))
         }
-        entity.grid?.takeIf { it.isNotBlank() }?.let { addRow(R.string.contact_detail_grid_label, it) }
+        entity.grid?.takeIf { it.isNotBlank() }?.let { grid ->
+            addRow(R.string.contact_detail_grid_label, grid)
+            // From the operator's own grid to theirs, when both are known.
+            // Grid centers, so this is an estimate by nature.
+            Maidenhead.describePath(myGrid(), grid)?.let {
+                addRow(R.string.contact_detail_distance_label, it)
+            }
+        }
         entity.info?.takeIf { it.isNotBlank() }?.let { addRow(R.string.contact_detail_info_label, it) }
     }
 
@@ -213,6 +221,10 @@ class ContactDetailFragment : Fragment() {
         row.findViewById<TextView>(R.id.row_value).text = value
         heardContainer.addView(row)
     }
+
+    private fun myGrid(): String? =
+        androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext())
+            .getString("grid", null)?.trim()?.takeIf { it.isNotEmpty() }
 
     private fun describePath(hops: List<String>): String {
         if (hops.isEmpty()) return getString(R.string.relay_direct)

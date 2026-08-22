@@ -399,57 +399,14 @@ class SettingsFragment : PreferenceFragmentCompat() {
     }
 
     private fun applyGridFromLocation(location: Location) {
-        val grid = maidenheadFromLocation(location.latitude, location.longitude)
+        val grid = com.js8call.example.util.Maidenhead
+            .fromLatLon(location.latitude, location.longitude)
         gridPreference?.setGridValue(grid)
     }
 
     private fun showGridError(messageResId: Int) {
         val view = view ?: return
         Snackbar.make(view, messageResId, Snackbar.LENGTH_LONG).show()
-    }
-
-    private fun maidenheadFromLocation(latitude: Double, longitude: Double): String {
-        var lon = -longitude
-        var lat = latitude.coerceIn(-90.0, 90.0)
-        if (lon < -180.0) lon += 360.0
-        if (lon > 180.0) lon -= 360.0
-        if (lon == 180.0) lon = 179.999999
-        if (lat == 90.0) lat = 89.999999
-
-        val lonMinutes = (180.0 - lon) * 60.0
-        val latMinutes = (lat + 90.0) * 60.0
-
-        val lonField = (lonMinutes / 1200.0).toInt().coerceIn(0, 17)
-        val latField = (latMinutes / 600.0).toInt().coerceIn(0, 17)
-
-        val lonFieldRemainder = lonMinutes - lonField * 1200.0
-        val latFieldRemainder = latMinutes - latField * 600.0
-
-        val lonSquare = (lonFieldRemainder / 120.0).toInt().coerceIn(0, 9)
-        val latSquare = (latFieldRemainder / 60.0).toInt().coerceIn(0, 9)
-
-        val lonSquareRemainder = lonFieldRemainder - lonSquare * 120.0
-        val latSquareRemainder = latFieldRemainder - latSquare * 60.0
-
-        val lonSub = (lonSquareRemainder / 5.0).toInt().coerceIn(0, 23)
-        val latSub = (latSquareRemainder / 2.5).toInt().coerceIn(0, 23)
-
-        val lonSubRemainder = lonSquareRemainder - lonSub * 5.0
-        val latSubRemainder = latSquareRemainder - latSub * 2.5
-
-        val lonExt = (lonSubRemainder / 0.5).toInt().coerceIn(0, 9)
-        val latExt = (latSubRemainder / 0.25).toInt().coerceIn(0, 9)
-
-        return buildString(8) {
-            append(('A'.code + lonField).toChar())
-            append(('A'.code + latField).toChar())
-            append(('0'.code + lonSquare).toChar())
-            append(('0'.code + latSquare).toChar())
-            append(('A'.code + lonSub).toChar())
-            append(('A'.code + latSub).toChar())
-            append(('0'.code + lonExt).toChar())
-            append(('0'.code + latExt).toChar())
-        }.uppercase(Locale.US)
     }
 
     private fun normalizeSerialSelection(
