@@ -3,6 +3,11 @@
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
     <item
+        android:id="@+id/action_relay_path"
+        android:title="@string/conversation_relay_path"
+        app:showAsAction="never" />
+
+    <item
         android:id="@+id/action_check_messages"
         android:title="@string/conversation_check_messages"
         app:showAsAction="never" />

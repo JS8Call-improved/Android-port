@@ -39,6 +39,20 @@ class MessagesViewModel(application: Application) : AndroidViewModel(application
     }
 
     /**
+     * The relay path stored for a thread, in `A>B` notation, or null for a
+     * thread that transmits direct.
+     */
+    fun getRelayPath(callsign: String): LiveData<String?> {
+        return repository.getRelayPath(callsign)
+    }
+
+    fun setRelayPath(callsign: String, path: String?) {
+        viewModelScope.launch {
+            repository.setRelayPath(callsign, path)
+        }
+    }
+
+    /**
      * Mark all messages in a conversation as read.
      */
     fun markConversationAsRead(callsign: String) {

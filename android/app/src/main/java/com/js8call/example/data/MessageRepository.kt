@@ -12,6 +12,7 @@ class MessageRepository(context: Context) {
 
     private val database = MessageDatabase.getInstance(context)
     private val messageDao = database.messageDao()
+    private val settingsDao = database.conversationSettingsDao()
 
     // ========== Conversation List ==========
 
@@ -192,6 +193,30 @@ class MessageRepository(context: Context) {
 
     fun searchMessages(query: String): LiveData<List<MessageEntity>> {
         return messageDao.searchMessages(query)
+    }
+
+    // ========== Thread settings ==========
+
+    fun getRelayPath(callsign: String): LiveData<String?> {
+        return settingsDao.getRelayPath(normalizeCallsign(callsign))
+    }
+
+    suspend fun getRelayPathOnce(callsign: String): String? {
+        return withContext(Dispatchers.IO) {
+            settingsDao.getRelayPathOnce(normalizeCallsign(callsign))
+        }
+    }
+
+    /** An empty or blank path clears the row rather than storing "send direct". */
+    suspend fun setRelayPath(callsign: String, path: String?) {
+        withContext(Dispatchers.IO) {
+            val id = normalizeCallsign(callsign)
+            if (path.isNullOrBlank()) {
+                settingsDao.delete(id)
+            } else {
+                settingsDao.upsert(ConversationSettingsEntity(id, path))
+            }
+        }
     }
 
     // ========== Utility ==========

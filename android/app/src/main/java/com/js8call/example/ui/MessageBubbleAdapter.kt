@@ -11,6 +11,7 @@ import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import com.js8call.example.R
 import com.js8call.example.data.MessageEntity
+import com.js8call.example.util.RelayPath
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -85,17 +86,20 @@ class MessageBubbleAdapter : ListAdapter<MessageEntity, RecyclerView.ViewHolder>
         return if (message.id == sendingMessageId) sendingLabel else null
     }
 
+
     class IncomingMessageViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         private val senderText: TextView = itemView.findViewById(R.id.sender_text)
         private val messageText: TextView = itemView.findViewById(R.id.message_text)
         private val timestampText: TextView = itemView.findViewById(R.id.timestamp_text)
         private val snrText: TextView = itemView.findViewById(R.id.snr_text)
+        private val relayText: TextView = itemView.findViewById(R.id.relay_text)
 
         private val timeFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
 
         fun bind(message: MessageEntity) {
             messageText.text = message.text
             timestampText.text = timeFormat.format(Date(message.timestamp))
+            bindRelayPath(relayText, message)
 
             // Show sender callsign for group conversations
             val sender = message.senderCallsign
@@ -121,6 +125,7 @@ class MessageBubbleAdapter : ListAdapter<MessageEntity, RecyclerView.ViewHolder>
         private val timestampText: TextView = itemView.findViewById(R.id.timestamp_text)
         private val statusIcon: ImageView = itemView.findViewById(R.id.status_icon)
         private val statusText: TextView = itemView.findViewById(R.id.status_text)
+        private val relayText: TextView = itemView.findViewById(R.id.relay_text)
 
         private val timeFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
 
@@ -128,6 +133,8 @@ class MessageBubbleAdapter : ListAdapter<MessageEntity, RecyclerView.ViewHolder>
             messageText.text = message.text
             timestampText.text = timeFormat.format(Date(message.timestamp))
             bindStatus(message, sendingLabel)
+
+            bindRelayPath(relayText, message)
 
             // Update status icon based on message status
             val (iconRes, tintColor) = when (message.status) {
@@ -189,5 +196,20 @@ class MessageBubbleAdapter : ListAdapter<MessageEntity, RecyclerView.ViewHolder>
         ): Boolean {
             return oldItem == newItem
         }
+    }
+}
+
+/**
+ * The stations that carried this message, shown on the message itself. The
+ * thread's path can change after the fact, so the bubble is the only honest
+ * record of how this one travelled.
+ */
+private fun bindRelayPath(view: TextView, message: MessageEntity) {
+    val hops = RelayPath.parse(message.relayPath)
+    if (hops.isEmpty()) {
+        view.visibility = View.GONE
+    } else {
+        view.visibility = View.VISIBLE
+        view.text = view.context.getString(R.string.relay_via, hops.joinToString(" › "))
     }
 }

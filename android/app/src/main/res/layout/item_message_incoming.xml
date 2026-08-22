@@ -45,6 +45,19 @@
             android:textColor="@color/bubble_text_incoming"
             tools:text="Hello! How are you doing today? This is a test message." />
 
+        <!-- Which stations carried this one, when it did not come direct -->
+        <TextView
+            android:id="@+id/relay_text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:alpha="0.7"
+            android:textAppearance="?attr/textAppearanceLabelSmall"
+            android:textColor="@color/bubble_text_incoming"
+            android:visibility="gone"
+            tools:text="via KA0XYZ › N0DEF"
+            tools:visibility="visible" />
+
         <!-- Metadata row (timestamp + SNR) -->
         <LinearLayout
             android:layout_width="wrap_content"

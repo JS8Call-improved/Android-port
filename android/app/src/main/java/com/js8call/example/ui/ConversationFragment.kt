@@ -6,6 +6,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
+import android.widget.TextView
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModelProvider
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
@@ -17,6 +18,7 @@ import com.google.android.material.snackbar.Snackbar
 import com.js8call.example.MainActivity
 import com.js8call.example.R
 import com.js8call.example.model.TransmitState
+import com.js8call.example.util.RelayPath
 
 /**
  * A direct-message thread with one station.
@@ -29,8 +31,13 @@ class ConversationFragment : Fragment() {
 
     private lateinit var recyclerView: RecyclerView
     private lateinit var emptyState: LinearLayout
+    private lateinit var relayStrip: View
+    private lateinit var relayLabel: TextView
 
     private var callsign: String = ""
+
+    /** Empty means transmit direct. Kept in sync by the stored-path observer. */
+    private var relayHops: List<String> = emptyList()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -62,6 +69,10 @@ class ConversationFragment : Fragment() {
             toolbar.inflateMenu(R.menu.conversation_menu)
             toolbar.setOnMenuItemClickListener { item ->
                 when (item.itemId) {
+                    R.id.action_relay_path -> {
+                        openRelayPathEditor()
+                        true
+                    }
                     R.id.action_check_messages -> {
                         // Any mail waiting for us at this station?
                         sendMessage("QUERY MSGS")
@@ -85,6 +96,22 @@ class ConversationFragment : Fragment() {
                     }
                     else -> false
                 }
+            }
+        }
+
+        // The protocol will not relay to a group, so a group thread gets no
+        // path strip at all rather than one that cannot be used.
+        relayStrip = view.findViewById(R.id.relay_path_strip)
+        relayLabel = view.findViewById(R.id.relay_path_label)
+        val relayDivider = view.findViewById<View>(R.id.relay_path_divider)
+        if (callsign.startsWith("@")) {
+            relayStrip.visibility = View.GONE
+            relayDivider.visibility = View.GONE
+        } else {
+            relayStrip.setOnClickListener { openRelayPathEditor() }
+            viewModel.getRelayPath(callsign).observe(viewLifecycleOwner) { stored ->
+                relayHops = RelayPath.parse(stored)
+                relayLabel.text = describePath(relayHops)
             }
         }
 
@@ -176,17 +203,51 @@ class ConversationFragment : Fragment() {
         }
     }
 
+    /**
+     * The one way out of this thread. The compose bar, the command menu and
+     * "Check for messages" all land here, so routing this covers every
+     * transmission the thread makes.
+     */
     private fun sendMessage(text: String) {
         if (!hasCallsignConfigured()) {
             Snackbar.make(requireView(), R.string.error_callsign_required, Snackbar.LENGTH_LONG).show()
             return
         }
 
-        viewModel.insertOutgoingMessage(callsign, text).observe(viewLifecycleOwner) { messageId ->
-            transmitViewModel.queueMessage(text, directed = callsign, dbId = messageId)
-            LocalBroadcastManager.getInstance(requireContext())
-                .sendBroadcast(Intent(MainActivity.ACTION_PROCESS_TX_QUEUE))
-        }
+        val hops = relayHops
+        val storedPath = RelayPath.format(hops)
+
+        viewModel.insertOutgoingMessage(callsign, text, relayPath = storedPath)
+            .observe(viewLifecycleOwner) { messageId ->
+                if (hops.isEmpty()) {
+                    transmitViewModel.queueMessage(text, directed = callsign, dbId = messageId)
+                } else {
+                    // A relay carries the destination in its payload, so the
+                    // nearest hop becomes the directed target and the native
+                    // packer reads it off the front of the text.
+                    transmitViewModel.queueMessage(
+                        RelayPath.compose(hops, callsign, text),
+                        directed = null,
+                        dbId = messageId
+                    )
+                }
+                LocalBroadcastManager.getInstance(requireContext())
+                    .sendBroadcast(Intent(MainActivity.ACTION_PROCESS_TX_QUEUE))
+            }
+    }
+
+    private fun openRelayPathEditor() {
+        findNavController().navigate(
+            R.id.action_conversation_to_relay_path,
+            Bundle().apply { putString("callsign", callsign) }
+        )
+    }
+
+    /** "Direct", or the hop count followed by the stations in transmit order. */
+    private fun describePath(hops: List<String>): String {
+        if (hops.isEmpty()) return getString(R.string.relay_direct)
+        val count = resources.getQuantityString(R.plurals.relay_hop_count, hops.size, hops.size)
+        return "$count · " + hops.joinToString(" › ")
     }
 
     private fun hasCallsignConfigured(): Boolean {

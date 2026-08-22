@@ -49,6 +49,18 @@
         <argument
             android:name="callsign"
             app:argType="string" />
+        <action
+            android:id="@+id/action_conversation_to_relay_path"
+            app:destination="@id/navigation_relay_path" />
+    </fragment>
+
+    <fragment
+        android:id="@+id/navigation_relay_path"
+        android:name="com.js8call.example.ui.RelayPathFragment"
+        android:label="@string/relay_path_title">
+        <argument
+            android:name="callsign"
+            app:argType="string" />
     </fragment>
 
     <fragment

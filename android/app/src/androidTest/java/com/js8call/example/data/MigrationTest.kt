@@ -79,4 +79,48 @@ class MigrationTest {
             assertEquals(0, c.getInt(0))
         }
     }
+
+    @Test
+    fun migrate4To5_keepsDataAndAddsThreadSettings() {
+        helper.createDatabase(testDb, 4).apply {
+            execSQL(
+                """
+                INSERT INTO messages
+                    (conversationId, direction, senderCallsign, text, timestamp,
+                     snr, frequency, status, isRead, relayPath)
+                VALUES ('KN4CRD', 0, 'KN4CRD', 'HELLO', 1724200000000,
+                        -12, 1500.0, 0, 1, NULL)
+                """.trimIndent()
+            )
+            execSQL(
+                """
+                INSERT INTO mailbox_messages
+                    (originator, destination, text, receivedAt, state, origin)
+                VALUES ('KA0XYZ', 'N0CALL', 'QRV 1400', 1724200000000, 0, 0)
+                """.trimIndent()
+            )
+            close()
+        }
+
+        val db = helper.runMigrationsAndValidate(
+            testDb, 5, true, MessageDatabase.MIGRATION_4_5
+        )
+
+        db.query("SELECT text FROM messages").use { c ->
+            assertTrue(c.moveToFirst())
+            assertEquals("HELLO", c.getString(0))
+        }
+        db.query("SELECT text FROM mailbox_messages").use { c ->
+            assertTrue(c.moveToFirst())
+            assertEquals("QRV 1400", c.getString(0))
+        }
+
+        db.execSQL(
+            "INSERT INTO conversation_settings (conversationId, relayPath) VALUES ('KN4CRD', 'KA0XYZ>N0DEF')"
+        )
+        db.query("SELECT relayPath FROM conversation_settings WHERE conversationId = 'KN4CRD'").use { c ->
+            assertTrue(c.moveToFirst())
+            assertEquals("KA0XYZ>N0DEF", c.getString(0))
+        }
+    }
 }

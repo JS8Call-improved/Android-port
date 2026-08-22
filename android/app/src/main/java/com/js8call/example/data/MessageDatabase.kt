@@ -15,9 +15,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         MessageEntity::class,
         ContactEntity::class,
         MailboxEntity::class,
-        MailboxGroupDeliveryEntity::class
+        MailboxGroupDeliveryEntity::class,
+        ConversationSettingsEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = true
 )
 abstract class MessageDatabase : RoomDatabase() {
@@ -27,6 +28,8 @@ abstract class MessageDatabase : RoomDatabase() {
     abstract fun contactDao(): ContactDao
 
     abstract fun mailboxDao(): MailboxDao
+
+    abstract fun conversationSettingsDao(): ConversationSettingsDao
 
     companion object {
         private const val DATABASE_NAME = "js8_messages.db"
@@ -103,6 +106,23 @@ abstract class MessageDatabase : RoomDatabase() {
             }
         }
 
+        // Per-thread settings, currently just the relay path. Threads are
+        // derived from the messages table rather than stored, so a thread
+        // setting had nowhere to live before this.
+        internal val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `conversation_settings` (
+                        `conversationId` TEXT NOT NULL,
+                        `relayPath` TEXT,
+                        PRIMARY KEY(`conversationId`)
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
+
         private fun buildDatabase(context: Context): MessageDatabase {
             // No destructive fallback: this database now holds traffic we
             // promised a third party we would forward, so a migration gap
@@ -112,7 +132,7 @@ abstract class MessageDatabase : RoomDatabase() {
                 MessageDatabase::class.java,
                 DATABASE_NAME
             )
-                .addMigrations(MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .build()
         }
     }
