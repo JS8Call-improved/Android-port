@@ -1442,6 +1442,20 @@ class JS8EngineService : Service() {
             stopTxMonitor()
             disableScoRouting()
 
+            // A transmission in flight when the engine stops never reaches
+            // the TX monitor's completion path, because the monitor is what
+            // just got cancelled. Without a terminal state here the UI sits
+            // at "Transmitting" forever, and since the queue pump refuses to
+            // send while it believes a transmission is running, nothing is
+            // ever transmitted again until the process restarts. Report the
+            // failure so the queue frees itself.
+            if (txSessionActive || txAudioActive) {
+                Log.i(TAG, "Engine stopped mid-transmission; failing the send in flight")
+                broadcastTxState(TX_STATE_FAILED)
+            }
+            txSessionActive = false
+            txAudioActive = false
+
             txHandler.removeCallbacksAndMessages(null)
             synchronized(pttStateLock) {
                 rigPttDesired = false
