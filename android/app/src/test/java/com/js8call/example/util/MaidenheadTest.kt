@@ -91,10 +91,11 @@ class MaidenheadTest {
     }
 
     @Test
-    fun describePathFormatsBothUnitsAndDirection() {
-        assertEquals("1,124 km / 698 mi · E 81°", Maidenhead.describePath("EM12", "EM73"))
-        assertNull(Maidenhead.describePath(null, "EM73"))
-        assertNull(Maidenhead.describePath("EM12", ""))
-        assertNull(Maidenhead.describePath("EM12", "bogus"))
+    fun describePathFormatsTheChosenUnitAndDirection() {
+        assertEquals("698 mi · E 81°", Maidenhead.describePath("EM12", "EM73", miles = true))
+        assertEquals("1,124 km · E 81°", Maidenhead.describePath("EM12", "EM73", miles = false))
+        assertNull(Maidenhead.describePath(null, "EM73", miles = true))
+        assertNull(Maidenhead.describePath("EM12", "", miles = true))
+        assertNull(Maidenhead.describePath("EM12", "bogus", miles = false))
     }
 }

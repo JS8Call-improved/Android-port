@@ -237,6 +237,15 @@
             app:defaultValue="false"
             app:iconSpaceReserved="false" />
 
+        <ListPreference
+            app:key="distance_units"
+            app:title="@string/settings_distance_units"
+            app:entries="@array/distance_units_entries"
+            app:entryValues="@array/distance_units_values"
+            app:defaultValue="mi"
+            app:useSimpleSummaryProvider="true"
+            app:iconSpaceReserved="false" />
+
         <SwitchPreferenceCompat
             app:key="keep_screen_on"
             app:title="@string/settings_keep_screen_on"

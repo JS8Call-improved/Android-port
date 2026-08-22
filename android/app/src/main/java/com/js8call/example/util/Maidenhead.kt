@@ -142,16 +142,18 @@ object Maidenhead {
         COMPASS[((bearing % 360.0 + 360.0) % 360.0 / 45.0).roundToInt() % 8]
 
     /**
-     * Distance and bearing between two locators as one display string:
-     * "1,239 km / 770 mi · NE 83°". Null when either locator is invalid.
+     * Distance and bearing between two locators as one display string, in
+     * the operator's chosen unit: "770 mi · NE 83°". Null when either
+     * locator is invalid.
      */
-    fun describePath(fromGrid: String?, toGrid: String?): String? {
+    fun describePath(fromGrid: String?, toGrid: String?, miles: Boolean): String? {
         val a = toLatLon(fromGrid.orEmpty()) ?: return null
         val b = toLatLon(toGrid.orEmpty()) ?: return null
         val km = distanceKm(a, b)
         val bearing = bearingDegrees(a, b)
-        val kmText = String.format(Locale.US, "%,d", km.roundToInt())
-        val miText = String.format(Locale.US, "%,d", (km / KM_PER_MILE).roundToInt())
-        return "$kmText km / $miText mi · ${compassPoint(bearing)} ${bearing.roundToInt()}°"
+        val value = if (miles) km / KM_PER_MILE else km
+        val unit = if (miles) "mi" else "km"
+        val distText = String.format(Locale.US, "%,d", value.roundToInt())
+        return "$distText $unit · ${compassPoint(bearing)} ${bearing.roundToInt()}°"
     }
 }

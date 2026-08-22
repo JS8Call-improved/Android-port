@@ -208,7 +208,7 @@ class ContactDetailFragment : Fragment() {
             addRow(R.string.contact_detail_grid_label, grid)
             // From the operator's own grid to theirs, when both are known.
             // Grid centers, so this is an estimate by nature.
-            Maidenhead.describePath(myGrid(), grid)?.let {
+            Maidenhead.describePath(myGrid(), grid, miles = useMiles())?.let {
                 addRow(R.string.contact_detail_distance_label, it)
             }
         }
@@ -225,6 +225,10 @@ class ContactDetailFragment : Fragment() {
     private fun myGrid(): String? =
         androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext())
             .getString("grid", null)?.trim()?.takeIf { it.isNotEmpty() }
+
+    private fun useMiles(): Boolean =
+        androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext())
+            .getString("distance_units", "mi") != "km"
 
     private fun describePath(hops: List<String>): String {
         if (hops.isEmpty()) return getString(R.string.relay_direct)
