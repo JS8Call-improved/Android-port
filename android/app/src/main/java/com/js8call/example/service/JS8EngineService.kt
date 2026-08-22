@@ -46,7 +46,6 @@ import com.js8call.example.util.TxMessageClassifier
 import java.util.Calendar
 import java.util.Locale
 import java.util.TimeZone
-import java.util.concurrent.CountDownLatch
 import java.util.concurrent.LinkedBlockingDeque
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
@@ -1450,14 +1449,29 @@ class JS8EngineService : Service() {
                 rigPttCommandPending = false
                 rigPttCompletion = null
             }
-            if (isRigControlConnected()) {
-                if (!releaseRigPttForShutdown()) {
-                    Log.e(TAG, "Unable to confirm PTT release during shutdown")
-                }
-            }
+            // Everything that talks to the radio is captured here and torn
+            // down on the TX handler, never on this thread. With the radio
+            // gone a CAT command blocks until hamlib's own timeout, measured
+            // at 8.6 seconds on a wedged Icom link, and every
+            // HamlibRigControl method shares one monitor, so close() then
+            // waits behind whatever is stuck. Doing that here held the main
+            // thread for nine seconds and Android called the app
+            // unresponsive. The TX handler already owns rig I/O, so the
+            // sequence runs there in order, behind the wedged call, and
+            // stopping returns immediately.
+            val shutdownMode = rigControlMode
+            val shutdownTransport = rtsPttTransport
+            val shutdownHamlib = hamlibRigControl
+            val shutdownUsb = usbSerialBridge
+            val shutdownBluetooth = bluetoothSerialBridge
+            val shutdownTruSdx = trusdxSerialSession
+            val shutdownNetwork = rigCtlClient
+            val shouldReleasePtt = isRigControlConnected()
 
-            // Disconnect rig control on background thread
-            val networkClientToDisconnect = rigCtlClient
+            hamlibRigControl = null
+            usbSerialBridge = null
+            bluetoothSerialBridge = null
+            trusdxSerialSession = null
             rigCtlClient = null
             rigCtlConnected = false
             rigCtlErrorShown = false
@@ -1472,8 +1486,6 @@ class JS8EngineService : Service() {
             trusdxRxKeepaliveCount = 0L
             rtsPttTransport = null
             rigControlMode = "none"
-            hamlibRigControl?.close()
-            trusdxSerialSession?.stop()
             if (isTruSdxDiagnosticsEnabled() &&
                 (trusdxRxFrames > 0 || trusdxTxFrames > 0 || trusdxParserResyncs > 0 || trusdxTxDrops > 0 || trusdxRxUnderruns > 0 || trusdxRxFrameDrops > 0)
             ) {
@@ -1482,15 +1494,37 @@ class JS8EngineService : Service() {
                     "TruSDX diagnostics: rxFrames=$trusdxRxFrames rxSamples=$trusdxRxSamples rxFrameDrops=$trusdxRxFrameDrops rxSubmitDrops=$trusdxRxSubmitDrops rxUnderruns=$trusdxRxUnderruns txFrames=$trusdxTxFrames txSamples=$trusdxTxSamples txSilent=$trusdxTxSilentFrames txDrops=$trusdxTxDrops parserResyncs=$trusdxParserResyncs"
                 )
             }
-            usbSerialBridge?.unregisterNative()
-            usbSerialBridge?.close()
-            bluetoothSerialBridge?.close()
-            bluetoothSerialBridge?.unregisterNative()
 
-            if (networkClientToDisconnect != null) {
-                Thread {
-                    networkClientToDisconnect.disconnect()
-                }.start()
+            txHandler.post {
+                if (shouldReleasePtt) {
+                    // The captured references are used directly rather than
+                    // setRigPtt, whose fields are already cleared above so a
+                    // restart cannot pick up a closing link.
+                    val released = when (shutdownMode) {
+                        "network" -> shutdownNetwork?.setPtt(false) == true
+                        "hamlib_usb" -> shutdownHamlib?.setPtt(false) == true
+                        "rts_ptt" -> when (shutdownTransport) {
+                            SerialTransport.USB -> shutdownUsb?.setRts(false) == true
+                            SerialTransport.BLUETOOTH -> shutdownBluetooth?.setRts(false) == true
+                            else -> false
+                        }
+                        "trusdx_serial" -> shutdownTruSdx?.setPtt(false) == true
+                        else -> false
+                    }
+                    if (released) {
+                        synchronized(pttStateLock) { rigPttAsserted = false }
+                    } else {
+                        Log.e(TAG, "Unable to confirm PTT release during shutdown")
+                    }
+                }
+                shutdownHamlib?.close()
+                shutdownTruSdx?.stop()
+                shutdownUsb?.unregisterNative()
+                shutdownUsb?.close()
+                shutdownBluetooth?.close()
+                shutdownBluetooth?.unregisterNative()
+                shutdownNetwork?.disconnect()
+                Log.i(TAG, "Rig control torn down")
             }
 
             pskReporterClient?.stop(flush = true)
@@ -2915,40 +2949,6 @@ class JS8EngineService : Service() {
         engine?.setTransmitReady(false)
         broadcastError(message)
         broadcastTxState(TX_STATE_FAILED)
-    }
-
-    private fun releaseRigPttForShutdown(): Boolean {
-        if (Looper.myLooper() == txHandler.looper) {
-            val released = setRigPtt(false)
-            if (released) rigPttAsserted = false
-            return released
-        }
-
-        val completed = CountDownLatch(1)
-        var released = false
-        txHandler.post {
-            try {
-                released = setRigPtt(false)
-                if (released) {
-                    synchronized(pttStateLock) {
-                        rigPttAsserted = false
-                    }
-                }
-            } finally {
-                completed.countDown()
-            }
-        }
-        // Bounded wait, and no retry on the calling thread. This runs on the
-        // main thread during shutdown, and when the radio has disconnected
-        // the TX handler can be wedged inside a rig call that never returns;
-        // an unbounded await here froze the whole app. If the release cannot
-        // be confirmed in time, the link is dead anyway - log and keep
-        // shutting down rather than trading a stuck PTT for a stuck app.
-        if (!completed.await(RIG_SHUTDOWN_PTT_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
-            Log.e(TAG, "PTT release timed out during shutdown; rig link presumed dead")
-            return false
-        }
-        return released
     }
 
     /**
@@ -4680,7 +4680,6 @@ class JS8EngineService : Service() {
         // must exceed the lead or the modulator joins the current frame.
         private const val TX_BOUNDARY_LEAD_MS = 1500L
         private const val TX_BOUNDARY_DELAY_S = 2.0
-        private const val RIG_SHUTDOWN_PTT_TIMEOUT_MS = 3000L
         private const val RELAY_FREQUENCY_TOLERANCE_HZ = 10.0f
         private const val RELAY_EOM_MARKER = "\u2662"
         private const val SUBMODE_NORMAL = 0
