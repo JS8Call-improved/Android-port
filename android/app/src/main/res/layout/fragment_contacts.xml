@@ -7,27 +7,46 @@
     android:background="?attr/colorSurface"
     android:orientation="vertical">
 
-    <!-- The list grows by itself on every decode, so it needs a way in. -->
-    <com.google.android.material.textfield.TextInputLayout
-        android:id="@+id/search_layout"
-        style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginHorizontal="16dp"
         android:layout_marginTop="8dp"
-        android:hint="@string/contact_search_hint"
-        app:endIconMode="clear_text"
-        app:startIconDrawable="@drawable/ic_search">
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
 
-        <com.google.android.material.textfield.TextInputEditText
-            android:id="@+id/search_input"
-            android:layout_width="match_parent"
+        <!-- The list grows by itself on every decode, so it needs a way in. -->
+        <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/search_layout"
+            style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:imeOptions="actionSearch"
-            android:inputType="text"
-            android:maxLines="1" />
+            android:layout_weight="1"
+            android:hint="@string/contact_search_hint"
+            app:endIconMode="clear_text"
+            app:startIconDrawable="@drawable/ic_search">
 
-    </com.google.android.material.textfield.TextInputLayout>
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/search_input"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:imeOptions="actionSearch"
+                android:inputType="text"
+                android:maxLines="1" />
+
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <ImageButton
+            android:id="@+id/network_map_button"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_marginStart="8dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/network_map_title"
+            android:src="@drawable/ic_network_map"
+            app:tint="?attr/colorOnSurfaceVariant" />
+
+    </LinearLayout>
 
     <FrameLayout
         android:layout_width="match_parent"

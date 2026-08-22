@@ -64,6 +64,10 @@ class ContactsFragment : Fragment() {
         }
         recyclerView.adapter = adapter
 
+        view.findViewById<View>(R.id.network_map_button).setOnClickListener {
+            findNavController().navigate(R.id.navigation_network_map)
+        }
+
         searchInput.setText(viewModel.query.value.orEmpty())
         searchInput.addTextChangedListener(
             afterTextChanged = { viewModel.setQuery(it?.toString().orEmpty()) }

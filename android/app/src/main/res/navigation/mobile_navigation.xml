@@ -78,6 +78,11 @@
         android:label="@string/nav_contacts" />
 
     <fragment
+        android:id="@+id/navigation_network_map"
+        android:name="com.js8call.example.ui.NetworkMapFragment"
+        android:label="@string/network_map_title" />
+
+    <fragment
         android:id="@+id/navigation_settings"
         android:name="com.js8call.example.ui.SettingsFragment"
         android:label="@string/nav_settings" />

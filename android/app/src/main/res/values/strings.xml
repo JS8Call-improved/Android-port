@@ -352,6 +352,13 @@
     <string name="contact_detail_grid_label">Grid</string>
     <string name="contact_detail_distance_label">Distance</string>
     <string name="settings_distance_units">Distance units</string>
+
+    <string name="network_map_title">Network map</string>
+    <string name="network_map_empty">No links observed in this window yet.\nThe map fills in as stations are heard talking to each other.</string>
+    <string name="network_map_legend">Thicker line = stronger signal · arrow points at the station that heard</string>
+    <string name="network_map_age_1h">1 hour</string>
+    <string name="network_map_age_24h">24 hours</string>
+    <string name="network_map_age_7d">7 days</string>
     <string name="contact_detail_info_label">Station info</string>
     <string name="contact_detail_never_heard">Not heard on the air yet</string>
     <string name="contact_detail_unfavorite">Remove favorite</string>
