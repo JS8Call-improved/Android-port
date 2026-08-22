@@ -2352,6 +2352,31 @@ class JS8EngineService : Service() {
         heartbeatHandler.postDelayed(heartbeatRunnable, waitMs)
     }
 
+    /**
+     * Run [block] shortly before the next frame boundary of [submode]'s
+     * period, on [handler].
+     *
+     * The modulator inherits the desktop's assumption that a transmission
+     * is requested at a period boundary: asked mid-period, it joins the
+     * frame already in progress and transmits only its tail, keying the
+     * radio for whatever seconds are left. The desktop's TX loop provides
+     * that timing; here this does. The block must pass
+     * [TX_BOUNDARY_DELAY_S] as txDelaySec — firing inside the lead window
+     * with that delay lands in the modulator's wait-for-next-period branch,
+     * which starts the frame cleanly at the boundary plus the submode's
+     * fixed on-air offset.
+     */
+    private fun scheduleAtNextTxBoundary(submode: Int, handler: Handler, block: () -> Unit) {
+        val period = framePeriodMs(submode)
+        val now = System.currentTimeMillis() + (engine?.timeDriftMs() ?: 0L)
+        val remaining = period - (((now % period) + period) % period)
+        if (remaining <= TX_BOUNDARY_LEAD_MS) {
+            block()
+        } else {
+            handler.postDelayed({ block() }, remaining - TX_BOUNDARY_LEAD_MS)
+        }
+    }
+
     private fun framePeriodMs(submode: Int): Long {
         return when (submode) {
             SUBMODE_SLOW -> 30000L
@@ -2435,25 +2460,32 @@ class JS8EngineService : Service() {
         val activeEngine = engine
         if (activeEngine != null) {
             val submode = getPreferredTxSubmode()
-            prepareEngineForTransmit(activeEngine)
-             val ok = activeEngine.transmitMessage(
-                text = payload,
-                myCall = callsign,
-                myGrid = grid,
-                selectedCall = "", // Broadcast-ish
-                submode = submode,
-                audioFrequencyHz = freq.toDouble(),
-                txDelaySec = 0.0,
-                forceIdentify = true, // Force ID to ensure callsign is sent
-                forceData = false
-            )
-            
-            if (ok) {
-                updateLastTxMessage(payload, "", submode, freq.toDouble())
-                broadcastTxState(TX_STATE_QUEUED)
-                startTxMonitor()
-            } else {
-                Log.e(TAG, "Failed to send heartbeat")
+            scheduleAtNextTxBoundary(submode, mainHandler) {
+                // Live engine query, not the monitor's cached flags: another
+                // deferred send may have started at this same boundary.
+                if (engine !== activeEngine || activeEngine.isTransmitting()) {
+                    return@scheduleAtNextTxBoundary
+                }
+                prepareEngineForTransmit(activeEngine)
+                val ok = activeEngine.transmitMessage(
+                    text = payload,
+                    myCall = callsign,
+                    myGrid = grid,
+                    selectedCall = "", // Broadcast-ish
+                    submode = submode,
+                    audioFrequencyHz = freq.toDouble(),
+                    txDelaySec = TX_BOUNDARY_DELAY_S,
+                    forceIdentify = true, // Force ID to ensure callsign is sent
+                    forceData = false
+                )
+
+                if (ok) {
+                    updateLastTxMessage(payload, "", submode, freq.toDouble())
+                    broadcastTxState(TX_STATE_QUEUED)
+                    startTxMonitor()
+                } else {
+                    Log.e(TAG, "Failed to send heartbeat")
+                }
             }
         }
 
@@ -2526,30 +2558,33 @@ class JS8EngineService : Service() {
             "TX request: text='$payloadText', directed='${directed}', submode=$submode, freq=$audioFrequencyHz, delay=$txDelaySec, identify=$effectiveForceIdentify"
         )
 
-        prepareEngineForTransmit(activeEngine)
-        val ok = activeEngine.transmitMessage(
-            text = payloadText,
-            myCall = callsign,
-            myGrid = grid,
-            selectedCall = directed,
-            submode = submode,
-            audioFrequencyHz = audioFrequencyHz,
-            txDelaySec = txDelaySec,
-            forceIdentify = effectiveForceIdentify,
-            forceData = forceData
-        )
+        scheduleAtNextTxBoundary(submode, txHandler) {
+            if (engine !== activeEngine) return@scheduleAtNextTxBoundary
+            prepareEngineForTransmit(activeEngine)
+            val ok = activeEngine.transmitMessage(
+                text = payloadText,
+                myCall = callsign,
+                myGrid = grid,
+                selectedCall = directed,
+                submode = submode,
+                audioFrequencyHz = audioFrequencyHz,
+                txDelaySec = maxOf(txDelaySec, TX_BOUNDARY_DELAY_S),
+                forceIdentify = effectiveForceIdentify,
+                forceData = forceData
+            )
 
-        if (ok) {
-            Log.i(TAG, "TX request accepted")
-            recordMailQuery(payloadText, directed)
-            updateLastTxMessage(payloadText, directed, submode, audioFrequencyHz)
-            broadcastTxSent(buildTxMessage(payloadText, directed), audioFrequencyHz)
-            broadcastTxState(TX_STATE_QUEUED)
-            startTxMonitor()
-        } else {
-            Log.e(TAG, "TX request rejected")
-            broadcastError("Failed to start transmit")
-            broadcastTxState(TX_STATE_FAILED)
+            if (ok) {
+                Log.i(TAG, "TX request accepted")
+                recordMailQuery(payloadText, directed)
+                updateLastTxMessage(payloadText, directed, submode, audioFrequencyHz)
+                broadcastTxSent(buildTxMessage(payloadText, directed), audioFrequencyHz)
+                broadcastTxState(TX_STATE_QUEUED)
+                startTxMonitor()
+            } else {
+                Log.e(TAG, "TX request rejected")
+                broadcastError("Failed to start transmit")
+                broadcastTxState(TX_STATE_FAILED)
+            }
         }
     }
 
@@ -4332,25 +4367,30 @@ class JS8EngineService : Service() {
         val payload = text.trim()
         if (payload.isEmpty()) return false
 
-        prepareEngineForTransmit(activeEngine)
-        val ok = activeEngine.transmitMessage(
-            text = payload,
-            myCall = callsign,
-            myGrid = grid,
-            selectedCall = "",
-            submode = submode,
-            audioFrequencyHz = currentTxOffsetHz.toDouble(),
-            txDelaySec = 0.0,
-            forceIdentify = callsign.isNotBlank(),
-            forceData = false
-        )
+        scheduleAtNextTxBoundary(submode, mainHandler) {
+            if (engine !== activeEngine || activeEngine.isTransmitting()) {
+                return@scheduleAtNextTxBoundary
+            }
+            prepareEngineForTransmit(activeEngine)
+            val ok = activeEngine.transmitMessage(
+                text = payload,
+                myCall = callsign,
+                myGrid = grid,
+                selectedCall = "",
+                submode = submode,
+                audioFrequencyHz = currentTxOffsetHz.toDouble(),
+                txDelaySec = TX_BOUNDARY_DELAY_S,
+                forceIdentify = callsign.isNotBlank(),
+                forceData = false
+            )
 
-        if (ok) {
-            updateLastTxMessage(payload, "", submode, currentTxOffsetHz.toDouble())
-            broadcastTxState(TX_STATE_QUEUED)
-            startTxMonitor()
+            if (ok) {
+                updateLastTxMessage(payload, "", submode, currentTxOffsetHz.toDouble())
+                broadcastTxState(TX_STATE_QUEUED)
+                startTxMonitor()
+            }
         }
-        return ok
+        return true
     }
 
     private fun sendAutoReply(
@@ -4373,28 +4413,33 @@ class JS8EngineService : Service() {
         val directedCall = directed?.trim().orEmpty().uppercase()
         if (requireDirected && directedCall.isBlank()) return
 
-        prepareEngineForTransmit(activeEngine)
-        val ok = activeEngine.transmitMessage(
-            text = payloadText,
-            myCall = callsign,
-            myGrid = grid,
-            selectedCall = directedCall,
-            submode = submode,
-            audioFrequencyHz = currentTxOffsetHz.toDouble(),
-            txDelaySec = 0.0,
-            forceIdentify = callsign.isNotBlank(),
-            forceData = forceData
-        )
+        scheduleAtNextTxBoundary(submode, mainHandler) {
+            if (engine !== activeEngine || activeEngine.isTransmitting()) {
+                return@scheduleAtNextTxBoundary
+            }
+            prepareEngineForTransmit(activeEngine)
+            val ok = activeEngine.transmitMessage(
+                text = payloadText,
+                myCall = callsign,
+                myGrid = grid,
+                selectedCall = directedCall,
+                submode = submode,
+                audioFrequencyHz = currentTxOffsetHz.toDouble(),
+                txDelaySec = TX_BOUNDARY_DELAY_S,
+                forceIdentify = callsign.isNotBlank(),
+                forceData = forceData
+            )
 
-        if (ok) {
-            Log.i(TAG, "Autoreply queued: to=$directedCall text='$payloadText'")
-            updateLastTxMessage(payloadText, directedCall, submode, currentTxOffsetHz.toDouble())
-            broadcastTxState(TX_STATE_QUEUED)
-            startTxMonitor()
-        } else {
-            Log.e(TAG, "Autoreply rejected")
-            broadcastError("Failed to start transmit")
-            broadcastTxState(TX_STATE_FAILED)
+            if (ok) {
+                Log.i(TAG, "Autoreply queued: to=$directedCall text='$payloadText'")
+                updateLastTxMessage(payloadText, directedCall, submode, currentTxOffsetHz.toDouble())
+                broadcastTxState(TX_STATE_QUEUED)
+                startTxMonitor()
+            } else {
+                Log.e(TAG, "Autoreply rejected")
+                broadcastError("Failed to start transmit")
+                broadcastTxState(TX_STATE_FAILED)
+            }
         }
     }
 
@@ -4625,6 +4670,11 @@ class JS8EngineService : Service() {
         private const val HEARD_WINDOW_MS = 15 * 60 * 1000L
         private val HEARD_EXCLUDE_TOKENS = setOf("CQ", "HB", "HEARTBEAT", "ALLCALL", "@ALLCALL")
         private const val RELAY_BUFFER_TIMEOUT_MS = 90_000L
+        // Engine TX calls fire this far before the frame boundary, with a
+        // txDelaySec that pushes the start into the next period. The delay
+        // must exceed the lead or the modulator joins the current frame.
+        private const val TX_BOUNDARY_LEAD_MS = 1500L
+        private const val TX_BOUNDARY_DELAY_S = 2.0
         private const val RELAY_FREQUENCY_TOLERANCE_HZ = 10.0f
         private const val RELAY_EOM_MARKER = "\u2662"
         private const val SUBMODE_NORMAL = 0
