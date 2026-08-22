@@ -13,6 +13,7 @@ import android.text.InputType
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.lifecycleScope
 import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
 import androidx.preference.Preference
@@ -24,6 +25,7 @@ import com.js8call.core.HamlibRigCatalog
 import com.js8call.core.UsbSerialPortCatalog
 import com.js8call.example.R
 import java.util.Locale
+import kotlinx.coroutines.launch
 
 /**
  * Fragment for app settings.
@@ -221,6 +223,11 @@ class SettingsFragment : PreferenceFragmentCompat() {
         gridPreference = findPreference("grid")
         gridPreference?.onUpdateClickListener = { onGridUpdateRequested() }
 
+        findPreference<Preference>("clear_link_data")?.setOnPreferenceClickListener {
+            confirmClearLinkData()
+            true
+        }
+
         logPreference = findPreference("log_messages_to_file")
         logPreference?.setOnPreferenceChangeListener { _, newValue ->
             val enable = newValue as? Boolean ?: false
@@ -249,6 +256,22 @@ class SettingsFragment : PreferenceFragmentCompat() {
     override fun onStop() {
         cancelLocationRequest()
         super.onStop()
+    }
+
+    private fun confirmClearLinkData() {
+        com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
+            .setTitle(R.string.settings_clear_link_data)
+            .setMessage(R.string.settings_clear_link_data_confirm)
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                viewLifecycleOwner.lifecycleScope.launch {
+                    com.js8call.example.data.LinkRepository.getInstance(requireContext()).clear()
+                    view?.let {
+                        Snackbar.make(it, R.string.settings_clear_link_data_done, Snackbar.LENGTH_SHORT).show()
+                    }
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 
     private fun updateAudioDeviceSummary() {

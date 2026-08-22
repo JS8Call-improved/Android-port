@@ -155,4 +155,44 @@ class MigrationTest {
             assertEquals("Jordan", c.getString(0))
         }
     }
+
+    @Test
+    fun migrate6To7_keepsDataAndAddsLinkObservations() {
+        helper.createDatabase(testDb, 6).apply {
+            execSQL(
+                """
+                INSERT INTO contacts (callsign, lastHeard, heardUs, starred, name)
+                VALUES ('KN4CRD', 1724200000000, 1, 1, 'Jordan')
+                """.trimIndent()
+            )
+            close()
+        }
+
+        val db = helper.runMigrationsAndValidate(
+            testDb, 7, true, MessageDatabase.MIGRATION_6_7
+        )
+
+        db.query("SELECT name FROM contacts WHERE callsign = 'KN4CRD'").use { c ->
+            assertTrue(c.moveToFirst())
+            assertEquals("Jordan", c.getString(0))
+        }
+
+        // The new table accepts a full row and a null-SNR, null-dial row.
+        db.execSQL(
+            """
+            INSERT INTO link_observations (reporter, heard, snr, source, dialFreqHz, observedAt)
+            VALUES ('N0DEF', 'KA0XYZ', 5, 'HB_ACK', 7078000, 1724200000000)
+            """.trimIndent()
+        )
+        db.execSQL(
+            """
+            INSERT INTO link_observations (reporter, heard, snr, source, dialFreqHz, observedAt)
+            VALUES ('N0DEF', 'W1AW', NULL, 'HEARING', NULL, 1724200000000)
+            """.trimIndent()
+        )
+        db.query("SELECT COUNT(*) FROM link_observations").use { c ->
+            assertTrue(c.moveToFirst())
+            assertEquals(2, c.getInt(0))
+        }
+    }
 }

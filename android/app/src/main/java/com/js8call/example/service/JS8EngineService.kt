@@ -33,11 +33,14 @@ import com.js8call.example.MainActivity
 import com.js8call.example.MessageLogWriter
 import com.js8call.example.R
 import com.js8call.example.BuildConfig
+import com.js8call.example.data.LinkObservationEntity
+import com.js8call.example.data.LinkRepository
 import com.js8call.example.data.MailboxEntity
 import com.js8call.example.data.MailboxRepository
 import com.js8call.example.network.PskReporterClient
 import com.js8call.example.util.CallsignValidator
 import com.js8call.example.util.Js8Commands
+import com.js8call.example.util.LinkEvidence
 import com.js8call.example.util.RelayPath
 import com.js8call.example.util.TxMessageClassifier
 import java.util.Calendar
@@ -70,6 +73,7 @@ class JS8EngineService : Service() {
     // rest of the handlers run on.
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val mailboxRepository by lazy { MailboxRepository(this) }
+    private val linkRepository by lazy { LinkRepository.getInstance(this) }
     private var rigCtlClient: RigCtlClient? = null
     private var rigCtlConnected: Boolean = false
     private var rigCtlErrorShown: Boolean = false
@@ -274,6 +278,7 @@ class JS8EngineService : Service() {
         super.onCreate()
         createNotificationChannel()
         pruneOtherGroupHistory()
+        pruneLinkObservations()
         usbSerialBridge = UsbSerialBridge(applicationContext)
         bluetoothSerialBridge = BluetoothSerialBridge(applicationContext)
         trusdxDirectSerial = TruSdxDirectSerial(applicationContext)
@@ -384,6 +389,7 @@ class JS8EngineService : Service() {
                             cal.get(Calendar.MINUTE) * 100 + cal.get(Calendar.SECOND)
                         mainHandler.post {
                             updateHeardCallsign(text)
+                            recordLinkEvidence(text, snr)
                             broadcastDecode(utc, snr, 0f, freq, text, type, 1f, submode, 0)
                             handleRelayFrame(text, snr, submode, freq, type)
                             maybeHandleIncomingMessage(text, snr, freq, type, submode)
@@ -531,6 +537,7 @@ class JS8EngineService : Service() {
                     mainHandler.post {
                         maybeApplyTimeSync(driftMs)
                         updateHeardCallsign(text)
+                        recordLinkEvidence(text, snr)
                         broadcastDecode(utc, snr, dt, freq, text, type, quality, mode, driftMs)
                         handleRelayFrame(text, snr, mode, freq, type)
                         maybeHandleIncomingMessage(text, snr, freq, type, mode)
@@ -3971,6 +3978,10 @@ class JS8EngineService : Service() {
 
         if (payload.isBlank()) return
 
+        // The *DE* trail is link evidence regardless of whether we forward,
+        // deliver, or drop this traffic. Observing is passive.
+        recordRelayLinkEvidence(buffer.from, payload)
+
         val forwardPayload = buildRelayForwardPayload(payload)
         if (forwardPayload != null) {
             // Carrying somebody else's traffic is the part an operator opts
@@ -4396,6 +4407,47 @@ class JS8EngineService : Service() {
         }
     }
 
+    /**
+     * Mine one decoded frame for who-hears-whom evidence and store it. Runs
+     * on every decode, addressed to us or not: overheard heartbeat ACKs and
+     * SNR reports between other stations are what the network map is made of.
+     */
+    private fun recordLinkEvidence(text: String, snr: Int) {
+        val callsign = getConfiguredCallsign() ?: return
+        storeLinkObservations(LinkEvidence.fromDecode(callsign, text, snr))
+    }
+
+    /**
+     * Mine a reassembled relay payload's *DE* trail: each hop demonstrably
+     * received a checksummed transfer from the station before it.
+     */
+    private fun recordRelayLinkEvidence(transmitter: String, payload: String) {
+        storeLinkObservations(LinkEvidence.fromRelayChain(transmitter, payload))
+    }
+
+    private fun storeLinkObservations(observations: List<LinkEvidence.Observation>) {
+        if (observations.isEmpty()) return
+        val now = System.currentTimeMillis()
+        val dial = currentDialHz.takeIf { it > 0 }
+        val rows = observations.map {
+            LinkObservationEntity(
+                reporter = it.reporter,
+                heard = it.heard,
+                snr = it.snr,
+                source = it.source.name,
+                dialFreqHz = dial,
+                observedAt = now
+            )
+        }
+        serviceScope.launch { linkRepository.record(rows) }
+    }
+
+    private fun pruneLinkObservations() {
+        val prefs = PreferenceManager.getDefaultSharedPreferences(this)
+        val days = prefs.getString(PREF_LINK_RETENTION_DAYS, "30")?.toLongOrNull() ?: 30L
+        serviceScope.launch { linkRepository.pruneOlderThan(days * 24 * 60 * 60 * 1000L) }
+    }
+
     private fun getRecentHeardCallsigns(exclude: Set<String>, limit: Int): List<String> {
         val now = System.currentTimeMillis()
         synchronized(heardLock) {
@@ -4568,6 +4620,7 @@ class JS8EngineService : Service() {
         private const val PREF_MY_STATUS = "my_status"
         private const val PREF_PSK_REPORTER = "psk_reporter"
         private const val PREF_TRUSDX_DIAGNOSTICS_ENABLED = "trusdx_diagnostics_enabled"
+        private const val PREF_LINK_RETENTION_DAYS = "link_retention_days"
         private const val HEARD_LIMIT = 4
         private const val HEARD_WINDOW_MS = 15 * 60 * 1000L
         private val HEARD_EXCLUDE_TOKENS = setOf("CQ", "HB", "HEARTBEAT", "ALLCALL", "@ALLCALL")

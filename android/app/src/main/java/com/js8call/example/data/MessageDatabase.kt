@@ -16,9 +16,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ContactEntity::class,
         MailboxEntity::class,
         MailboxGroupDeliveryEntity::class,
-        ConversationSettingsEntity::class
+        ConversationSettingsEntity::class,
+        LinkObservationEntity::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = true
 )
 abstract class MessageDatabase : RoomDatabase() {
@@ -30,6 +31,8 @@ abstract class MessageDatabase : RoomDatabase() {
     abstract fun mailboxDao(): MailboxDao
 
     abstract fun conversationSettingsDao(): ConversationSettingsDao
+
+    abstract fun linkObservationDao(): LinkObservationDao
 
     companion object {
         private const val DATABASE_NAME = "js8_messages.db"
@@ -131,6 +134,29 @@ abstract class MessageDatabase : RoomDatabase() {
             }
         }
 
+        // Link observations: append-only who-hears-whom evidence mined from
+        // decoded traffic, feeding the network map and relay recommendations.
+        internal val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `link_observations` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `reporter` TEXT NOT NULL,
+                        `heard` TEXT NOT NULL,
+                        `snr` INTEGER,
+                        `source` TEXT NOT NULL,
+                        `dialFreqHz` INTEGER,
+                        `observedAt` INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_link_observations_reporter` ON `link_observations` (`reporter`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_link_observations_heard` ON `link_observations` (`heard`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_link_observations_observedAt` ON `link_observations` (`observedAt`)")
+            }
+        }
+
         private fun buildDatabase(context: Context): MessageDatabase {
             // No destructive fallback: this database now holds traffic we
             // promised a third party we would forward, so a migration gap
@@ -140,7 +166,7 @@ abstract class MessageDatabase : RoomDatabase() {
                 MessageDatabase::class.java,
                 DATABASE_NAME
             )
-                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                 .build()
         }
     }

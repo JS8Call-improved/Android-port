@@ -226,6 +226,14 @@
     <string name="settings_mailbox">Enable Mailbox</string>
     <string name="settings_mailbox_summary">Hold messages other stations deposit with MSG TO: and serve them on request. Check your local rules on third-party traffic before enabling.</string>
 
+    <string name="settings_category_network_map">Network map</string>
+    <string name="settings_link_retention">Keep link data for</string>
+    <string name="settings_link_retention_summary">Who-hears-whom observations mined from decoded traffic, behind the network map and relay suggestions</string>
+    <string name="settings_clear_link_data">Clear link data</string>
+    <string name="settings_clear_link_data_summary">Delete all recorded link observations</string>
+    <string name="settings_clear_link_data_confirm">Delete all link observations? The network map starts over from what is heard next.</string>
+    <string name="settings_clear_link_data_done">Link data cleared</string>
+
     <string name="settings_category_heartbeat">Heartbeat</string>
     <string name="settings_category_timing">Timing</string>
     <string name="settings_category_about">About</string>

@@ -260,6 +260,28 @@
 
     </PreferenceCategory>
 
+    <!-- Network map Category -->
+    <PreferenceCategory
+        app:title="@string/settings_category_network_map"
+        app:iconSpaceReserved="false">
+
+        <ListPreference
+            app:key="link_retention_days"
+            app:title="@string/settings_link_retention"
+            app:summary="@string/settings_link_retention_summary"
+            app:entries="@array/link_retention_entries"
+            app:entryValues="@array/link_retention_values"
+            app:defaultValue="30"
+            app:iconSpaceReserved="false" />
+
+        <Preference
+            app:key="clear_link_data"
+            app:title="@string/settings_clear_link_data"
+            app:summary="@string/settings_clear_link_data_summary"
+            app:iconSpaceReserved="false" />
+
+    </PreferenceCategory>
+
     <!-- Heartbeat Category -->
     <PreferenceCategory
         app:title="@string/settings_category_heartbeat"
