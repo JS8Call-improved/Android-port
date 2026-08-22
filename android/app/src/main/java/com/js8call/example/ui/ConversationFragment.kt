@@ -18,6 +18,8 @@ import com.google.android.material.snackbar.Snackbar
 import com.js8call.example.MainActivity
 import com.js8call.example.R
 import com.js8call.example.model.TransmitState
+import com.js8call.example.util.AvatarColor
+import com.js8call.example.util.DisplayName
 import com.js8call.example.util.RelayPath
 
 /**
@@ -59,9 +61,9 @@ class ConversationFragment : Fragment() {
         transmitViewModel = ViewModelProvider(requireActivity())[TransmitViewModel::class.java]
 
         val toolbar = view.findViewById<MaterialToolbar>(R.id.thread_toolbar)
-        toolbar.title = callsign
         toolbar.setNavigationOnClickListener { findNavController().navigateUp() }
         SpeedChip.bind(view.findViewById(R.id.speed_chip))
+        bindThreadHeader(view)
 
         // Mailbox actions make sense toward a station, not a group. A group
         // thread the operator has not joined gets a Join action instead.
@@ -119,6 +121,7 @@ class ConversationFragment : Fragment() {
         emptyState = view.findViewById(R.id.empty_state)
 
         adapter = MessageBubbleAdapter()
+        adapter.onSenderClick = { sender -> openContactCard(sender) }
         recyclerView.adapter = adapter
         // No cross-fade on rebinds; the sending label ticks every second
         (recyclerView.itemAnimator as? androidx.recyclerview.widget.SimpleItemAnimator)
@@ -234,6 +237,52 @@ class ConversationFragment : Fragment() {
                 LocalBroadcastManager.getInstance(requireContext())
                     .sendBroadcast(Intent(MainActivity.ACTION_PROCESS_TX_QUEUE))
             }
+    }
+
+    /**
+     * The toolbar names who the thread is with and opens their contact card.
+     * A group has no contact record, so it stays a plain heading.
+     */
+    private fun bindThreadHeader(view: View) {
+        val header = view.findViewById<View>(R.id.thread_header)
+        val avatarFrame = view.findViewById<View>(R.id.avatar_frame)
+        val avatarText = view.findViewById<TextView>(R.id.avatar_text)
+        val nameText = view.findViewById<TextView>(R.id.thread_name)
+        val callsignText = view.findViewById<TextView>(R.id.thread_callsign)
+        val isGroup = callsign.startsWith("@")
+
+        avatarFrame.backgroundTintList = android.content.res.ColorStateList.valueOf(
+            androidx.core.content.ContextCompat.getColor(
+                requireContext(), AvatarColor.forCallsign(callsign)
+            )
+        )
+        avatarText.text = if (isGroup) "@" else DisplayName.initial(callsign, null)
+        nameText.text = callsign
+
+        if (isGroup) {
+            header.isClickable = false
+            header.background = null
+            return
+        }
+
+        header.setOnClickListener { openContactCard(callsign) }
+
+        val contactsViewModel = ViewModelProvider(requireActivity())[ContactsViewModel::class.java]
+        contactsViewModel.getContact(callsign).observe(viewLifecycleOwner) { contact ->
+            val name = contact?.name
+            nameText.text = DisplayName.of(callsign, name)
+            avatarText.text = DisplayName.initial(callsign, name)
+            val secondary = DisplayName.secondary(callsign, name)
+            callsignText.text = secondary.orEmpty()
+            callsignText.visibility = if (secondary == null) View.GONE else View.VISIBLE
+        }
+    }
+
+    private fun openContactCard(station: String) {
+        findNavController().navigate(
+            R.id.navigation_contact_detail,
+            Bundle().apply { putString("callsign", station) }
+        )
     }
 
     private fun openRelayPathEditor() {

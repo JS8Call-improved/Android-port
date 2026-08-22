@@ -1,16 +1,20 @@
 package com.js8call.example.ui
 
+import android.content.res.ColorStateList
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.TextView
+import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.button.MaterialButton
 import com.js8call.example.R
 import com.js8call.example.data.ContactEntity
+import com.js8call.example.util.AvatarColor
+import com.js8call.example.util.DisplayName
 
 /**
  * Adapter for the heard-station contact list.
@@ -31,6 +35,7 @@ class ContactListAdapter : ListAdapter<ContactEntity, ContactListAdapter.Contact
     }
 
     inner class ContactViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
+        private val avatarFrame: View = itemView.findViewById(R.id.avatar_frame)
         private val avatarText: TextView = itemView.findViewById(R.id.avatar_text)
         private val callsignText: TextView = itemView.findViewById(R.id.callsign_text)
         private val hearsUsIcon: ImageView = itemView.findViewById(R.id.hears_us_icon)
@@ -41,12 +46,18 @@ class ContactListAdapter : ListAdapter<ContactEntity, ContactListAdapter.Contact
         private val starButton: MaterialButton = itemView.findViewById(R.id.star_button)
 
         fun bind(contact: ContactEntity) {
-            avatarText.text = contact.callsign.firstOrNull()?.toString() ?: "?"
-            callsignText.text = contact.callsign
+            avatarText.text = DisplayName.initial(contact.callsign, contact.name)
+            avatarFrame.backgroundTintList = ColorStateList.valueOf(
+                ContextCompat.getColor(itemView.context, AvatarColor.forCallsign(contact.callsign))
+            )
+            callsignText.text = DisplayName.of(contact.callsign, contact.name)
             hearsUsIcon.visibility = if (contact.heardUs) View.VISIBLE else View.GONE
 
             val res = itemView.resources
             val parts = mutableListOf<String>()
+            // A named station shows its callsign here, since the headline
+            // gave the row to the name.
+            DisplayName.secondary(contact.callsign, contact.name)?.let { parts.add(it) }
             contact.snr?.let { parts.add(res.getString(R.string.contact_snr, it)) }
             contact.offset?.let { parts.add(res.getString(R.string.contact_offset, it.toInt())) }
             contact.grid?.let { parts.add(it) }

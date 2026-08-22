@@ -332,6 +332,24 @@
     <string name="contact_action_message">Message</string>
     <string name="contact_action_comment">Edit comment</string>
     <string name="contact_action_delete">Delete</string>
+    <string name="contact_search_hint">Search contacts</string>
+    <string name="contacts_no_matches">No station matches “%1$s”</string>
+
+    <string name="contact_name_hint">Name</string>
+    <string name="contact_notes_hint">Notes</string>
+    <string name="contact_detail_heard">Heard</string>
+    <string name="contact_detail_last_heard">Last heard</string>
+    <string name="contact_detail_snr_label">Signal</string>
+    <string name="contact_detail_offset_label">Offset</string>
+    <string name="contact_detail_grid_label">Grid</string>
+    <string name="contact_detail_info_label">Station info</string>
+    <string name="contact_detail_never_heard">Not heard on the air yet</string>
+    <string name="contact_detail_unfavorite">Remove favorite</string>
+    <string name="contact_deleted">Deleted %1$s</string>
+    <plurals name="contact_detail_mail">
+        <item quantity="one">%1$d message waiting for them</item>
+        <item quantity="other">%1$d messages waiting for them</item>
+    </plurals>
     <string name="contact_comment_hint">Comment</string>
     <string name="contact_comment_save">Save</string>
     <string name="contact_delete_title">Delete %s?</string>

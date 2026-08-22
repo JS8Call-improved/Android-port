@@ -6,7 +6,7 @@ import androidx.room.PrimaryKey
 
 /**
  * A station heard on the air, updated on every decode from it.
- * Star and comment are user data and survive heard updates.
+ * Name, star and comment are user data and survive heard updates.
  */
 @Entity(
     tableName = "contacts",
@@ -15,6 +15,12 @@ import androidx.room.PrimaryKey
 data class ContactEntity(
     @PrimaryKey
     val callsign: String,
+
+    /**
+     * What the operator calls this station. Shown in place of the callsign
+     * wherever a station is named, with the callsign kept underneath.
+     */
+    val name: String? = null,
 
     /** UTC timestamp in milliseconds of the newest decode from this station */
     val lastHeard: Long,

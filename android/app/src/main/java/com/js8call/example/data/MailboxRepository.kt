@@ -18,6 +18,9 @@ class MailboxRepository(context: Context) {
 
     fun getHeldCount(): LiveData<Int> = mailboxDao.getHeldCount()
 
+    fun getHeldCountFor(callsign: String): LiveData<Int> =
+        mailboxDao.getHeldCountFor(callsign.trim().uppercase())
+
     fun getDeliveryCounts(): LiveData<List<DeliveryCount>> = mailboxDao.getDeliveryCounts()
 
     suspend fun store(message: MailboxEntity): Long =

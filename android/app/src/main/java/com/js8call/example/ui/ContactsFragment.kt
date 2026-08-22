@@ -6,14 +6,14 @@ import android.os.Looper
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.TextView
+import androidx.core.widget.addTextChangedListener
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModelProvider
 import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.RecyclerView
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.textfield.TextInputEditText
 import com.js8call.example.R
-import com.js8call.example.data.ContactEntity
 
 /**
  * Contacts tab: every station heard on the air, starred first,
@@ -25,6 +25,9 @@ class ContactsFragment : Fragment() {
     private lateinit var adapter: ContactListAdapter
     private lateinit var recyclerView: RecyclerView
     private lateinit var emptyState: View
+    private lateinit var emptyTitle: TextView
+    private lateinit var emptyHint: TextView
+    private lateinit var searchInput: TextInputEditText
 
     // Refresh the age column while the list is on screen
     private val ageHandler = Handler(Looper.getMainLooper())
@@ -51,17 +54,51 @@ class ContactsFragment : Fragment() {
         recyclerView = view.findViewById(R.id.contacts_recycler_view)
         emptyState = view.findViewById(R.id.empty_state)
 
+        emptyTitle = view.findViewById(R.id.empty_title)
+        emptyHint = view.findViewById(R.id.empty_hint)
+        searchInput = view.findViewById(R.id.search_input)
+
         adapter = ContactListAdapter().apply {
-            onItemClick = { contact -> showContactOptions(contact) }
+            onItemClick = { contact -> openContact(contact.callsign) }
             onStarClick = { contact -> viewModel.setStarred(contact.callsign, !contact.starred) }
         }
         recyclerView.adapter = adapter
 
-        viewModel.contacts.observe(viewLifecycleOwner) { contacts ->
+        searchInput.setText(viewModel.query.value.orEmpty())
+        searchInput.addTextChangedListener(
+            afterTextChanged = { viewModel.setQuery(it?.toString().orEmpty()) }
+        )
+
+        viewModel.visibleContacts.observe(viewLifecycleOwner) { contacts ->
             adapter.submitList(contacts)
-            emptyState.visibility = if (contacts.isEmpty()) View.VISIBLE else View.GONE
-            recyclerView.visibility = if (contacts.isEmpty()) View.GONE else View.VISIBLE
+            val empty = contacts.isEmpty()
+            emptyState.visibility = if (empty) View.VISIBLE else View.GONE
+            recyclerView.visibility = if (empty) View.GONE else View.VISIBLE
+            if (empty) showEmptyState()
         }
+    }
+
+    /**
+     * An empty list means two different things. Nothing heard yet is the
+     * normal starting state; nothing matching a search is the operator's
+     * own doing and needs to say so.
+     */
+    private fun showEmptyState() {
+        val query = viewModel.query.value.orEmpty().trim()
+        if (query.isEmpty()) {
+            emptyTitle.setText(R.string.contacts_empty)
+            emptyHint.setText(R.string.contacts_empty_hint)
+        } else {
+            emptyTitle.setText(R.string.contact_search_hint)
+            emptyHint.text = getString(R.string.contacts_no_matches, query)
+        }
+    }
+
+    private fun openContact(callsign: String) {
+        findNavController().navigate(
+            R.id.navigation_contact_detail,
+            Bundle().apply { putString("callsign", callsign) }
+        )
     }
 
     override fun onStart() {
@@ -72,56 +109,6 @@ class ContactsFragment : Fragment() {
     override fun onStop() {
         ageHandler.removeCallbacks(ageTick)
         super.onStop()
-    }
-
-    private fun showContactOptions(contact: ContactEntity) {
-        val options = arrayOf(
-            getString(R.string.contact_action_message),
-            getString(R.string.contact_action_comment),
-            getString(R.string.contact_action_delete)
-        )
-        MaterialAlertDialogBuilder(requireContext())
-            .setTitle(contact.callsign)
-            .setItems(options) { _, which ->
-                when (which) {
-                    0 -> openConversation(contact.callsign)
-                    1 -> editComment(contact)
-                    2 -> confirmDelete(contact)
-                }
-            }
-            .show()
-    }
-
-    private fun openConversation(callsign: String) {
-        val bundle = Bundle().apply { putString("callsign", callsign) }
-        findNavController().navigate(R.id.navigation_conversation, bundle)
-    }
-
-    private fun editComment(contact: ContactEntity) {
-        val dialogView = layoutInflater.inflate(R.layout.dialog_edit_comment, null)
-        val input = dialogView.findViewById<TextInputEditText>(R.id.comment_input)
-        input.setText(contact.comment.orEmpty())
-
-        MaterialAlertDialogBuilder(requireContext())
-            .setTitle(contact.callsign)
-            .setView(dialogView)
-            .setPositiveButton(R.string.contact_comment_save) { _, _ ->
-                val text = input.text?.toString()?.trim()
-                viewModel.setComment(contact.callsign, text?.takeIf { it.isNotEmpty() })
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
-    }
-
-    private fun confirmDelete(contact: ContactEntity) {
-        MaterialAlertDialogBuilder(requireContext())
-            .setTitle(getString(R.string.contact_delete_title, contact.callsign))
-            .setMessage(R.string.contact_delete_message)
-            .setPositiveButton(R.string.contact_action_delete) { _, _ ->
-                viewModel.deleteContact(contact.callsign)
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
     }
 
     companion object {

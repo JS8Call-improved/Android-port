@@ -103,6 +103,10 @@ interface MailboxDao {
     @Query("SELECT COUNT(*) FROM mailbox_messages WHERE state = 0")
     fun getHeldCount(): LiveData<Int>
 
+    /** How much we are holding for one station, for its contact card. */
+    @Query("SELECT COUNT(*) FROM mailbox_messages WHERE state = 0 AND destination = :callsign")
+    fun getHeldCountFor(callsign: String): LiveData<Int>
+
     @Query("SELECT COUNT(*) FROM mailbox_group_delivery WHERE msgId = :msgId")
     suspend fun deliveryCount(msgId: Long): Int
 

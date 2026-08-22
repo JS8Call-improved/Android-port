@@ -87,6 +87,16 @@ class MessagesFragment : Fragment() {
         }
         recyclerView.adapter = adapter
 
+        // Threads come from the messages table and names from contacts. The
+        // two are joined here rather than in SQL, which leaves the
+        // conversation query alone.
+        ViewModelProvider(requireActivity())[ContactsViewModel::class.java]
+            .contacts.observe(viewLifecycleOwner) { contacts ->
+                adapter.names = contacts
+                    .filter { !it.name.isNullOrBlank() }
+                    .associate { it.callsign.uppercase() to it.name!!.trim() }
+            }
+
         newMessageFab.setOnClickListener {
             showNewMessageDialog()
         }

@@ -18,7 +18,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         MailboxGroupDeliveryEntity::class,
         ConversationSettingsEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = true
 )
 abstract class MessageDatabase : RoomDatabase() {
@@ -123,6 +123,14 @@ abstract class MessageDatabase : RoomDatabase() {
             }
         }
 
+        // A station can be given a name, which is what the app shows in place
+        // of the callsign. Nullable, so every existing row stays valid.
+        internal val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `contacts` ADD COLUMN `name` TEXT")
+            }
+        }
+
         private fun buildDatabase(context: Context): MessageDatabase {
             // No destructive fallback: this database now holds traffic we
             // promised a third party we would forward, so a migration gap
@@ -132,7 +140,7 @@ abstract class MessageDatabase : RoomDatabase() {
                 MessageDatabase::class.java,
                 DATABASE_NAME
             )
-                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                 .build()
         }
     }

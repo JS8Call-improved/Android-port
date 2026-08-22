@@ -64,6 +64,15 @@
     </fragment>
 
     <fragment
+        android:id="@+id/navigation_contact_detail"
+        android:name="com.js8call.example.ui.ContactDetailFragment"
+        android:label="{callsign}">
+        <argument
+            android:name="callsign"
+            app:argType="string" />
+    </fragment>
+
+    <fragment
         android:id="@+id/navigation_contacts"
         android:name="com.js8call.example.ui.ContactsFragment"
         android:label="@string/nav_contacts" />

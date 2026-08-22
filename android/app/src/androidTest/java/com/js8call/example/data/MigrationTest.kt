@@ -123,4 +123,36 @@ class MigrationTest {
             assertEquals("KA0XYZ>N0DEF", c.getString(0))
         }
     }
+
+    @Test
+    fun migrate5To6_keepsUserDataAndAddsName() {
+        helper.createDatabase(testDb, 5).apply {
+            // The star and comment are the operator's, not the radio's, and
+            // the name column joins them. All three have to survive.
+            execSQL(
+                """
+                INSERT INTO contacts (callsign, lastHeard, snr, grid, heardUs, starred, comment)
+                VALUES ('KN4CRD', 1724200000000, -12, 'EM73', 1, 1, 'sked partner')
+                """.trimIndent()
+            )
+            close()
+        }
+
+        val db = helper.runMigrationsAndValidate(
+            testDb, 6, true, MessageDatabase.MIGRATION_5_6
+        )
+
+        db.query("SELECT starred, comment, name FROM contacts WHERE callsign = 'KN4CRD'").use { c ->
+            assertTrue(c.moveToFirst())
+            assertEquals(1, c.getInt(0))
+            assertEquals("sked partner", c.getString(1))
+            assertTrue("name starts empty", c.isNull(2))
+        }
+
+        db.execSQL("UPDATE contacts SET name = 'Jordan' WHERE callsign = 'KN4CRD'")
+        db.query("SELECT name FROM contacts WHERE callsign = 'KN4CRD'").use { c ->
+            assertTrue(c.moveToFirst())
+            assertEquals("Jordan", c.getString(0))
+        }
+    }
 }

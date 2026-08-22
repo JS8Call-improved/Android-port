@@ -16,12 +16,37 @@ class ContactRepository(context: Context) {
 
     fun getContacts(): LiveData<List<ContactEntity>> = contactDao.getContacts()
 
+    fun getContactLive(callsign: String): LiveData<ContactEntity?> =
+        contactDao.getContactLive(callsign.trim().uppercase())
+
     suspend fun setStarred(callsign: String, starred: Boolean) {
-        withContext(Dispatchers.IO) { contactDao.setStarred(callsign, starred) }
+        withContext(Dispatchers.IO) {
+            ensureRow(callsign)
+            contactDao.setStarred(callsign, starred)
+        }
     }
 
     suspend fun setComment(callsign: String, comment: String?) {
-        withContext(Dispatchers.IO) { contactDao.setComment(callsign, comment) }
+        withContext(Dispatchers.IO) {
+            ensureRow(callsign)
+            contactDao.setComment(callsign, comment)
+        }
+    }
+
+    suspend fun setName(callsign: String, name: String?) {
+        withContext(Dispatchers.IO) {
+            ensureRow(callsign)
+            contactDao.setName(callsign, name)
+        }
+    }
+
+    /**
+     * Rows are normally written by [recordDecode], so a station named from a
+     * thread the app restored but never heard has no row to update yet.
+     * lastHeard of 0 marks it as never actually heard on the air.
+     */
+    private suspend fun ensureRow(callsign: String) {
+        contactDao.insertIgnore(ContactEntity(callsign = callsign, lastHeard = 0L))
     }
 
     suspend fun deleteContact(callsign: String) {

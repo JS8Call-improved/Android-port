@@ -18,6 +18,10 @@ interface ContactDao {
     @Query("SELECT * FROM contacts WHERE callsign = :callsign")
     suspend fun getContact(callsign: String): ContactEntity?
 
+    /** Null until the station has been heard, or named on its contact card. */
+    @Query("SELECT * FROM contacts WHERE callsign = :callsign")
+    fun getContactLive(callsign: String): LiveData<ContactEntity?>
+
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertIgnore(contact: ContactEntity): Long
 
@@ -48,6 +52,9 @@ interface ContactDao {
 
     @Query("UPDATE contacts SET comment = :comment WHERE callsign = :callsign")
     suspend fun setComment(callsign: String, comment: String?)
+
+    @Query("UPDATE contacts SET name = :name WHERE callsign = :callsign")
+    suspend fun setName(callsign: String, name: String?)
 
     @Query("DELETE FROM contacts WHERE callsign = :callsign")
     suspend fun deleteContact(callsign: String)

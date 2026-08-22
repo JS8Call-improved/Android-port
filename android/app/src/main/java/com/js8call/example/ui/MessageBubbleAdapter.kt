@@ -32,6 +32,9 @@ class MessageBubbleAdapter : ListAdapter<MessageEntity, RecyclerView.ViewHolder>
 
     var onMessageLongClick: ((MessageEntity) -> Boolean)? = null
 
+    /** The sender's name on a group message opens their contact card. */
+    var onSenderClick: ((String) -> Unit)? = null
+
     /** Message id of the bubble currently transmitting, if any. */
     var sendingMessageId: Long? = null
 
@@ -73,7 +76,7 @@ class MessageBubbleAdapter : ListAdapter<MessageEntity, RecyclerView.ViewHolder>
     override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
         val message = getItem(position)
         when (holder) {
-            is IncomingMessageViewHolder -> holder.bind(message)
+            is IncomingMessageViewHolder -> holder.bind(message, onSenderClick)
             is OutgoingMessageViewHolder -> holder.bind(message, labelFor(message))
         }
 
@@ -96,7 +99,7 @@ class MessageBubbleAdapter : ListAdapter<MessageEntity, RecyclerView.ViewHolder>
 
         private val timeFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
 
-        fun bind(message: MessageEntity) {
+        fun bind(message: MessageEntity, onSenderClick: ((String) -> Unit)?) {
             messageText.text = message.text
             timestampText.text = timeFormat.format(Date(message.timestamp))
             bindRelayPath(relayText, message)
@@ -106,8 +109,10 @@ class MessageBubbleAdapter : ListAdapter<MessageEntity, RecyclerView.ViewHolder>
             if (sender != null && message.conversationId.startsWith("@")) {
                 senderText.visibility = View.VISIBLE
                 senderText.text = sender
+                senderText.setOnClickListener { onSenderClick?.invoke(sender) }
             } else {
                 senderText.visibility = View.GONE
+                senderText.setOnClickListener(null)
             }
 
             // Show SNR if available

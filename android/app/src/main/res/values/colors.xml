@@ -104,4 +104,15 @@
     <!-- Contact star -->
     <color name="star_active">#FFB300</color>
     <color name="star_inactive">#72787E</color>
+
+    <!-- Avatar circles, picked by callsign. Mid-tone so white sits on all
+         of them, in light and dark alike. -->
+    <color name="avatar_1">#5C6BC0</color>
+    <color name="avatar_2">#00897B</color>
+    <color name="avatar_3">#C2185B</color>
+    <color name="avatar_4">#6D4C41</color>
+    <color name="avatar_5">#00838F</color>
+    <color name="avatar_6">#7B1FA2</color>
+    <color name="avatar_7">#EF6C00</color>
+    <color name="avatar_8">#2E7D32</color>
 </resources>
