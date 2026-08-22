@@ -53,6 +53,22 @@ class MessagesFragment : Fragment() {
             findNavController().navigate(R.id.action_messages_to_everything)
         }
 
+        // Held messages entry: visible once the mailbox holds anything,
+        // badged with the count still waiting for its recipients.
+        val mailboxViewModel = ViewModelProvider(requireActivity())[MailboxViewModel::class.java]
+        val mailboxFrame = view.findViewById<View>(R.id.mailbox_button_frame)
+        val mailboxBadge = view.findViewById<android.widget.TextView>(R.id.mailbox_badge)
+        view.findViewById<View>(R.id.mailbox_button).setOnClickListener {
+            findNavController().navigate(R.id.action_messages_to_mailbox)
+        }
+        mailboxViewModel.messages.observe(viewLifecycleOwner) { rows ->
+            mailboxFrame.visibility = if (rows.isEmpty()) View.GONE else View.VISIBLE
+        }
+        mailboxViewModel.heldCount.observe(viewLifecycleOwner) { held ->
+            mailboxBadge.visibility = if (held > 0) View.VISIBLE else View.GONE
+            mailboxBadge.text = held.toString()
+        }
+
         // Newest band activity as the thread preview, like a DM row
         val everythingPreview = view.findViewById<android.widget.TextView>(R.id.everything_preview)
         decodeViewModel.decodes.observe(viewLifecycleOwner) { decodes ->

@@ -6,6 +6,9 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 
+/** One group message and how many stations have collected it. */
+data class DeliveryCount(val msgId: Long, val count: Int)
+
 /**
  * Data Access Object for the store-and-forward mailbox.
  *
@@ -102,6 +105,10 @@ interface MailboxDao {
 
     @Query("SELECT COUNT(*) FROM mailbox_group_delivery WHERE msgId = :msgId")
     suspend fun deliveryCount(msgId: Long): Int
+
+    /** How many stations have collected each group message. */
+    @Query("SELECT msgId, COUNT(*) AS count FROM mailbox_group_delivery GROUP BY msgId")
+    fun getDeliveryCounts(): LiveData<List<DeliveryCount>>
 
     @Query("DELETE FROM mailbox_messages WHERE id = :id")
     suspend fun delete(id: Long)

@@ -160,6 +160,29 @@
     <string name="settings_autoreply_summary">Automatically respond to heartbeats with SNR</string>
     <string name="settings_relay">Enable Relay</string>
     <string name="settings_relay_summary">Automatically relay messages using CALL&gt;</string>
+    <!-- Held messages screen -->
+    <string name="mailbox_title">Held messages</string>
+    <string name="mailbox_empty">No held messages</string>
+    <string name="mailbox_empty_hint">Messages other stations ask you to hold appear here until their recipients collect them</string>
+    <string name="mailbox_from_age">from %1$s · %2$s</string>
+    <string name="mailbox_state_held">Held</string>
+    <string name="mailbox_state_delivered">Delivered</string>
+    <string name="mailbox_detail_from">From %1$s</string>
+    <string name="mailbox_detail_via">Via %1$s</string>
+    <string name="mailbox_delete">Delete</string>
+    <string name="mailbox_delete_confirm">Delete this message for %1$s? Its recipient has not necessarily seen it.</string>
+    <string name="mailbox_delete_delivered">Delete delivered</string>
+    <string name="mailbox_delete_delivered_confirm">Remove every message already collected by its recipient?</string>
+    <string name="mailbox_deleted">Deleted</string>
+    <plurals name="mailbox_destination_summary">
+        <item quantity="one">%1$d message, oldest %2$s</item>
+        <item quantity="other">%1$d messages, oldest %2$s</item>
+    </plurals>
+    <plurals name="mailbox_collected_by">
+        <item quantity="one">Collected by %1$d station</item>
+        <item quantity="other">Collected by %1$d stations</item>
+    </plurals>
+
     <string name="settings_mailbox">Enable Mailbox</string>
     <string name="settings_mailbox_summary">Hold messages other stations deposit with MSG TO: and serve them on request. Check your local rules on third-party traffic before enabling.</string>
 

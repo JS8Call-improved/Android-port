@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Material Symbols "inbox" -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="960"
+    android:viewportHeight="960"
+    android:tint="?attr/colorControlNormal">
+    <group android:translateY="960">
+        <path
+            android:fillColor="@android:color/white"
+            android:pathData="M200,-120q-33,0 -56.5,-23.5T120,-200v-560q0,-33 23.5,-56.5T200,-840h560q33,0 56.5,23.5T840,-760v560q0,33 -23.5,56.5T760,-120H200ZM200,-200h560v-120H640q-30,38 -71.5,59T480,-240q-47,0 -88.5,-21T320,-320H200v120ZM549,-342q31,-22 43,-58h168v-360H200v360h168q12,36 43,58t69,22q38,0 69,-22ZM200,-200h560,-560Z" />
+    </group>
+</vector>

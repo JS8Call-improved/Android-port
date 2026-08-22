@@ -11,6 +11,62 @@
         android:layout_height="match_parent"
         android:orientation="vertical">
 
+        <!-- Header strip: entry points that are not conversations. The
+             mailbox button appears only once the mailbox holds anything. -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="16dp"
+            android:paddingEnd="4dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:paddingVertical="8dp"
+                android:text="@string/nav_messages"
+                android:textAppearance="?attr/textAppearanceTitleMedium" />
+
+            <FrameLayout
+                android:id="@+id/mailbox_button_frame"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:visibility="gone"
+                tools:visibility="visible">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/mailbox_button"
+                    style="@style/Widget.Material3.Button.IconButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:contentDescription="@string/mailbox_title"
+                    app:icon="@drawable/ic_inbox"
+                    app:iconTint="?attr/colorOnSurfaceVariant" />
+
+                <TextView
+                    android:id="@+id/mailbox_badge"
+                    android:layout_width="wrap_content"
+                    android:layout_height="16dp"
+                    android:layout_gravity="top|end"
+                    android:layout_marginTop="4dp"
+                    android:layout_marginEnd="2dp"
+                    android:background="@drawable/unread_badge_background"
+                    android:gravity="center"
+                    android:minWidth="16dp"
+                    android:paddingHorizontal="4dp"
+                    android:textColor="@color/unread_badge_text"
+                    android:textSize="10sp"
+                    android:textStyle="bold"
+                    android:visibility="gone"
+                    tools:text="2"
+                    tools:visibility="visible" />
+
+            </FrameLayout>
+
+        </LinearLayout>
+
         <!-- Pinned "Everything" thread: all band activity -->
         <LinearLayout
             android:id="@+id/everything_card"
