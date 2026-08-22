@@ -1442,13 +1442,9 @@ class JS8EngineService : Service() {
             stopTxMonitor()
             disableScoRouting()
 
-            // A transmission in flight when the engine stops never reaches
-            // the TX monitor's completion path, because the monitor is what
-            // just got cancelled. Without a terminal state here the UI sits
-            // at "Transmitting" forever, and since the queue pump refuses to
-            // send while it believes a transmission is running, nothing is
-            // ever transmitted again until the process restarts. Report the
-            // failure so the queue frees itself.
+            // Stopping cancels the TX monitor, which is what would have
+            // reported the end of a send in flight. Without a terminal state
+            // the UI stays at Transmitting and the queue pump never sends again.
             if (txSessionActive || txAudioActive) {
                 Log.i(TAG, "Engine stopped mid-transmission; failing the send in flight")
                 broadcastTxState(TX_STATE_FAILED)
@@ -1463,16 +1459,10 @@ class JS8EngineService : Service() {
                 rigPttCommandPending = false
                 rigPttCompletion = null
             }
-            // Everything that talks to the radio is captured here and torn
-            // down on the TX handler, never on this thread. With the radio
-            // gone a CAT command blocks until hamlib's own timeout, measured
-            // at 8.6 seconds on a wedged Icom link, and every
-            // HamlibRigControl method shares one monitor, so close() then
-            // waits behind whatever is stuck. Doing that here held the main
-            // thread for nine seconds and Android called the app
-            // unresponsive. The TX handler already owns rig I/O, so the
-            // sequence runs there in order, behind the wedged call, and
-            // stopping returns immediately.
+            // Rig teardown belongs on the TX handler, not here. With the radio
+            // gone a CAT command blocks for hamlib's full timeout, and every
+            // HamlibRigControl method shares one monitor, so close() waits
+            // behind it. That was nine seconds on the main thread.
             val shutdownMode = rigControlMode
             val shutdownTransport = rtsPttTransport
             val shutdownHamlib = hamlibRigControl
@@ -1511,9 +1501,8 @@ class JS8EngineService : Service() {
 
             txHandler.post {
                 if (shouldReleasePtt) {
-                    // The captured references are used directly rather than
-                    // setRigPtt, whose fields are already cleared above so a
-                    // restart cannot pick up a closing link.
+                    // Captured references, not setRigPtt: the fields are
+                    // cleared above so a restart cannot reuse a closing link.
                     val released = when (shutdownMode) {
                         "network" -> shutdownNetwork?.setPtt(false) == true
                         "hamlib_usb" -> shutdownHamlib?.setPtt(false) == true
@@ -2401,18 +2390,10 @@ class JS8EngineService : Service() {
     }
 
     /**
-     * Run [block] shortly before the next frame boundary of [submode]'s
-     * period, on [handler].
-     *
-     * The modulator inherits the desktop's assumption that a transmission
-     * is requested at a period boundary: asked mid-period, it joins the
-     * frame already in progress and transmits only its tail, keying the
-     * radio for whatever seconds are left. The desktop's TX loop provides
-     * that timing; here this does. The block must pass
-     * [TX_BOUNDARY_DELAY_S] as txDelaySec — firing inside the lead window
-     * with that delay lands in the modulator's wait-for-next-period branch,
-     * which starts the frame cleanly at the boundary plus the submode's
-     * fixed on-air offset.
+     * Run [block] just before [submode]'s next frame boundary. The modulator
+     * assumes it was asked at a boundary, as the desktop's TX loop does;
+     * mid-period it joins the frame in progress and sends only its tail.
+     * The block must pass [TX_BOUNDARY_DELAY_S] as txDelaySec.
      */
     private fun scheduleAtNextTxBoundary(submode: Int, handler: Handler, block: () -> Unit) {
         val period = framePeriodMs(submode)
@@ -2509,8 +2490,8 @@ class JS8EngineService : Service() {
         if (activeEngine != null) {
             val submode = getPreferredTxSubmode()
             scheduleAtNextTxBoundary(submode, mainHandler) {
-                // Live engine query, not the monitor's cached flags: another
-                // deferred send may have started at this same boundary.
+                // Live query, not the monitor's cached flags: another
+                // deferred send may have started at this boundary.
                 if (engine !== activeEngine || activeEngine.isTransmitting()) {
                     return@scheduleAtNextTxBoundary
                 }
@@ -4689,9 +4670,8 @@ class JS8EngineService : Service() {
         private const val HEARD_WINDOW_MS = 15 * 60 * 1000L
         private val HEARD_EXCLUDE_TOKENS = setOf("CQ", "HB", "HEARTBEAT", "ALLCALL", "@ALLCALL")
         private const val RELAY_BUFFER_TIMEOUT_MS = 90_000L
-        // Engine TX calls fire this far before the frame boundary, with a
-        // txDelaySec that pushes the start into the next period. The delay
-        // must exceed the lead or the modulator joins the current frame.
+        // Fire this far before the boundary; the delay must exceed the lead
+        // or the modulator joins the frame already in progress.
         private const val TX_BOUNDARY_LEAD_MS = 1500L
         private const val TX_BOUNDARY_DELAY_S = 2.0
         private const val RELAY_FREQUENCY_TOLERANCE_HZ = 10.0f
