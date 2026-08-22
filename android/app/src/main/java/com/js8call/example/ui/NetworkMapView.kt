@@ -245,7 +245,15 @@ class NetworkMapView @JvmOverloads constructor(
                 node.y - (initialPaint.ascent() + initialPaint.descent()) / 2f,
                 initialPaint
             )
-            canvas.drawText(node.callsign, node.x, node.y + r + 14f * density, labelPaint)
+            // drawText's y is the baseline, so clear the circle (and the
+            // ring on our own node) by the text's ascent plus a real gap.
+            val ringExtra = if (node.callsign == myCallsign) 6f * density else 0f
+            canvas.drawText(
+                node.callsign,
+                node.x,
+                node.y + r + ringExtra + 10f * density - labelPaint.ascent(),
+                labelPaint
+            )
         }
 
         canvas.restore()
