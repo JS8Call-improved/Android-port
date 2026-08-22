@@ -55,13 +55,16 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent" />
 
+        <!-- Top of the frame, not centered: the pinned self node owns the
+             center of the map even when there are no edges yet. -->
         <TextView
             android:id="@+id/map_empty_state"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_gravity="center"
+            android:layout_gravity="center_horizontal|top"
+            android:layout_marginTop="24dp"
             android:gravity="center"
-            android:padding="32dp"
+            android:paddingHorizontal="32dp"
             android:text="@string/network_map_empty"
             android:textAppearance="?attr/textAppearanceBodyLarge"
             android:textColor="?attr/colorOnSurfaceVariant"
