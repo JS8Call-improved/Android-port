@@ -123,6 +123,150 @@ the store-and-forward mailbox (`MSG TO:` deposits, `QUERY MSGS`, `QUERY MSG {id}
 relay forwarding and delivery, auto-replies to the query commands, heartbeats, and
 ACK handling.
 
+## Clock alignment
+
+JS8 is a timed mode. The decoder searches a window of about **±2.48 seconds**
+around where it expects a frame to start (`JZ = 62` steps of `NSPS / 4` samples,
+`core/src/decoder/legacy_decoder.cpp`). A clock further off than that decodes
+nothing, while the waterfall keeps looking normal, because an FFT has no timing
+dependence. That combination — signals visible, decodes zero — is the signature
+of a clock problem and of nothing else.
+
+The engine never sets the system clock. It holds an offset instead:
+
+```
+drifted_now() = system_clock::now() + time_drift_ms_
+```
+
+That offset feeds `align_ring_to_clock()`, which snaps the RX ring to the UTC
+minute, and it feeds the transmit start. A drift change sets
+`drift_realign_pending_`, and the next capture buffer re-snaps the ring on the
+audio thread that owns it. Nothing else moves.
+
+**Three things can set the offset.**
+
+1. *Sync from a decode.* `compute_drift_estimate()` runs inside the decode
+   callback and returns the total drift that would centre that signal. The
+   service applies it when auto-sync is on or a one-shot sync is armed. This is
+   the desktop's algorithm and it is accurate, but it needs a decode, so it
+   cannot recover a clock that is too wrong to decode anything.
+2. *Manual entry.* Monitor overflow, "Adjust time drift", or a tap on the drift
+   readout in the status strip. Capped at ±30 s because the ring aligns to the
+   UTC minute and a larger value wraps onto a smaller one.
+3. *The blind search.* Described below. It exists because 1 cannot start itself
+   and 2 asks the user to know a number they have no way to measure.
+
+### The blind search
+
+```
+decode cycle (primary submode) ──▶ note_decode_cycle(decoded)
+        │                                   │
+   decoded > 0                        8 quiet cycles
+        │                                   │
+        ▼                                   ▼
+  counter reset                      search armed
+                                            │
+                        one shifted window per cycle, 3 of them
+                                            │
+                      ┌─────────────────────┴──────────────────┐
+                      ▼                                        ▼
+             a trial decodes                          all three empty
+                      │                                        │
+                      ▼                                        ▼
+        TimingSuggestion::Found                 TimingSuggestion::GaveUp
+        (drift_ms from the same                 quiet_cycles = -40, so the
+         compute_drift_estimate)                 next attempt is far off
+```
+
+**Arming** is a decode drought, not a signal test. `note_decode_cycle()` counts
+only tasks that carry the primary submode, which is the longest-period submode
+enabled — Normal when it is on. Any decode resets the counter to zero and
+disarms. Eight consecutive empty cycles arm the search, so two minutes of
+silence on Normal.
+
+The sharper trigger would be "sync candidates found but zero decodes". The
+decoder can report those, but only when `syncStats` is set, and
+`populate_decode_metadata()` leaves it false because the flag emits an event per
+candidate. A drought is looser and arms on a genuinely dead band too. That costs
+nothing visible: the user only ever sees something when a shifted window
+**actually decodes a message**, so a false arm burns one extra decode per cycle
+for three cycles and then gives up in silence.
+
+**Trials** need no decoder change. `schedule_decodes()` already snapshots the
+ring plus a `kposX`/`kszX` window and enqueues it, so a trial is one more
+snapshot with a shifted `kpos` and `timing_trial = true`. Coverage per attempt
+is the decoder's own ±2.48 s, so three trials spaced a quarter period apart,
+plus the ordinary window, cover a whole period with overlap.
+
+Shifts are always **backwards**. A forward shift would read past the ring's
+write pointer into the previous minute's audio. A step earlier is the same phase
+modulo the period and it is real, already-captured data.
+
+A trial that decodes calls `report_timing_found()` and its decode is **not**
+reported as traffic. Reporting it would duplicate the message once the offset is
+accepted and the same audio decodes again in the ordinary window.
+
+`finish_timing_trial()` is what gives up, not the code that queues the trials.
+Decoding runs on its own thread, so the sweep is only spent when the last trial
+returns. Giving up when the last one was merely queued announced failure a
+fraction of a second before the answer arrived.
+
+### Surfacing it
+
+A correction is a decision, so the app proposes and the user accepts. Nothing is
+applied automatically. That matters because a single mistimed station can drag
+sync-from-decode onto its own clock, which is a real failure and not a rare one:
+of the eight stations in `media/tests/A_2_9.wav`, one sits at DT +1.58 s while
+the rest are inside ±0.35 s.
+
+| Where | What |
+|---|---|
+| Monitor | An elevated card with `Dismiss` and `Fix it` |
+| Anywhere else | A snackbar whose action takes the user to Monitor |
+| Monitor nav item | A badge for as long as a suggestion is pending |
+| Status strip, while searching | The offset stays, plus a countdown |
+
+`MainActivity.renderTimingSurface()` decides between the card and the snackbar,
+and it runs on a new suggestion **and on every navigation**, because moving off
+Monitor is what makes the snackbar right and moving back is what retires it.
+Neither is a change to the suggestion itself, so a LiveData observer alone
+misses both.
+
+The countdown is derived, not guessed. `TimingSuggestion` carries `period_ms`
+for the submode being hunted, and the remaining time is
+`(steps - step + 1) x period`, since each outstanding trial takes one frame. The
+deadline is re-armed on every trial event, so a slipped cycle corrects itself
+instead of accumulating. Turbo counts down from 18 s and Slow from 90 s with no
+extra code.
+
+`Dismiss` clears the shared suggestion rather than hiding the card. The card is
+not the only surface, so a local hide would leave the badge and the snackbar up.
+
+### Numbers and where they live
+
+| Constant | Value | File |
+|---|---|---|
+| `kTimingQuietCycles` | 8 | `core/src/engine/engine.cpp` |
+| `kTimingTrialSteps` | 3 | same |
+| `kTimingRetryCycles` | 40 | same |
+| Decoder DT search | ±2.48 s | `legacy_decoder.cpp` (`JZ`, `NSSY`) |
+| Manual drift cap | ±30 s | `MonitorFragment.DRIFT_LIMIT_MS` |
+
+### Driving the UI without waiting
+
+Debug builds accept a timing suggestion straight from an intent, so the surfaces
+can be checked without a two-minute drought and a lucky trial:
+
+```sh
+./tools/show-timing-banner.sh found      # card, or snackbar when off Monitor
+./tools/show-timing-banner.sh searching  # strip countdown
+./tools/show-timing-banner.sh hide
+```
+
+It is read by `MainActivity.applyDebugTimingSuggestion()` and gated on
+`BuildConfig.DEBUG`. The service has a matching `ACTION_DEBUG_INJECT_TIMING`,
+which is unreachable from `am` because the service is not exported.
+
 ## Transmitting
 
 There are **two** transmit paths, and the difference matters.

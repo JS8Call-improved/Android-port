@@ -412,5 +412,12 @@ class JS8Engine private constructor(
          * Called with TX audio PCM samples when enabled.
          */
         fun onTxAudio(samples: ShortArray, sampleRateHz: Int) {}
+
+        /**
+         * Raised when decoding has gone dead and the engine is trying shifted
+         * windows to find the clock offset. [kind] is 0 searching, 1 found,
+         * 2 gave up. [driftMs] is the total drift to apply on a find.
+         */
+        fun onTimingSuggestion(kind: Int, driftMs: Int, step: Int, steps: Int, periodMs: Int) {}
     }
 }

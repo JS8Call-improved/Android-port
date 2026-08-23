@@ -370,6 +370,21 @@ class JS8EngineService : Service() {
                 Log.i(TAG, "One-shot time sync armed; waiting for next decode")
                 timeSyncOncePending = true
             }
+            ACTION_DEBUG_INJECT_TIMING -> {
+                // Debug builds only: drive the timing banner without waiting
+                // for a real decode drought and a lucky shifted-window hit.
+                if (BuildConfig.DEBUG) {
+                    val kind = intent.getIntExtra(EXTRA_TIMING_KIND, TIMING_FOUND)
+                    val driftMs = intent.getLongExtra(EXTRA_TIME_DRIFT_MS, -5500L)
+                    val step = intent.getIntExtra(EXTRA_TIMING_STEP, 1)
+                    val steps = intent.getIntExtra(EXTRA_TIMING_STEPS, 3)
+                    val periodMs = intent.getIntExtra(EXTRA_TIMING_PERIOD_MS, 15_000)
+                    Log.i(TAG, "Injected timing suggestion: kind=$kind drift=$driftMs")
+                    mainHandler.post {
+                        broadcastTimingSuggestion(kind, driftMs, step, steps, periodMs)
+                    }
+                }
+            }
             ACTION_DEBUG_INJECT_DECODE -> {
                 // Debug builds only: run a synthetic decode through the same
                 // path a real one takes. Protocol handling becomes testable on
@@ -570,6 +585,15 @@ class JS8EngineService : Service() {
                     Log.d(TAG, "Decode finished: count=$count")
                     mainHandler.post {
                         broadcastDecodeFinished(count)
+                    }
+                }
+
+                override fun onTimingSuggestion(
+                    kind: Int, driftMs: Int, step: Int, steps: Int, periodMs: Int
+                ) {
+                    Log.i(TAG, "Timing suggestion: kind=$kind drift=$driftMs step=$step/$steps period=$periodMs")
+                    mainHandler.post {
+                        broadcastTimingSuggestion(kind, driftMs.toLong(), step, steps, periodMs)
                     }
                 }
 
@@ -1657,6 +1681,19 @@ class JS8EngineService : Service() {
             Log.i(TAG, "Time drift restored: $driftMs ms")
         }
         broadcastTimeDrift(driftMs)
+    }
+
+    private fun broadcastTimingSuggestion(
+        kind: Int, driftMs: Long, step: Int, steps: Int, periodMs: Int
+    ) {
+        val intent = Intent(ACTION_TIMING_SUGGESTION).apply {
+            putExtra(EXTRA_TIMING_KIND, kind)
+            putExtra(EXTRA_TIME_DRIFT_MS, driftMs)
+            putExtra(EXTRA_TIMING_STEP, step)
+            putExtra(EXTRA_TIMING_STEPS, steps)
+            putExtra(EXTRA_TIMING_PERIOD_MS, periodMs)
+        }
+        LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
     }
 
     private fun broadcastTimeDrift(driftMs: Long) {
@@ -4718,6 +4755,15 @@ class JS8EngineService : Service() {
         const val ACTION_TIME_SYNC_ONCE = "com.js8call.example.ACTION_TIME_SYNC_ONCE"
         const val ACTION_SET_TIME_DRIFT = "com.js8call.example.ACTION_SET_TIME_DRIFT"
         const val ACTION_TIME_DRIFT = "com.js8call.example.ACTION_TIME_DRIFT"
+        const val ACTION_TIMING_SUGGESTION = "com.js8call.example.ACTION_TIMING_SUGGESTION"
+        const val ACTION_DEBUG_INJECT_TIMING = "com.js8call.example.ACTION_DEBUG_INJECT_TIMING"
+        const val EXTRA_TIMING_KIND = "timing_kind"
+        const val EXTRA_TIMING_STEP = "timing_step"
+        const val EXTRA_TIMING_STEPS = "timing_steps"
+        const val EXTRA_TIMING_PERIOD_MS = "timing_period_ms"
+        const val TIMING_SEARCHING = 0
+        const val TIMING_FOUND = 1
+        const val TIMING_GAVE_UP = 2
         const val ACTION_RIG_STATUS = "com.js8call.example.ACTION_RIG_STATUS"
         // Debug builds only; ignored in release. See onStartCommand.
         const val ACTION_DEBUG_INJECT_DECODE = "com.js8call.example.ACTION_DEBUG_INJECT_DECODE"

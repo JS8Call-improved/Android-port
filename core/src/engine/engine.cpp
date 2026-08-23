@@ -709,6 +709,12 @@ public:
           decode_state_.params.nsubmodes |= (1 << static_cast<int>(sch.id));
           any = true;
 
+          // Kept so a timing trial can shift this same window
+          if (auto const* primary = primary_schedule(); primary && primary->id == sch.id) {
+            current_window_start_ = wrapped_start;
+            current_window_size_ = size;
+          }
+
           if (callbacks_.on_log) {
             // Get UTC time for logging
             using clock = std::chrono::system_clock;
@@ -740,11 +746,125 @@ public:
 
       populate_decode_metadata();
 
+      auto const* primary = primary_schedule();
       DecodeState snapshot;
       snapshot.params = decode_state_.params;
       snapshot.samples = decode_state_.samples;
       snapshot.drift_ms_at_capture = ring_drift_ms_;
+      snapshot.counts_for_drought =
+          primary != nullptr &&
+          (decode_state_.params.nsubmodes & (1 << static_cast<int>(primary->id))) != 0;
       enqueue_decode(std::move(snapshot));
+
+      enqueue_timing_trial();
+    }
+
+    /**
+     * One shifted window per cycle while the timing search is armed. The
+     * decoder finds a signal within about a quarter period of where it looks,
+     * so a handful of offsets covers every alignment a wrong clock can produce.
+     */
+    void enqueue_timing_trial() {
+      if (!timing_search_armed_) return;
+
+      auto const* sch = primary_schedule();
+      if (sch == nullptr) return;
+      if ((decode_state_.params.nsubmodes & (1 << static_cast<int>(sch->id))) == 0) return;
+
+      int const period = sch->period_samples;
+      int const steps = kTimingTrialSteps;
+      int const step = timing_trial_step_.load();
+      // Always look backwards. Forwards would run past the write pointer into
+      // last minute's audio; a step earlier is the same phase and real data.
+      int const shift = -(period / (steps + 1)) * (step + 1);
+
+      DecodeState trial;
+      trial.params = decode_state_.params;
+      trial.samples = decode_state_.samples;
+      trial.drift_ms_at_capture = ring_drift_ms_;
+      trial.timing_trial = true;
+      // Only the submode being hunted; the others would just burn CPU.
+      trial.params.nsubmodes = (1 << static_cast<int>(sch->id));
+
+      int const ring = static_cast<int>(decode_state_.samples.size());
+      int const shifted = ((current_window_start_ + shift) % ring + ring) % ring;
+      set_submode_window_on(trial.params, sch->id, shifted, current_window_size_);
+      timing_trials_outstanding_.fetch_add(1);
+      enqueue_decode(std::move(trial));
+
+      auto const rate = config_.sample_rate_hz ? config_.sample_rate_hz : kJs8RxSampleRate;
+      events::TimingSuggestion ev;
+      ev.kind = events::TimingSuggestion::Kind::Searching;
+      ev.step = step + 1;
+      ev.steps = steps;
+      ev.period_ms = static_cast<int>((static_cast<long long>(period) * 1000) / rate);
+      emit_event(events::Variant{ev});
+
+      timing_trial_step_.fetch_add(1);
+    }
+
+    /**
+     * Decoding runs on its own thread, so the sweep is only spent once the
+     * last trial has come back. Giving up when the last one was merely queued
+     * would report failure just before the answer arrived.
+     */
+    void finish_timing_trial() {
+      if (timing_trials_outstanding_.fetch_sub(1) - 1 > 0) return;
+      if (!timing_search_armed_) return;
+      if (timing_trial_step_.load() < kTimingTrialSteps) return;
+
+      timing_search_armed_ = false;
+      timing_trial_step_ = 0;
+      quiet_cycles_ = -kTimingRetryCycles;
+      events::TimingSuggestion done;
+      done.kind = events::TimingSuggestion::Kind::GaveUp;
+      emit_event(events::Variant{done});
+    }
+
+    /** Longest-period enabled submode, which is the one worth hunting. */
+    SubmodeSchedule const* primary_schedule() const {
+      SubmodeSchedule const* best = nullptr;
+      for (auto const& sch : schedules_) {
+        if ((enabled_submodes_.load() & (1 << static_cast<int>(sch.id))) == 0) continue;
+        if (best == nullptr || sch.period_samples > best->period_samples) best = &sch;
+      }
+      return best;
+    }
+
+    void set_submode_window_on(DecodeParams& p, protocol::SubmodeId id, int start, int size) {
+      switch (id) {
+        case protocol::SubmodeId::A: p.kposA = start; p.kszA = size; break;
+        case protocol::SubmodeId::B: p.kposB = start; p.kszB = size; break;
+        case protocol::SubmodeId::C: p.kposC = start; p.kszC = size; break;
+        case protocol::SubmodeId::E: p.kposE = start; p.kszE = size; break;
+        case protocol::SubmodeId::I: p.kposI = start; p.kszI = size; break;
+      }
+    }
+
+    /** Arms the search once decoding has been dead for a while. */
+    void note_decode_cycle(std::size_t decoded) {
+      if (decoded > 0) {
+        quiet_cycles_ = 0;
+        timing_search_armed_ = false;
+        timing_trial_step_ = 0;
+        return;
+      }
+      if (timing_search_armed_) return;
+      if (quiet_cycles_.fetch_add(1) + 1 < kTimingQuietCycles) return;
+      timing_search_armed_ = true;
+      timing_trial_step_ = 0;
+      quiet_cycles_ = 0;
+    }
+
+    /** A shifted window decoded something, so its offset is the right one. */
+    void report_timing_found(int drift_ms) {
+      if (!timing_search_armed_.exchange(false)) return;  // first trial home wins
+      timing_trial_step_ = 0;
+      quiet_cycles_ = 0;
+      events::TimingSuggestion ev;
+      ev.kind = events::TimingSuggestion::Kind::Found;
+      ev.drift_ms = drift_ms;
+      emit_event(events::Variant{ev});
     }
 
     bool start_tx_output() {
@@ -1028,6 +1148,20 @@ public:
     // Written only on the audio thread; may lag time_drift_ms_ by one capture buffer.
     std::int64_t ring_drift_ms_{0};
     bool running_{false};
+
+    // Timing search. Armed on the audio thread, cleared from the decode thread
+    // when a trial lands, so the flag is atomic.
+    // Trials plus the ordinary window make up one period of coverage, so the
+    // step is period/(steps+1) and the unshifted phase is never retried.
+    static constexpr int kTimingTrialSteps = 3;
+    static constexpr int kTimingQuietCycles = 8;
+    static constexpr int kTimingRetryCycles = 40;
+    std::atomic<bool> timing_search_armed_{false};
+    std::atomic<int> timing_trial_step_{0};
+    std::atomic<int> timing_trials_outstanding_{0};
+    std::atomic<int> quiet_cycles_{0};
+    int current_window_start_{0};
+    int current_window_size_{0};
     std::mutex tx_mutex_;
     std::deque<TxFrame> tx_queue_;
     TxSettings tx_settings_{};
@@ -1190,11 +1324,24 @@ public:
           if (auto const* d = std::get_if<events::Decoded>(&ev)) {
             auto out = *d;
             out.drift_ms = compute_drift_estimate(task, out);
+            // A shifted window only exists to find the offset. Reporting its
+            // decodes would duplicate them once the offset is accepted.
+            if (task.timing_trial) {
+              report_timing_found(out.drift_ms);
+              return;
+            }
             emit_event(events::Variant{std::move(out)});
             return;
           }
+          if (task.timing_trial) return;
           emit_event(ev);
         });
+
+        if (task.timing_trial) {
+          finish_timing_trial();
+        } else if (task.counts_for_drought) {
+          note_decode_cycle(decode_count);
+        }
 
         if (callbacks_.on_log) {
           char log_msg[256];

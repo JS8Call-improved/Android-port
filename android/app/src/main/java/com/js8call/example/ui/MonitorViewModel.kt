@@ -32,6 +32,18 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     private val _rigConnected = MutableLiveData<Boolean>(false)
     val rigConnected: LiveData<Boolean> = _rigConnected
 
+    /** Null when the engine is not hunting for a clock offset. */
+    data class TimingSuggestion(
+        val kind: Int,
+        val driftMs: Long,
+        val step: Int,
+        val steps: Int,
+        val periodMs: Int = 15_000
+    )
+
+    private val _timingSuggestion = MutableLiveData<TimingSuggestion?>(null)
+    val timingSuggestion: LiveData<TimingSuggestion?> = _timingSuggestion
+
     private val waterfallRenderer = WaterfallRenderer()
 
     init {
@@ -121,6 +133,10 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
      */
     fun updateTimeDrift(driftMs: Long) {
         _status.value = _status.value?.copy(timeDriftMs = driftMs)
+    }
+
+    fun updateTimingSuggestion(suggestion: TimingSuggestion?) {
+        _timingSuggestion.value = suggestion
     }
 
     /**

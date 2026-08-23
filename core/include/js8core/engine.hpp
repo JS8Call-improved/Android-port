@@ -59,6 +59,19 @@ struct DecodeFinished {
   std::size_t decoded = 0;
 };
 
+// Raised when signals are present but nothing decodes, which is what a clock
+// error far outside the decoder's own search range looks like.
+struct TimingSuggestion {
+  enum class Kind { Searching, Found, GaveUp } kind = Kind::Searching;
+  // Total drift (ms) that would centre the signal, for Kind::Found.
+  int drift_ms = 0;
+  // Trial number and how many cover a whole period, for progress display.
+  int step = 0;
+  int steps = 0;
+  // Frame period (ms) of the submode being hunted, so the UI can count down.
+  int period_ms = 0;
+};
+
 struct Spectrum {
   std::vector<float> bins;
   float bin_hz = 0.0f;
@@ -66,7 +79,8 @@ struct Spectrum {
   float peak_db = 0.0f;
 };
 
-using Variant = std::variant<DecodeStarted, SyncStart, SyncState, Decoded, DecodeFinished, Spectrum>;
+using Variant = std::variant<DecodeStarted, SyncStart, SyncState, Decoded, DecodeFinished, Spectrum,
+                             TimingSuggestion>;
 
 }  // namespace events
 

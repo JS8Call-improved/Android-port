@@ -29,7 +29,26 @@
     <string name="monitor_rig_disconnected">Rig not connected</string>
     <string name="monitor_menu_audio_device">Audio device</string>
     <string name="monitor_menu_time_sync">Sync clock to next decode</string>
+    <string name="monitor_menu_time_drift_adjust">Adjust time drift…</string>
     <string name="monitor_menu_time_drift_reset">Reset time drift</string>
+    <string name="monitor_time_drift_title">Time drift</string>
+    <string name="monitor_time_drift_hint">Offset</string>
+    <string name="monitor_time_drift_suffix">ms</string>
+    <string name="monitor_time_drift_minus_second">−1s</string>
+    <string name="monitor_time_drift_minus_fine">−100</string>
+    <string name="monitor_time_drift_plus_fine">+100</string>
+    <string name="monitor_time_drift_plus_second">+1s</string>
+    <string name="monitor_time_drift_help">Shifts decode windows and transmit timing without changing the tablet clock. Negative when the clock runs fast.</string>
+    <string name="monitor_time_drift_set">Set</string>
+    <string name="monitor_time_drift_reset_action">Reset</string>
+    <string name="monitor_time_drift_applied">Time drift %+d ms</string>
+    <string name="monitor_time_drift_range">Enter %1$+d to %2$+d ms</string>
+    <string name="monitor_timing_checking">%1$s · checking timing %2$ds</string>
+    <string name="monitor_timing_found">Signals are not decoding. Timing looks %1$s off.</string>
+    <string name="monitor_timing_dismiss">Dismiss</string>
+    <string name="monitor_timing_apply">Fix it</string>
+    <string name="monitor_timing_show">View</string>
+    <string name="monitor_timing_applied">Timing corrected by %1$s</string>
     <string name="monitor_audio_device_switching">Switching to %s…</string>
     <string name="monitor_audio_device_selected">Audio device: %s</string>
 

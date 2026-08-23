@@ -39,6 +39,12 @@ struct DecodeState {
   DecodeParams params;
   // Drift the ring alignment used at snapshot time; estimates must use this, not current drift.
   std::int64_t drift_ms_at_capture = 0;
+  // Set on a window shifted to hunt for a badly misaligned clock. Its decodes
+  // only produce a timing suggestion, they are not reported as traffic.
+  bool timing_trial = false;
+  // Only the submode being hunted decides whether decoding has gone dead. The
+  // others fall quiet on their own and would arm the search over and over.
+  bool counts_for_drought = false;
 };
 
 struct SpectrumState {

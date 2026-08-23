@@ -9,6 +9,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.view.MenuItem
+import android.view.View
 import android.view.WindowManager
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -22,6 +23,7 @@ import androidx.navigation.fragment.NavHostFragment
 import androidx.navigation.ui.NavigationUI
 import androidx.navigation.ui.setupWithNavController
 import androidx.preference.PreferenceManager
+import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.google.android.material.navigation.NavigationBarView
 import com.google.android.material.snackbar.Snackbar
 import com.js8call.example.data.MailboxRepository
@@ -206,6 +208,24 @@ class MainActivity : AppCompatActivity() {
                     val driftMs = intent.getLongExtra(JS8EngineService.EXTRA_TIME_DRIFT_MS, 0L)
                     monitorViewModel.updateTimeDrift(driftMs)
                 }
+                JS8EngineService.ACTION_TIMING_SUGGESTION -> {
+                    val kind = intent.getIntExtra(JS8EngineService.EXTRA_TIMING_KIND, 0)
+                    monitorViewModel.updateTimingSuggestion(
+                        if (kind == JS8EngineService.TIMING_GAVE_UP) {
+                            null
+                        } else {
+                            MonitorViewModel.TimingSuggestion(
+                                kind = kind,
+                                driftMs = intent.getLongExtra(JS8EngineService.EXTRA_TIME_DRIFT_MS, 0L),
+                                step = intent.getIntExtra(JS8EngineService.EXTRA_TIMING_STEP, 0),
+                                steps = intent.getIntExtra(JS8EngineService.EXTRA_TIMING_STEPS, 0),
+                                periodMs = intent.getIntExtra(
+                                    JS8EngineService.EXTRA_TIMING_PERIOD_MS, 15_000
+                                )
+                            )
+                        }
+                    )
+                }
                 JS8EngineService.ACTION_RIG_STATUS -> {
                     val connected = intent.getBooleanExtra(JS8EngineService.EXTRA_RIG_CONNECTED, false)
                     monitorViewModel.updateRigConnected(connected)
@@ -237,9 +257,11 @@ class MainActivity : AppCompatActivity() {
         val navHostFragment = supportFragmentManager
             .findFragmentById(R.id.nav_host_fragment) as NavHostFragment
         val navController = navHostFragment.navController
+        mainNavController = navController
 
         bottomNav.setupWithNavController(navController)
         navController.addOnDestinationChangedListener { _, destination, _ ->
+            renderTimingSurface()
             if (destination.id == R.id.navigation_conversation ||
                 destination.id == R.id.navigation_everything
             ) {
@@ -256,6 +278,7 @@ class MainActivity : AppCompatActivity() {
 
         decodeViewModel = ViewModelProvider(this)[DecodeViewModel::class.java]
         monitorViewModel = ViewModelProvider(this)[MonitorViewModel::class.java]
+        observeTimingSuggestion()
         messagesViewModel = ViewModelProvider(this)[MessagesViewModel::class.java]
         transmitViewModel = ViewModelProvider(this)[TransmitViewModel::class.java]
         decodeViewModel.loadPersistedDecodesIfEnabled()
@@ -304,6 +327,7 @@ class MainActivity : AppCompatActivity() {
             addAction(JS8EngineService.ACTION_ERROR)
             addAction(JS8EngineService.ACTION_RADIO_FREQUENCY)
             addAction(JS8EngineService.ACTION_TIME_DRIFT)
+            addAction(JS8EngineService.ACTION_TIMING_SUGGESTION)
             addAction(JS8EngineService.ACTION_RIG_STATUS)
         }
         LocalBroadcastManager.getInstance(this)
@@ -335,9 +359,87 @@ class MainActivity : AppCompatActivity() {
      */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        applyDebugTimingSuggestion(intent)
         val navHostFragment = supportFragmentManager
             .findFragmentById(R.id.nav_host_fragment) as? NavHostFragment ?: return
         openThreadFromNotification(intent, navHostFragment.navController)
+    }
+
+    /**
+     * A timing fix is worth knowing about from anywhere, but it is acted on
+     * from Monitor. So: a badge on the Monitor tab whenever one is pending, a
+     * snackbar only when the user is somewhere else, and its action just takes
+     * them to the card rather than applying a correction out of context.
+     */
+    private var timingSnackbar: Snackbar? = null
+    private var mainNavController: NavController? = null
+
+    private fun observeTimingSuggestion() {
+        monitorViewModel.timingSuggestion.observe(this) { renderTimingSurface() }
+    }
+
+    /**
+     * Called on a new suggestion and on every navigation, because moving off
+     * Monitor is what makes the snackbar the right surface and moving back is
+     * what retires it. Neither is a change to the suggestion itself.
+     */
+    private fun renderTimingSurface() {
+        // The destination listener fires while the activity is still wiring up
+        if (!::monitorViewModel.isInitialized) return
+        val suggestion = monitorViewModel.timingSuggestion.value
+        val pending = suggestion != null &&
+            suggestion.kind == JS8EngineService.TIMING_FOUND
+
+        if (pending) {
+            bottomNav.getOrCreateBadge(R.id.navigation_monitor)
+        } else {
+            bottomNav.removeBadge(R.id.navigation_monitor)
+        }
+
+        val onMonitor = mainNavController?.currentDestination?.id == R.id.navigation_monitor
+        if (!pending || onMonitor) {
+            timingSnackbar?.dismiss()
+            timingSnackbar = null
+            return
+        }
+        if (timingSnackbar?.isShown == true) return
+
+        val shift = String.format("%.1f s", kotlin.math.abs(suggestion!!.driftMs) / 1000.0)
+        timingSnackbar = Snackbar.make(
+            findViewById(android.R.id.content),
+            getString(R.string.monitor_timing_found, shift),
+            Snackbar.LENGTH_INDEFINITE
+        ).apply {
+            anchorView = bottomNav as? BottomNavigationView
+            setAction(R.string.monitor_timing_show) {
+                mainNavController?.navigate(R.id.navigation_monitor)
+            }
+            show()
+        }
+    }
+
+    /**
+     * Debug builds only: drive the timing banner straight from an intent, so
+     * the UI can be checked without waiting out a decode drought and hoping a
+     * shifted window lands a decode. Same LiveData the real path writes.
+     */
+    private fun applyDebugTimingSuggestion(intent: Intent) {
+        if (!BuildConfig.DEBUG) return
+        if (!intent.hasExtra("debug_timing_kind")) return
+        val kind = intent.getIntExtra("debug_timing_kind", JS8EngineService.TIMING_FOUND)
+        monitorViewModel.updateTimingSuggestion(
+            if (kind == JS8EngineService.TIMING_GAVE_UP) {
+                null
+            } else {
+                MonitorViewModel.TimingSuggestion(
+                    kind = kind,
+                    driftMs = intent.getLongExtra("debug_timing_drift", -5500L),
+                    step = intent.getIntExtra("debug_timing_step", 1),
+                    steps = intent.getIntExtra("debug_timing_steps", 3),
+                    periodMs = intent.getIntExtra("debug_timing_period", 15_000)
+                )
+            }
+        )
     }
 
     /**

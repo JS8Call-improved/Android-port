@@ -449,6 +449,17 @@ static void event_callback(JS8Engine_Native* native, js8core::events::Variant co
       env->CallVoidMethod(native->callback_handler, method,
                          static_cast<jint>(decode_finished->decoded));
     }
+  } else if (auto* timing = std::get_if<js8core::events::TimingSuggestion>(&event)) {
+    // Call onTimingSuggestion(int kind, int driftMs, int step, int steps)
+    jmethodID method = env->GetMethodID(handler_class, "onTimingSuggestion", "(IIIII)V");
+    if (method) {
+      env->CallVoidMethod(native->callback_handler, method,
+                          static_cast<jint>(timing->kind),
+                          static_cast<jint>(timing->drift_ms),
+                          static_cast<jint>(timing->step),
+                          static_cast<jint>(timing->steps),
+                          static_cast<jint>(timing->period_ms));
+    }
   }
 
   env->DeleteLocalRef(handler_class);

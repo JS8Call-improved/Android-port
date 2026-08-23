@@ -20,6 +20,58 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content" />
 
+    <!-- Raised only while a timing fix is on offer. Elevated so it reads as
+         something to act on rather than another readout. -->
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/timing_card"
+        style="@style/Widget.Material3.CardView.Elevated"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_margin="8dp"
+        android:visibility="gone"
+        app:cardCornerRadius="12dp"
+        app:cardElevation="3dp"
+        tools:visibility="visible">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:minHeight="56dp"
+            android:orientation="horizontal"
+            android:paddingStart="16dp"
+            android:paddingEnd="8dp"
+            android:paddingTop="8dp"
+            android:paddingBottom="8dp">
+
+            <TextView
+                android:id="@+id/timing_card_text"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:paddingEnd="12dp"
+                android:textAppearance="?attr/textAppearanceBodyMedium"
+                android:textColor="?attr/colorOnSurface"
+                tools:text="Signals are not decoding. Timing looks 5.5 s off." />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/timing_dismiss"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/monitor_timing_dismiss" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/timing_apply"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="4dp"
+                android:text="@string/monitor_timing_apply" />
+        </LinearLayout>
+
+    </com.google.android.material.card.MaterialCardView>
+
     <!-- Embedded decode list -->
     <androidx.fragment.app.FragmentContainerView
         android:id="@+id/decode_pane"
