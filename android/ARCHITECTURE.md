@@ -217,6 +217,21 @@ step against a seeded database.
 **Engine-level** (`android/js8core-lib/src/androidTest/`): lifecycle, audio
 submission, and TX timing against the real native engine.
 
+Two of those run signal through the engine rather than around it.
+`JS8EngineReferenceDecodeTest` feeds the desktop project's own recordings from
+`media/tests/` straight into the decoder, so a failure is the decoder and not the
+microphone or the radio. It is a smoke test rather than desktop parity: the
+engine decodes a 13.6 second window at a fixed depth where the desktop CLI reads
+the whole file, so the counts run a little under the names the files carry. It
+also prints each decode's DT, which is the ground truth for judging whether an
+alignment change helped.
+
+`JS8EngineLoopbackTest` transmits, captures the waveform off the TX tap and
+decodes it, with no speaker or microphone in the path, so a failure there is the
+transmitted audio itself. Note the tap sits **after** the output resampler, so it
+runs at whatever rate the audio device negotiated — 11520 Hz on the emulator, not
+the engine's 12000 — and the test resamples before decoding.
+
 There is also a **debug-only decode injection path**. A broadcast to
 `DebugDecodeReceiver` (debug source set only) feeds synthetic decode text through
 the same handler chain a real decode takes, which makes multi-frame commands,
