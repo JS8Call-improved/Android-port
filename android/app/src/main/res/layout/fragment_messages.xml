@@ -6,52 +6,195 @@
     android:layout_height="match_parent"
     android:background="?attr/colorSurface">
 
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/conversations_recycler_view"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:clipToPadding="false"
-        android:paddingBottom="88dp"
-        app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager"
-        tools:listitem="@layout/item_conversation" />
-
-    <!-- Empty state -->
     <LinearLayout
-        android:id="@+id/empty_state"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:gravity="center"
-        android:orientation="vertical"
-        android:padding="32dp"
-        android:visibility="gone">
+        android:orientation="vertical">
 
-        <ImageView
-            android:layout_width="96dp"
-            android:layout_height="96dp"
-            android:alpha="0.5"
-            android:src="@android:drawable/ic_dialog_email"
-            app:tint="?attr/colorOnSurfaceVariant" />
-
-        <TextView
-            android:layout_width="wrap_content"
+        <!-- Header strip: entry points that are not conversations. The
+             mailbox button appears only once the mailbox holds anything. -->
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:text="@string/messages_empty"
-            android:textAppearance="?attr/textAppearanceHeadlineSmall"
-            android:textColor="?attr/colorOnSurfaceVariant" />
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="16dp"
+            android:paddingEnd="4dp">
 
-        <TextView
-            android:layout_width="wrap_content"
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:paddingVertical="8dp"
+                android:text="@string/nav_messages"
+                android:textAppearance="?attr/textAppearanceTitleMedium" />
+
+            <!-- Groups heard on the band that the operator is not in -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/other_groups_button"
+                style="@style/Widget.Material3.Button.IconButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:contentDescription="@string/other_groups_title"
+                android:visibility="gone"
+                app:icon="@drawable/ic_group"
+                app:iconTint="?attr/colorOnSurfaceVariant"
+                tools:visibility="visible" />
+
+            <FrameLayout
+                android:id="@+id/mailbox_button_frame"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:visibility="gone"
+                tools:visibility="visible">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/mailbox_button"
+                    style="@style/Widget.Material3.Button.IconButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:contentDescription="@string/mailbox_title"
+                    app:icon="@drawable/ic_inbox"
+                    app:iconTint="?attr/colorOnSurfaceVariant" />
+
+                <TextView
+                    android:id="@+id/mailbox_badge"
+                    android:layout_width="wrap_content"
+                    android:layout_height="16dp"
+                    android:layout_gravity="top|end"
+                    android:layout_marginTop="4dp"
+                    android:layout_marginEnd="2dp"
+                    android:background="@drawable/unread_badge_background"
+                    android:gravity="center"
+                    android:minWidth="16dp"
+                    android:paddingHorizontal="4dp"
+                    android:textColor="@color/unread_badge_text"
+                    android:textSize="10sp"
+                    android:textStyle="bold"
+                    android:visibility="gone"
+                    tools:text="2"
+                    tools:visibility="visible" />
+
+            </FrameLayout>
+
+        </LinearLayout>
+
+        <!-- Pinned "Everything" thread: all band activity -->
+        <LinearLayout
+            android:id="@+id/everything_card"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:gravity="center"
-            android:text="@string/messages_empty_hint"
-            android:textAppearance="?attr/textAppearanceBodyMedium"
-            android:textColor="?attr/colorOnSurfaceVariant" />
+            android:background="?attr/selectableItemBackground"
+            android:gravity="center_vertical"
+            android:minHeight="72dp"
+            android:orientation="horizontal"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="12dp">
+
+            <FrameLayout
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@drawable/avatar_circle_background">
+
+                <ImageView
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
+                    android:layout_gravity="center"
+                    android:src="@drawable/ic_rss_feed"
+                    app:tint="@color/md_theme_light_onPrimary"
+                    tools:ignore="ContentDescription" />
+
+            </FrameLayout>
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="16dp"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/everything_title"
+                    android:textAppearance="?attr/textAppearanceTitleMedium" />
+
+                <TextView
+                    android:id="@+id/everything_preview"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:text="@string/everything_subtitle"
+                    android:textAppearance="?attr/textAppearanceBodyMedium"
+                    android:textColor="?attr/colorOnSurfaceVariant"
+                    tools:text="KN4CRD: CQ CQ CQ" />
+
+            </LinearLayout>
+
+        </LinearLayout>
+
+        <com.google.android.material.divider.MaterialDivider
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginHorizontal="16dp" />
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1">
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/conversations_recycler_view"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:clipToPadding="false"
+                android:paddingBottom="88dp"
+                app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager"
+                tools:listitem="@layout/item_conversation" />
+
+            <!-- Empty state (DM list only; the Everything thread is always present) -->
+            <LinearLayout
+                android:id="@+id/empty_state"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:gravity="center"
+                android:orientation="vertical"
+                android:padding="32dp"
+                android:visibility="gone">
+
+                <ImageView
+                    android:layout_width="96dp"
+                    android:layout_height="96dp"
+                    android:alpha="0.5"
+                    android:src="@drawable/ic_chat_bubble_outline"
+                    app:tint="?attr/colorOnSurfaceVariant"
+                    tools:ignore="ContentDescription" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:text="@string/messages_empty"
+                    android:textAppearance="?attr/textAppearanceHeadlineSmall"
+                    android:textColor="?attr/colorOnSurfaceVariant" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:gravity="center"
+                    android:text="@string/messages_empty_hint"
+                    android:textAppearance="?attr/textAppearanceBodyMedium"
+                    android:textColor="?attr/colorOnSurfaceVariant" />
+
+            </LinearLayout>
+
+        </FrameLayout>
 
     </LinearLayout>
 
-    <!-- FAB for new message (optional - may navigate to transmit) -->
     <com.google.android.material.floatingactionbutton.FloatingActionButton
         android:id="@+id/new_message_fab"
         android:layout_width="wrap_content"
@@ -59,7 +202,7 @@
         android:layout_gravity="bottom|end"
         android:layout_margin="16dp"
         android:contentDescription="@string/messages_new"
-        android:src="@android:drawable/ic_input_add"
+        android:src="@drawable/ic_add"
         app:tint="?attr/colorOnPrimary" />
 
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

@@ -12,6 +12,7 @@ class MessageRepository(context: Context) {
 
     private val database = MessageDatabase.getInstance(context)
     private val messageDao = database.messageDao()
+    private val settingsDao = database.conversationSettingsDao()
 
     // ========== Conversation List ==========
 
@@ -68,7 +69,8 @@ class MessageRepository(context: Context) {
         text: String,
         snr: Int?,
         frequency: Float?,
-        relayPath: String? = null
+        relayPath: String? = null,
+        markRead: Boolean = false
     ): Long {
         val message = MessageEntity(
             conversationId = if (conversationId.startsWith("@")) conversationId.uppercase() else normalizeCallsign(conversationId),
@@ -79,7 +81,7 @@ class MessageRepository(context: Context) {
             snr = snr,
             frequency = frequency,
             status = MessageEntity.STATUS_SENT,
-            isRead = false,
+            isRead = markRead,
             relayPath = relayPath
         )
         return insertMessage(message)
@@ -91,7 +93,8 @@ class MessageRepository(context: Context) {
     suspend fun insertOutgoingMessage(
         to: String,
         text: String,
-        status: Int = MessageEntity.STATUS_PENDING
+        status: Int = MessageEntity.STATUS_PENDING,
+        relayPath: String? = null
     ): Long {
         val message = MessageEntity(
             conversationId = normalizeCallsign(to),
@@ -99,9 +102,33 @@ class MessageRepository(context: Context) {
             text = text,
             timestamp = System.currentTimeMillis(),
             status = status,
-            isRead = true // Outgoing messages are always "read"
+            isRead = true, // Outgoing messages are always "read"
+            relayPath = relayPath
         )
         return insertMessage(message)
+    }
+
+    /**
+     * Prune unsubscribed group traffic older than [cutoff]. It is stored
+     * speculatively so a later Join reveals history; it is not the
+     * operator's data and must not grow the database forever.
+     */
+    suspend fun deleteOldGroupMessages(cutoff: Long, subscribed: List<String>) {
+        withContext(Dispatchers.IO) {
+            // NOT IN () matches nothing in SQLite, so guarantee one element.
+            messageDao.deleteOldGroupMessages(cutoff, subscribed.ifEmpty { listOf("@") })
+        }
+    }
+
+    /** Take an inbound ACK as the receipt for the newest sent message. */
+    suspend fun markLatestSentAcked(conversationId: String) {
+        withContext(Dispatchers.IO) {
+            messageDao.markLatestSentAcked(
+                normalizeCallsign(conversationId),
+                MessageEntity.STATUS_SENT,
+                MessageEntity.STATUS_ACKED
+            )
+        }
     }
 
     suspend fun updateMessage(message: MessageEntity) {
@@ -166,6 +193,30 @@ class MessageRepository(context: Context) {
 
     fun searchMessages(query: String): LiveData<List<MessageEntity>> {
         return messageDao.searchMessages(query)
+    }
+
+    // ========== Thread settings ==========
+
+    fun getRelayPath(callsign: String): LiveData<String?> {
+        return settingsDao.getRelayPath(normalizeCallsign(callsign))
+    }
+
+    suspend fun getRelayPathOnce(callsign: String): String? {
+        return withContext(Dispatchers.IO) {
+            settingsDao.getRelayPathOnce(normalizeCallsign(callsign))
+        }
+    }
+
+    /** An empty or blank path clears the row rather than storing "send direct". */
+    suspend fun setRelayPath(callsign: String, path: String?) {
+        withContext(Dispatchers.IO) {
+            val id = normalizeCallsign(callsign)
+            if (path.isNullOrBlank()) {
+                settingsDao.delete(id)
+            } else {
+                settingsDao.upsert(ConversationSettingsEntity(id, path))
+            }
+        }
     }
 
     // ========== Utility ==========

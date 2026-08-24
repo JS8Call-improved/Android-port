@@ -48,6 +48,14 @@
         app:title="@string/settings_category_audio"
         app:iconSpaceReserved="false">
 
+        <!-- Same picker the Monitor strip offers; the summary is set in code
+             because the inputs are whatever is plugged in at the time. -->
+        <Preference
+            app:key="audio_device"
+            app:title="@string/settings_audio_device"
+            app:persistent="false"
+            app:iconSpaceReserved="false" />
+
         <SwitchPreferenceCompat
             app:key="tx_boost_enabled"
             app:title="@string/settings_tx_boost"
@@ -223,6 +231,22 @@
             app:iconSpaceReserved="false" />
 
         <SwitchPreferenceCompat
+            app:key="mailbox_enabled"
+            app:title="@string/settings_mailbox"
+            app:summary="@string/settings_mailbox_summary"
+            app:defaultValue="false"
+            app:iconSpaceReserved="false" />
+
+        <ListPreference
+            app:key="distance_units"
+            app:title="@string/settings_distance_units"
+            app:entries="@array/distance_units_entries"
+            app:entryValues="@array/distance_units_values"
+            app:defaultValue="mi"
+            app:useSimpleSummaryProvider="true"
+            app:iconSpaceReserved="false" />
+
+        <SwitchPreferenceCompat
             app:key="keep_screen_on"
             app:title="@string/settings_keep_screen_on"
             app:summary="@string/settings_keep_screen_on_summary"
@@ -241,6 +265,28 @@
             app:title="@string/settings_log_messages"
             app:summary="@string/settings_log_messages_summary"
             app:defaultValue="false"
+            app:iconSpaceReserved="false" />
+
+    </PreferenceCategory>
+
+    <!-- Network map Category -->
+    <PreferenceCategory
+        app:title="@string/settings_category_network_map"
+        app:iconSpaceReserved="false">
+
+        <ListPreference
+            app:key="link_retention_days"
+            app:title="@string/settings_link_retention"
+            app:summary="@string/settings_link_retention_summary"
+            app:entries="@array/link_retention_entries"
+            app:entryValues="@array/link_retention_values"
+            app:defaultValue="30"
+            app:iconSpaceReserved="false" />
+
+        <Preference
+            app:key="clear_link_data"
+            app:title="@string/settings_clear_link_data"
+            app:summary="@string/settings_clear_link_data_summary"
             app:iconSpaceReserved="false" />
 
     </PreferenceCategory>
@@ -272,6 +318,19 @@
             app:title="@string/settings_time_sync_auto"
             app:summary="@string/settings_time_sync_auto_summary"
             app:defaultValue="false"
+            app:iconSpaceReserved="false" />
+
+    </PreferenceCategory>
+
+    <!-- About Category -->
+    <PreferenceCategory
+        app:title="@string/settings_category_about"
+        app:iconSpaceReserved="false">
+
+        <Preference
+            app:key="app_version"
+            app:title="@string/settings_version"
+            app:selectable="false"
             app:iconSpaceReserved="false" />
 
     </PreferenceCategory>

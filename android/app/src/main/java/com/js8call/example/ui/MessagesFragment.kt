@@ -4,6 +4,7 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ArrayAdapter
 import android.widget.LinearLayout
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModelProvider
@@ -12,19 +13,23 @@ import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.android.material.snackbar.Snackbar
+import com.google.android.material.textfield.MaterialAutoCompleteTextView
 import com.js8call.example.R
 
 /**
- * Fragment showing the list of conversations (Messages tab).
+ * The Messages tab: the pinned Everything thread plus DM conversations.
  */
 class MessagesFragment : Fragment() {
 
     private lateinit var viewModel: MessagesViewModel
+    private lateinit var decodeViewModel: DecodeViewModel
     private lateinit var adapter: ConversationListAdapter
 
     private lateinit var recyclerView: RecyclerView
     private lateinit var emptyState: LinearLayout
     private lateinit var newMessageFab: FloatingActionButton
+
+    private var conversationCallsigns: List<String> = emptyList()
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -37,15 +42,40 @@ class MessagesFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        // Initialize ViewModel (shared with ConversationFragment)
         viewModel = ViewModelProvider(requireActivity())[MessagesViewModel::class.java]
+        decodeViewModel = ViewModelProvider(requireActivity())[DecodeViewModel::class.java]
 
-        // Find views
         recyclerView = view.findViewById(R.id.conversations_recycler_view)
         emptyState = view.findViewById(R.id.empty_state)
         newMessageFab = view.findViewById(R.id.new_message_fab)
 
-        // Set up RecyclerView
+        view.findViewById<View>(R.id.everything_card).setOnClickListener {
+            findNavController().navigate(R.id.action_messages_to_everything)
+        }
+
+        // Held messages entry: visible once the mailbox holds anything,
+        // badged with the count still waiting for its recipients.
+        val mailboxViewModel = ViewModelProvider(requireActivity())[MailboxViewModel::class.java]
+        val mailboxFrame = view.findViewById<View>(R.id.mailbox_button_frame)
+        val mailboxBadge = view.findViewById<android.widget.TextView>(R.id.mailbox_badge)
+        view.findViewById<View>(R.id.mailbox_button).setOnClickListener {
+            findNavController().navigate(R.id.action_messages_to_mailbox)
+        }
+        mailboxViewModel.messages.observe(viewLifecycleOwner) { rows ->
+            mailboxFrame.visibility = if (rows.isEmpty()) View.GONE else View.VISIBLE
+        }
+        mailboxViewModel.heldCount.observe(viewLifecycleOwner) { held ->
+            mailboxBadge.visibility = if (held > 0) View.VISIBLE else View.GONE
+            mailboxBadge.text = held.toString()
+        }
+
+        // Newest band activity as the thread preview, like a DM row
+        val everythingPreview = view.findViewById<android.widget.TextView>(R.id.everything_preview)
+        decodeViewModel.decodes.observe(viewLifecycleOwner) { decodes ->
+            everythingPreview.text = decodes.lastOrNull()?.text
+                ?: getString(R.string.everything_subtitle)
+        }
+
         adapter = ConversationListAdapter().apply {
             onItemClick = { conversation ->
                 navigateToConversation(conversation.callsign)
@@ -57,19 +87,48 @@ class MessagesFragment : Fragment() {
         }
         recyclerView.adapter = adapter
 
-        // Set up FAB (navigate to Transmit tab to compose new message)
+        // Threads come from the messages table and names from contacts. The
+        // two are joined here rather than in SQL, which leaves the
+        // conversation query alone.
+        ViewModelProvider(requireActivity())[ContactsViewModel::class.java]
+            .contacts.observe(viewLifecycleOwner) { contacts ->
+                adapter.names = contacts
+                    .filter { !it.name.isNullOrBlank() }
+                    .associate { it.callsign.uppercase() to it.name!!.trim() }
+            }
+
         newMessageFab.setOnClickListener {
-            // Navigate to Transmit tab for new message
-            val bottomNav = activity?.findViewById<com.google.android.material.bottomnavigation.BottomNavigationView>(R.id.bottom_navigation)
-            bottomNav?.selectedItemId = R.id.navigation_transmit
+            showNewMessageDialog()
+        }
+
+        val otherGroupsButton = view.findViewById<View>(R.id.other_groups_button)
+        otherGroupsButton.setOnClickListener {
+            findNavController().navigate(R.id.action_messages_to_other_groups)
         }
 
         // Observe conversations
         viewModel.conversations.observe(viewLifecycleOwner) { conversations ->
-            adapter.submitList(conversations)
+            // Group traffic the operator has not subscribed to lives behind
+            // the Other groups entry, not in the main thread list. Groups
+            // they have subscribed to appear even before any traffic.
+            val subscribed = subscribedGroups()
+            val (other, mine) = conversations.partition {
+                it.callsign.startsWith("@") && it.callsign.uppercase() !in subscribed
+            }
+            val emptyGroups = subscribed
+                .filter { group -> mine.none { it.callsign.equals(group, true) } }
+                .map {
+                    com.js8call.example.data.ConversationSummary(
+                        it, getString(R.string.group_no_traffic), 0L, 0
+                    )
+                }
+            val shown = mine + emptyGroups
+            adapter.submitList(shown)
+            conversationCallsigns = shown.map { it.callsign }
+            otherGroupsButton.visibility = if (other.isEmpty()) View.GONE else View.VISIBLE
 
             // Show/hide empty state
-            if (conversations.isEmpty()) {
+            if (shown.isEmpty()) {
                 emptyState.visibility = View.VISIBLE
                 recyclerView.visibility = View.GONE
             } else {
@@ -77,6 +136,42 @@ class MessagesFragment : Fragment() {
                 recyclerView.visibility = View.VISIBLE
             }
         }
+    }
+
+    private fun subscribedGroups(): List<String> {
+        val prefs = androidx.preference.PreferenceManager
+            .getDefaultSharedPreferences(requireContext())
+        return (prefs.getString("my_groups", "") ?: "")
+            .split(",").map { it.trim().uppercase() }.filter { it.isNotEmpty() }
+    }
+
+    private fun showNewMessageDialog() {
+        val dialogView = layoutInflater.inflate(R.layout.dialog_new_message, null)
+        val input = dialogView.findViewById<MaterialAutoCompleteTextView>(R.id.callsign_input)
+
+        // Suggest stations from conversation history, this session's
+        // decodes, and the well-known groups from the protocol table
+        val suggestions = (
+            conversationCallsigns +
+                decodeViewModel.heardCallsigns() +
+                com.js8call.example.util.Js8Groups.SUGGESTED
+            ).distinct()
+        input.setAdapter(
+            ArrayAdapter(requireContext(), android.R.layout.simple_list_item_1, suggestions)
+        )
+        input.threshold = 1
+
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle(R.string.messages_new)
+            .setView(dialogView)
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                val callsign = input.text?.toString()?.trim()?.uppercase().orEmpty()
+                if (callsign.isNotEmpty()) {
+                    navigateToConversation(callsign)
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 
     private fun navigateToConversation(callsign: String) {

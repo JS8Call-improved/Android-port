@@ -1,32 +1,34 @@
 package com.js8call.example.ui
 
 import android.Manifest
-import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.media.AudioDeviceInfo
-import android.media.AudioManager
-import android.os.Build
+import android.content.res.ColorStateList
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.AdapterView
-import android.widget.ArrayAdapter
-import android.widget.Button
-import android.widget.Spinner
+import android.widget.ImageView
+import android.widget.PopupMenu
 import android.widget.TextView
+import androidx.appcompat.app.AlertDialog
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModelProvider
+import com.google.android.material.button.MaterialButton
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.materialswitch.MaterialSwitch
 import com.google.android.material.snackbar.Snackbar
+import com.google.android.material.textfield.TextInputEditText
+import com.google.android.material.textfield.TextInputLayout
 import com.js8call.example.R
 import com.js8call.example.model.EngineState
+import com.js8call.example.model.TransmitState
 import com.js8call.example.service.JS8EngineService
 
 /**
  * Fragment for monitoring/receiving screen.
- * Shows waterfall display and engine status.
+ * Shows the waterfall and the status strip below it.
  */
 class MonitorFragment : Fragment() {
 
@@ -34,29 +36,33 @@ class MonitorFragment : Fragment() {
     private lateinit var transmitViewModel: TransmitViewModel
 
     private lateinit var waterfallView: WaterfallView
+    private lateinit var stateDot: ImageView
     private lateinit var statusText: TextView
-    private lateinit var snrValue: TextView
-    private lateinit var powerValue: TextView
-    private lateinit var txOffsetValue: TextView
-    private lateinit var timeDriftValue: TextView
-    private lateinit var timeSyncButton: Button
-    private lateinit var timeDriftResetButton: Button
-    private lateinit var audioDeviceSpinner: Spinner
-    private lateinit var frequencySpinner: Spinner
-    private lateinit var startStopButton: Button
-    private lateinit var monitorVersionText: TextView
+    private lateinit var rigIndicator: ImageView
+    private lateinit var frequencyButton: MaterialButton
+    private lateinit var powerSwitch: MaterialSwitch
+    private lateinit var telemetryText: TextView
+    private lateinit var overflowButton: MaterialButton
+    private lateinit var timingCard: View
+    private lateinit var timingCardText: TextView
+    private lateinit var timingDismiss: MaterialButton
+    private lateinit var timingApply: MaterialButton
 
-    // Audio device management
-    private var audioDeviceAdapter: ArrayAdapter<AudioDeviceItem>? = null
-    private var availableDevices = mutableListOf<AudioDeviceItem>()
-    private var isUpdatingSpinner = false
-    private var userInitiatedAudioSelection = false
-    private var lastSelectedAudioDeviceId = -1
+    private var searchDeadlineMs: Long? = null
+    private var countdownTicker: Runnable? = null
 
     // Frequency management
-    // Spinner position last applied programmatically; onItemSelected skips it
-    // because setSelection() fires the listener asynchronously.
+    private var frequencyEntries = listOf<String>()
+    private var frequencyValues = listOf<String>()
     private var appliedFrequencyIndex = -1
+
+    // Engine and transmit state both feed the dot and the state word.
+    private var engineState = EngineState.STOPPED
+    private var transmitState = TransmitState.IDLE
+
+    // Set true while the switch is moved in code, so the listener can tell a
+    // state update apart from a tap.
+    private var applyingSwitchState = false
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -75,25 +81,17 @@ class MonitorFragment : Fragment() {
 
         // Find views
         waterfallView = view.findViewById(R.id.waterfall_view)
+        stateDot = view.findViewById(R.id.state_dot)
         statusText = view.findViewById(R.id.status_text)
-        snrValue = view.findViewById(R.id.snr_value)
-        powerValue = view.findViewById(R.id.power_value)
-        txOffsetValue = view.findViewById(R.id.tx_offset_value)
-        timeDriftValue = view.findViewById(R.id.time_drift_value)
-        timeSyncButton = view.findViewById(R.id.time_sync_button)
-        timeDriftResetButton = view.findViewById(R.id.time_drift_reset_button)
-        monitorVersionText = view.findViewById(R.id.monitor_version)
-        audioDeviceSpinner = view.findViewById(R.id.audio_device_spinner)
-        frequencySpinner = view.findViewById(R.id.frequency_spinner)
-        startStopButton = view.findViewById(R.id.start_stop_button)
-
-        // Set version text dynamically from package info
-        val versionName = try {
-            requireContext().packageManager.getPackageInfo(requireContext().packageName, 0).versionName
-        } catch (e: PackageManager.NameNotFoundException) {
-            "unknown"
-        }
-        monitorVersionText.text = "Version: $versionName"
+        rigIndicator = view.findViewById(R.id.rig_indicator)
+        frequencyButton = view.findViewById(R.id.frequency_button)
+        powerSwitch = view.findViewById(R.id.power_switch)
+        telemetryText = view.findViewById(R.id.telemetry_text)
+        overflowButton = view.findViewById(R.id.monitor_overflow)
+        timingCard = view.findViewById(R.id.timing_card)
+        timingCardText = view.findViewById(R.id.timing_card_text)
+        timingDismiss = view.findViewById(R.id.timing_dismiss)
+        timingApply = view.findViewById(R.id.timing_apply)
 
         // Set up waterfall offset callback
         waterfallView.bindRenderer(viewModel.getWaterfallRenderer())
@@ -110,81 +108,68 @@ class MonitorFragment : Fragment() {
             requireContext().startService(intent)
         }
 
-        // Set up audio device spinner
-        setupAudioDeviceSpinner()
-
-        // Set up frequency spinner
-        setupFrequencySpinner()
-
-        // Set up observers
+        loadFrequencies()
         observeViewModel()
 
-        // Set up click listeners
-        startStopButton.setOnClickListener {
-            toggleMonitoring()
+        powerSwitch.setOnCheckedChangeListener { _, isChecked ->
+            if (applyingSwitchState) return@setOnCheckedChangeListener
+            if (isChecked) startMonitoring() else stopMonitoring()
         }
 
-        timeSyncButton.setOnClickListener {
-            val intent = Intent(requireContext(), JS8EngineService::class.java).apply {
-                action = JS8EngineService.ACTION_TIME_SYNC_ONCE
+        frequencyButton.setOnClickListener { showFrequencyDialog() }
+        overflowButton.setOnClickListener { showOverflowMenu(it) }
+        // The strip already reads out the drift, so let it edit the drift too
+        telemetryText.setOnClickListener { showTimeDriftDialog() }
+
+        timingDismiss.setOnClickListener {
+            // Clears the badge and any snackbar too; the card is not the only
+            // surface, so a local hide would leave the others up.
+            viewModel.updateTimingSuggestion(null)
+        }
+        timingApply.setOnClickListener {
+            val suggestion = viewModel.timingSuggestion.value ?: return@setOnClickListener
+            applyTimeDrift(suggestion.driftMs)
+            viewModel.updateTimingSuggestion(null)
+            Snackbar.make(
+                requireView(),
+                getString(
+                    R.string.monitor_timing_applied,
+                    String.format("%.1f s", suggestion.driftMs / 1000.0)
+                ),
+                Snackbar.LENGTH_LONG
+            ).show()
+        }
+
+        // MainActivity raises the snackbar only when this screen is not up, so
+        // the card is the whole story here.
+        viewModel.timingSuggestion.observe(viewLifecycleOwner) { suggestion ->
+            if (suggestion?.kind == JS8EngineService.TIMING_SEARCHING) {
+                startTimingCountdown(suggestion)
+            } else {
+                stopTimingCountdown()
             }
-            requireContext().startService(intent)
-            Snackbar.make(requireView(), getString(R.string.monitor_time_sync_armed), Snackbar.LENGTH_SHORT).show()
+            renderTimingCard(suggestion)
+            renderTelemetry()
         }
-
-        timeDriftResetButton.setOnClickListener {
-            val intent = Intent(requireContext(), JS8EngineService::class.java).apply {
-                action = JS8EngineService.ACTION_SET_TIME_DRIFT
-                putExtra(JS8EngineService.EXTRA_TIME_DRIFT_MS, 0L)
-            }
-            requireContext().startService(intent)
-        }
-
-    }
-
-    override fun onPause() {
-        super.onPause()
-        userInitiatedAudioSelection = false
     }
 
     override fun onResume() {
         super.onResume()
-        refreshAudioDevices()
+        updateRigIndicator()
     }
 
     override fun onDestroyView() {
+        stopTimingCountdown()
         super.onDestroyView()
     }
 
     private fun observeViewModel() {
         // Observe status
         viewModel.status.observe(viewLifecycleOwner) { status ->
-            updateStatus(status.state)
-
-            // Update SNR
-            snrValue.text = if (status.snr != 0) {
-                getString(R.string.format_snr, status.snr)
-            } else {
-                "--"
-            }
-
-            // Update power
-            powerValue.text = if (status.powerDb != 0f) {
-                String.format("%.1f dB", status.powerDb)
-            } else {
-                "--"
-            }
-
-            // Update TX offset
-            txOffsetValue.text = "${status.txOffsetHz.toInt()} Hz"
+            engineState = status.state
+            renderState()
+            renderTelemetry()
             waterfallView.txOffsetHz = status.txOffsetHz
-
-            // Update time drift
-            timeDriftValue.text = if (status.timeDriftMs != 0L) {
-                String.format("%+d ms", status.timeDriftMs)
-            } else {
-                "0 ms"
-            }
 
             // Show error if present
             status.errorMessage?.let { error ->
@@ -193,10 +178,12 @@ class MonitorFragment : Fragment() {
             }
         }
 
-        // Observe running state
-        viewModel.isRunning.observe(viewLifecycleOwner) { isRunning ->
-            updateButtonState(isRunning)
+        transmitViewModel.txState.observe(viewLifecycleOwner) { state ->
+            transmitState = state ?: TransmitState.IDLE
+            renderState()
         }
+
+        viewModel.rigConnected.observe(viewLifecycleOwner) { updateRigIndicator() }
 
         viewModel.radioFrequency.observe(viewLifecycleOwner) { frequencyHz ->
             if (frequencyHz != null && frequencyHz > 0) {
@@ -205,34 +192,272 @@ class MonitorFragment : Fragment() {
         }
     }
 
-    private fun updateStatus(state: EngineState) {
-        statusText.text = when (state) {
-            EngineState.STOPPED -> getString(R.string.monitor_status_stopped)
-            EngineState.STARTING -> getString(R.string.monitor_status_starting)
-            EngineState.RUNNING -> getString(R.string.monitor_status_running)
-            EngineState.ERROR -> "ERROR"
+    /**
+     * Paint the state dot, the state word and the switch.
+     *
+     * The engine is the only switchable thing on this screen, so transmit shows
+     * up here as a state rather than as a control of its own.
+     */
+    private fun renderState() {
+        val transmitting = engineState == EngineState.RUNNING &&
+            transmitState == TransmitState.TRANSMITTING
+
+        val labelRes = when {
+            transmitting -> R.string.monitor_state_transmitting
+            engineState == EngineState.RUNNING -> R.string.monitor_state_receiving
+            engineState == EngineState.STARTING -> R.string.monitor_status_starting
+            engineState == EngineState.ERROR -> R.string.monitor_state_error
+            else -> R.string.monitor_state_off
+        }
+        val colorRes = when {
+            transmitting -> R.color.tx_button_transmitting
+            engineState == EngineState.RUNNING -> R.color.snr_excellent
+            engineState == EngineState.STARTING -> R.color.tx_button_queued
+            engineState == EngineState.ERROR -> R.color.message_failed
+            else -> R.color.message_pending
+        }
+
+        statusText.setText(labelRes)
+        // Transmitting and Error are both red, so an error changes the mark
+        // itself rather than relying on a shade the eye has to measure.
+        stateDot.setImageResource(
+            if (engineState == EngineState.ERROR) R.drawable.ic_error_outline
+            else R.drawable.status_dot
+        )
+        stateDot.imageTintList =
+            ColorStateList.valueOf(ContextCompat.getColor(requireContext(), colorRes))
+
+        val shouldBeOn = engineState == EngineState.RUNNING || engineState == EngineState.STARTING
+        if (powerSwitch.isChecked != shouldBeOn) {
+            applyingSwitchState = true
+            powerSwitch.isChecked = shouldBeOn
+            applyingSwitchState = false
+        }
+
+        // A missing rig link only counts against a running engine
+        updateRigIndicator()
+    }
+
+    private fun renderTelemetry() {
+        val status = viewModel.status.value ?: return
+        val offset = if (status.timeDriftMs != 0L) {
+            String.format("%+d ms", status.timeDriftMs)
+        } else {
+            "0 ms"
+        }
+        // The offset stays put while the search runs; the countdown is the
+        // trials still to come, each one frame long.
+        val drift = timingSearchSecondsLeft()?.let {
+            getString(R.string.monitor_timing_checking, offset, it)
+        } ?: offset
+        val offsetAndDrift = getString(
+            R.string.monitor_telemetry,
+            status.txOffsetHz.toInt(),
+            drift
+        )
+        // A stopped engine reads no power, and a leading placeholder just adds noise
+        telemetryText.text = if (status.powerDb != 0f) {
+            getString(R.string.monitor_telemetry_power, status.powerDb, offsetAndDrift)
+        } else {
+            offsetAndDrift
         }
     }
 
-    private fun updateButtonState(isRunning: Boolean) {
-        if (isRunning) {
-            startStopButton.text = getString(R.string.monitor_stop)
-            startStopButton.setCompoundDrawablesWithIntrinsicBounds(android.R.drawable.ic_media_pause, 0, 0, 0)
-        } else {
-            startStopButton.text = getString(R.string.monitor_start)
-            startStopButton.setCompoundDrawablesWithIntrinsicBounds(android.R.drawable.ic_media_play, 0, 0, 0)
+    /**
+     * Show the rig link only when rig control is switched on in Settings.
+     *
+     * Grey means nothing has tried to connect yet, red means the engine is
+     * running without a link, and green means CAT is alive. These are the
+     * colors the state dot uses for the same three ideas.
+     */
+    private fun updateRigIndicator() {
+        if (!isAdded) return
+        val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext())
+        val rigEnabled = prefs.getBoolean("rig_control_enabled", false) &&
+            prefs.getString("rig_type", "none") != "none"
+        if (!rigEnabled) {
+            rigIndicator.visibility = View.GONE
+            return
         }
+
+        rigIndicator.visibility = View.VISIBLE
+        val connected = viewModel.rigConnected.value == true
+        // A failed start is usually the rig failing to connect, so an error
+        // counts as an attempt: grey there would deny the very thing that broke.
+        val attempted = engineState == EngineState.RUNNING || engineState == EngineState.ERROR
+        val colorRes = when {
+            connected -> R.color.snr_excellent
+            engineState == EngineState.STARTING -> R.color.tx_button_queued
+            attempted -> R.color.message_failed
+            else -> R.color.message_pending
+        }
+        rigIndicator.imageTintList =
+            ColorStateList.valueOf(ContextCompat.getColor(requireContext(), colorRes))
+        rigIndicator.contentDescription = getString(
+            when {
+                connected -> R.string.monitor_rig_connected
+                engineState == EngineState.STARTING -> R.string.monitor_rig_connecting
+                else -> R.string.monitor_rig_disconnected
+            }
+        )
     }
 
-    private fun toggleMonitoring() {
-        if (viewModel.isRunning.value == true) {
-            stopMonitoring()
-        } else {
-            startMonitoring()
+    private fun showOverflowMenu(anchor: View) {
+        val popup = PopupMenu(requireContext(), anchor)
+        popup.menuInflater.inflate(R.menu.monitor_overflow, popup.menu)
+        popup.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                R.id.action_audio_device -> {
+                    showAudioDeviceDialog()
+                    true
+                }
+                R.id.action_time_sync -> {
+                    armTimeSync()
+                    true
+                }
+                R.id.action_time_drift_adjust -> {
+                    showTimeDriftDialog()
+                    true
+                }
+                R.id.action_time_drift_reset -> {
+                    resetTimeDrift()
+                    true
+                }
+                else -> false
+            }
         }
+        popup.show()
+    }
+
+    private fun armTimeSync() {
+        val intent = Intent(requireContext(), JS8EngineService::class.java).apply {
+            action = JS8EngineService.ACTION_TIME_SYNC_ONCE
+        }
+        requireContext().startService(intent)
+        Snackbar.make(requireView(), getString(R.string.monitor_time_sync_armed), Snackbar.LENGTH_SHORT).show()
+    }
+
+    private fun resetTimeDrift() {
+        applyTimeDrift(0L)
+    }
+
+    private fun applyTimeDrift(driftMs: Long) {
+        val intent = Intent(requireContext(), JS8EngineService::class.java).apply {
+            action = JS8EngineService.ACTION_SET_TIME_DRIFT
+            putExtra(JS8EngineService.EXTRA_TIME_DRIFT_MS, driftMs)
+        }
+        requireContext().startService(intent)
+    }
+
+    /** Seconds until the sweep is spent, or null when no search is running. */
+    private fun timingSearchSecondsLeft(): Int? {
+        val deadline = searchDeadlineMs ?: return null
+        val left = deadline - System.currentTimeMillis()
+        if (left <= 0L) return 0
+        return ((left + 999L) / 1000L).toInt()
+    }
+
+    /**
+     * Each remaining trial takes one frame, so the sweep ends that many frames
+     * out. Re-armed on every trial event, which keeps it honest if a cycle slips.
+     */
+    private fun startTimingCountdown(suggestion: MonitorViewModel.TimingSuggestion) {
+        val remaining = (suggestion.steps - suggestion.step + 1).coerceAtLeast(0)
+        searchDeadlineMs = System.currentTimeMillis() + remaining.toLong() * suggestion.periodMs
+        countdownTicker?.let { telemetryText.removeCallbacks(it) }
+        val ticker = object : Runnable {
+            override fun run() {
+                if (searchDeadlineMs == null) return
+                renderTelemetry()
+                telemetryText.postDelayed(this, 1000L)
+            }
+        }
+        countdownTicker = ticker
+        telemetryText.post(ticker)
+    }
+
+    private fun stopTimingCountdown() {
+        searchDeadlineMs = null
+        countdownTicker?.let { telemetryText.removeCallbacks(it) }
+        countdownTicker = null
+    }
+
+    /** Only a find is actionable; a running search just tints the strip. */
+    private fun renderTimingCard(suggestion: MonitorViewModel.TimingSuggestion?) {
+        val actionable = suggestion != null &&
+            suggestion.kind == JS8EngineService.TIMING_FOUND
+        if (!actionable) {
+            timingCard.visibility = View.GONE
+            return
+        }
+        timingCardText.text = getString(
+            R.string.monitor_timing_found,
+            String.format("%.1f s", kotlin.math.abs(suggestion!!.driftMs) / 1000.0)
+        )
+        timingCard.visibility = View.VISIBLE
+    }
+
+    /**
+     * Manual drift entry, for when nothing decodes and the sync-from-decode
+     * path has nothing to work from.
+     */
+    private fun showTimeDriftDialog() {
+        val view = layoutInflater.inflate(R.layout.dialog_time_drift, null)
+        val input = view.findViewById<TextInputEditText>(R.id.drift_input)
+        val inputLayout = view.findViewById<TextInputLayout>(R.id.drift_input_layout)
+
+        input.setText((viewModel.status.value?.timeDriftMs ?: 0L).toString())
+        input.setSelection(input.text?.length ?: 0)
+
+        fun nudge(deltaMs: Long) {
+            val current = input.text?.toString()?.toLongOrNull() ?: 0L
+            input.setText((current + deltaMs).coerceIn(-DRIFT_LIMIT_MS, DRIFT_LIMIT_MS).toString())
+            input.setSelection(input.text?.length ?: 0)
+            inputLayout.error = null
+        }
+        view.findViewById<MaterialButton>(R.id.nudge_minus_second).setOnClickListener { nudge(-1000L) }
+        view.findViewById<MaterialButton>(R.id.nudge_minus_fine).setOnClickListener { nudge(-100L) }
+        view.findViewById<MaterialButton>(R.id.nudge_plus_fine).setOnClickListener { nudge(100L) }
+        view.findViewById<MaterialButton>(R.id.nudge_plus_second).setOnClickListener { nudge(1000L) }
+
+        val dialog = MaterialAlertDialogBuilder(requireContext())
+            .setTitle(R.string.monitor_time_drift_title)
+            .setView(view)
+            .setPositiveButton(R.string.monitor_time_drift_set, null)
+            .setNegativeButton(android.R.string.cancel, null)
+            .setNeutralButton(R.string.monitor_time_drift_reset_action, null)
+            .create()
+
+        dialog.setOnShowListener {
+            // Bound the button so a bad value keeps the dialog open
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val value = input.text?.toString()?.toLongOrNull()
+                if (value == null || value < -DRIFT_LIMIT_MS || value > DRIFT_LIMIT_MS) {
+                    inputLayout.error = getString(
+                        R.string.monitor_time_drift_range, -DRIFT_LIMIT_MS.toInt(), DRIFT_LIMIT_MS.toInt()
+                    )
+                    return@setOnClickListener
+                }
+                applyTimeDrift(value)
+                Snackbar.make(
+                    requireView(),
+                    getString(R.string.monitor_time_drift_applied, value.toInt()),
+                    Snackbar.LENGTH_SHORT
+                ).show()
+                dialog.dismiss()
+            }
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                input.setText("0")
+                inputLayout.error = null
+            }
+        }
+        dialog.show()
     }
 
     private fun startMonitoring() {
+        // Starting an engine that is already up tears down its audio capture
+        if (engineState == EngineState.RUNNING || engineState == EngineState.STARTING) return
+
         val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext())
         val rigType = prefs.getString("rig_type", "none")
         val skipMicPermission = rigType == "trusdx_serial"
@@ -246,26 +471,15 @@ class MonitorFragment : Fragment() {
         // Update view model
         viewModel.startMonitoring()
 
-        // Start service with selected audio device
+        // Start service with selected audio device. A saved choice that does not
+        // match what is plugged in resolves to an available input, and under a
+        // TruSDX that list only holds the rig's own inputs.
         val intent = Intent(requireContext(), JS8EngineService::class.java).apply {
             action = JS8EngineService.ACTION_START
-            // Pass selected device ID if any
-            if (availableDevices.isNotEmpty()) {
-                val selectedPos = audioDeviceSpinner.selectedItemPosition
-                if (selectedPos >= 0 && selectedPos < availableDevices.size) {
-                    var selectedDevice = availableDevices[selectedPos]
-                    if (rigType == "trusdx_serial" &&
-                        selectedDevice.id != JS8EngineService.TRUSDX_AUDIO_SERIAL_ID &&
-                        selectedDevice.id != JS8EngineService.TRUSDX_AUDIO_SPEAKER_ID
-                    ) {
-                        selectedDevice = availableDevices.firstOrNull {
-                            it.id == JS8EngineService.TRUSDX_AUDIO_SERIAL_ID
-                        } ?: selectedDevice
-                    }
-                    putExtra(JS8EngineService.EXTRA_AUDIO_DEVICE_ID, selectedDevice.id)
-                    android.util.Log.d("MonitorFragment",
-                        "Starting with device: ${selectedDevice.name} (ID: ${selectedDevice.id})")
-                }
+            AudioDevices.selected(requireContext())?.let { device ->
+                putExtra(JS8EngineService.EXTRA_AUDIO_DEVICE_ID, device.id)
+                android.util.Log.d("MonitorFragment",
+                    "Starting with device: ${device.name} (ID: ${device.id})")
             }
         }
         ContextCompat.startForegroundService(requireContext(), intent)
@@ -311,6 +525,8 @@ class MonitorFragment : Fragment() {
                 // Permission granted, try starting again
                 startMonitoring()
             } else {
+                // The switch moved on the tap that asked for the permission
+                renderState()
                 Snackbar.make(
                     requireView(),
                     R.string.permission_audio_denied,
@@ -320,143 +536,103 @@ class MonitorFragment : Fragment() {
         }
     }
 
-    private fun setupAudioDeviceSpinner() {
-        // Create adapter
-        audioDeviceAdapter = ArrayAdapter(
-            requireContext(),
-            android.R.layout.simple_spinner_item,
-            availableDevices
-        )
-        audioDeviceAdapter?.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        audioDeviceSpinner.adapter = audioDeviceAdapter
-
-        audioDeviceSpinner.setOnTouchListener { _, _ ->
-            userInitiatedAudioSelection = true
-            false
-        }
-        audioDeviceSpinner.setOnFocusChangeListener { _, hasFocus ->
-            if (!hasFocus) {
-                userInitiatedAudioSelection = false
+    private fun showAudioDeviceDialog() {
+        val running = viewModel.isRunning.value == true
+        AudioDevices.showPicker(requireContext(), running) { device ->
+            // A stopped engine has nothing to move, so say what will be used
+            val message = if (running) {
+                getString(R.string.monitor_audio_device_switching, device.name)
+            } else {
+                getString(R.string.monitor_audio_device_selected, device.name)
             }
+            Snackbar.make(requireView(), message, Snackbar.LENGTH_SHORT).show()
         }
-
-        // Set up selection listener
-        audioDeviceSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                val userInitiated = userInitiatedAudioSelection
-                userInitiatedAudioSelection = false
-                if (!userInitiated) return
-                if (isUpdatingSpinner) return
-                if (position < 0 || position >= availableDevices.size) return
-
-                val selectedDevice = availableDevices[position]
-                android.util.Log.d("MonitorFragment", "Audio device selected: ${selectedDevice.name} (ID: ${selectedDevice.id})")
-
-                // Only switch if engine is running
-                if (viewModel.isRunning.value == true) {
-                    if (selectedDevice.id == lastSelectedAudioDeviceId) return
-                    lastSelectedAudioDeviceId = selectedDevice.id
-                    val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext())
-                    prefs.edit().putInt(PREF_LAST_AUDIO_DEVICE_ID, selectedDevice.id).apply()
-                    switchAudioDevice(selectedDevice.id)
-                }
-            }
-
-            override fun onNothingSelected(parent: AdapterView<*>?) {
-                // Do nothing
-            }
-        }
-
-        // Populate with available devices
-        refreshAudioDevices()
     }
 
-    private fun refreshAudioDevices() {
+    private fun loadFrequencies() {
+        val baseEntries = resources.getStringArray(R.array.js8_frequency_entries)
+        val baseValues = resources.getStringArray(R.array.js8_frequency_values)
+
         val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext())
-        val rigType = prefs.getString("rig_type", "none")
-        if (rigType == "trusdx_serial") {
-            availableDevices.clear()
-            availableDevices.add(AudioDeviceItem(JS8EngineService.TRUSDX_AUDIO_SERIAL_ID, "TruSDX Serial"))
-            availableDevices.add(AudioDeviceItem(JS8EngineService.TRUSDX_AUDIO_SPEAKER_ID, "TruSDX Speaker"))
-            audioDeviceAdapter?.notifyDataSetChanged()
+        val customFrequencyMhz = prefs.getString("custom_frequency_mhz", "")?.trim().orEmpty()
 
-            val savedDeviceId = prefs.getInt(PREF_LAST_AUDIO_DEVICE_ID, JS8EngineService.TRUSDX_AUDIO_SERIAL_ID)
-            val selectedIndex = availableDevices.indexOfFirst { it.id == savedDeviceId }
-                .takeIf { it >= 0 } ?: 0
-            isUpdatingSpinner = true
-            audioDeviceSpinner.setSelection(selectedIndex)
-            isUpdatingSpinner = false
-            lastSelectedAudioDeviceId = availableDevices[selectedIndex].id
-            return
+        val entries = baseEntries.toMutableList()
+        val values = baseValues.toMutableList()
+
+        val customFrequencyHz = customFrequencyMhz.toDoubleOrNull()?.let { mhz ->
+            if (mhz > 0) (mhz * 1_000_000.0).toLong() else null
         }
 
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
-            // Fallback for older versions
-            availableDevices.clear()
-            availableDevices.add(AudioDeviceItem(-1, "Default Microphone"))
-            audioDeviceAdapter?.notifyDataSetChanged()
-            return
+        if (customFrequencyHz != null) {
+            entries.add("Custom - ${customFrequencyMhz}MHz")
+            values.add(customFrequencyHz.toString())
         }
 
-        val audioManager = requireContext().getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        val devices = audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS)
+        frequencyEntries = entries
+        frequencyValues = values
 
-        availableDevices.clear()
+        val defaultFrequency = baseValues.getOrNull(3) ?: "14078000"
+        val savedFrequency = prefs.getString("last_frequency", defaultFrequency) ?: defaultFrequency
+        val savedIndex = values.indexOf(savedFrequency).takeIf { it >= 0 }
+            ?: values.indexOf(defaultFrequency).takeIf { it >= 0 }
+            ?: 0
 
-        for (device in devices) {
-            if (!device.isSource) continue
-            val deviceName = when (device.type) {
-                AudioDeviceInfo.TYPE_BUILTIN_MIC -> "Internal Microphone"
-                AudioDeviceInfo.TYPE_WIRED_HEADSET -> "Wired Headset"
-                AudioDeviceInfo.TYPE_USB_DEVICE -> {
-                    device.productName?.toString() ?: "USB Audio Device"
-                }
-                AudioDeviceInfo.TYPE_USB_ACCESSORY -> "USB Audio Accessory"
-                AudioDeviceInfo.TYPE_USB_HEADSET -> "USB Headset"
-                AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> "Bluetooth Headset"
-                AudioDeviceInfo.TYPE_BLUETOOTH_A2DP -> "Bluetooth Audio"
-                AudioDeviceInfo.TYPE_LINE_ANALOG -> "Line Input"
-                AudioDeviceInfo.TYPE_LINE_DIGITAL -> "Digital Line Input"
-                else -> continue  // Skip unknown types
-            }
-
-            availableDevices.add(AudioDeviceItem(device.id, deviceName))
-            android.util.Log.d("MonitorFragment", "Found audio device: $deviceName (ID: ${device.id})")
-        }
-
-        // Add default option if no devices found
-        if (availableDevices.isEmpty()) {
-            availableDevices.add(AudioDeviceItem(-1, "Default Microphone"))
-        }
-
-        audioDeviceAdapter?.notifyDataSetChanged()
-
-        if (availableDevices.isNotEmpty()) {
-            val savedDeviceId = prefs.getInt(PREF_LAST_AUDIO_DEVICE_ID, -1)
-            val selectedIndex = availableDevices.indexOfFirst { it.id == savedDeviceId }
-                .takeIf { it >= 0 } ?: 0
-            isUpdatingSpinner = true
-            audioDeviceSpinner.setSelection(selectedIndex)
-            isUpdatingSpinner = false
-            lastSelectedAudioDeviceId = availableDevices[selectedIndex].id
-        }
+        appliedFrequencyIndex = savedIndex
+        frequencyButton.text = shortFrequencyLabel(entries[savedIndex])
     }
 
-    private fun switchAudioDevice(deviceId: Int) {
-        // Send intent to service to switch audio device
-        val intent = Intent(requireContext(), JS8EngineService::class.java).apply {
-            action = JS8EngineService.ACTION_SWITCH_AUDIO_DEVICE
-            putExtra(JS8EngineService.EXTRA_AUDIO_DEVICE_ID, deviceId)
-        }
-        requireContext().startService(intent)
+    /** "20m - 14.078 MHz" is too wide for the strip, so show it as "20m · 14.078". */
+    private fun shortFrequencyLabel(entry: String): String {
+        return entry.removeSuffix(" MHz").replace(" - ", " · ")
+    }
 
-        Snackbar.make(requireView(), "Switching audio device...", Snackbar.LENGTH_SHORT).show()
+    private fun showFrequencyDialog() {
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle(R.string.monitor_radio_frequency)
+            .setSingleChoiceItems(
+                frequencyEntries.toTypedArray(),
+                appliedFrequencyIndex
+            ) { dialog, which ->
+                dialog.dismiss()
+                selectFrequency(which)
+            }
+            .show()
+    }
+
+    private fun selectFrequency(position: Int) {
+        if (position == appliedFrequencyIndex) return
+        if (position < 0 || position >= frequencyValues.size) return
+        appliedFrequencyIndex = position
+        frequencyButton.text = shortFrequencyLabel(frequencyEntries[position])
+
+        val frequencyHz = frequencyValues[position].toLongOrNull() ?: return
+        android.util.Log.d("MonitorFragment", "Frequency selected: ${frequencyEntries[position]} ($frequencyHz Hz)")
+
+        // Save frequency preference
+        val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext())
+        prefs.edit().putString("last_frequency", frequencyValues[position]).apply()
+
+        // Check if rig control is enabled
+        val rigControlEnabled = prefs.getBoolean("rig_control_enabled", false)
+        val rigType = prefs.getString("rig_type", "none")
+
+        if (rigControlEnabled && (rigType == "network" || rigType == "hamlib_usb" || rigType == "trusdx_serial")) {
+            // Send frequency change to service
+            val intent = Intent(requireContext(), JS8EngineService::class.java).apply {
+                action = JS8EngineService.ACTION_SET_FREQUENCY
+                putExtra(JS8EngineService.EXTRA_FREQUENCY_HZ, frequencyHz)
+            }
+            requireContext().startService(intent)
+
+            Snackbar.make(requireView(), "Setting frequency to ${frequencyEntries[position]}", Snackbar.LENGTH_SHORT).show()
+        } else if (rigControlEnabled && rigType == "rts_ptt") {
+            android.util.Log.d("MonitorFragment", "RTS PTT mode does not support frequency control")
+        } else {
+            android.util.Log.d("MonitorFragment", "Rig control not enabled or not supported type, skipping frequency change")
+        }
     }
 
     private fun updateFrequencyFromRadio(frequencyHz: Long) {
-        val frequencyValues = resources.getStringArray(R.array.js8_frequency_values)
-        val frequencyEntries = resources.getStringArray(R.array.js8_frequency_entries)
-
         // Find the closest matching frequency in our list
         var closestIndex = 0
         var closestDiff = Long.MAX_VALUE
@@ -470,14 +646,13 @@ class MonitorFragment : Fragment() {
             }
         }
 
-        // Update spinner if we found a reasonable match (within 100 kHz)
+        // Update the label if we found a reasonable match (within 100 kHz)
         if (closestDiff < 100000) {
-            val currentIndex = frequencySpinner.selectedItemPosition
-            if (currentIndex == closestIndex) {
+            if (appliedFrequencyIndex == closestIndex) {
                 return
             }
             appliedFrequencyIndex = closestIndex
-            frequencySpinner.setSelection(closestIndex)
+            frequencyButton.text = shortFrequencyLabel(frequencyEntries[closestIndex])
 
             val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext())
             prefs.edit().putString("last_frequency", frequencyValues[closestIndex]).apply()
@@ -489,97 +664,11 @@ class MonitorFragment : Fragment() {
         }
     }
 
-    private fun setupFrequencySpinner() {
-        // Get frequency arrays from resources
-        val baseEntries = resources.getStringArray(R.array.js8_frequency_entries)
-        val baseValues = resources.getStringArray(R.array.js8_frequency_values)
-
-        // Load saved frequency preference
-        val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext())
-        val customFrequencyMhz = prefs.getString("custom_frequency_mhz", "")?.trim().orEmpty()
-
-        val frequencyEntries = baseEntries.toMutableList()
-        val frequencyValues = baseValues.toMutableList()
-
-        val customFrequencyHz = customFrequencyMhz.toDoubleOrNull()?.let { mhz ->
-            if (mhz > 0) (mhz * 1_000_000.0).toLong() else null
-        }
-
-        if (customFrequencyHz != null) {
-            frequencyEntries.add("Custom - ${customFrequencyMhz}MHz")
-            frequencyValues.add(customFrequencyHz.toString())
-        }
-
-        // Create adapter
-        val adapter = ArrayAdapter(
-            requireContext(),
-            android.R.layout.simple_spinner_item,
-            frequencyEntries
-        )
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        frequencySpinner.adapter = adapter
-
-        val defaultFrequency = baseValues.getOrNull(3) ?: "14078000"
-        val savedFrequency = prefs.getString("last_frequency", defaultFrequency) ?: defaultFrequency
-        val savedIndex = frequencyValues.indexOf(savedFrequency).takeIf { it >= 0 }
-            ?: frequencyValues.indexOf(defaultFrequency).takeIf { it >= 0 }
-            ?: 0
-
-        // Set initial selection
-        appliedFrequencyIndex = savedIndex
-        frequencySpinner.setSelection(savedIndex, false)
-
-        // Set up selection listener
-        frequencySpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                if (position == appliedFrequencyIndex) return
-                if (position < 0 || position >= frequencyValues.size) return
-                appliedFrequencyIndex = position
-
-                val frequencyHz = frequencyValues[position].toLongOrNull() ?: return
-                android.util.Log.d("MonitorFragment", "Frequency selected: ${frequencyEntries[position]} ($frequencyHz Hz)")
-
-                // Save frequency preference
-                prefs.edit().putString("last_frequency", frequencyValues[position]).apply()
-
-                // Check if rig control is enabled
-                val rigControlEnabled = prefs.getBoolean("rig_control_enabled", false)
-                val rigType = prefs.getString("rig_type", "none")
-
-                if (rigControlEnabled && (rigType == "network" || rigType == "hamlib_usb" || rigType == "trusdx_serial")) {
-                    // Send frequency change to service
-                    val intent = Intent(requireContext(), JS8EngineService::class.java).apply {
-                        action = JS8EngineService.ACTION_SET_FREQUENCY
-                        putExtra(JS8EngineService.EXTRA_FREQUENCY_HZ, frequencyHz)
-                    }
-                    requireContext().startService(intent)
-
-                    Snackbar.make(requireView(), "Setting frequency to ${frequencyEntries[position]}", Snackbar.LENGTH_SHORT).show()
-                } else if (rigControlEnabled && rigType == "rts_ptt") {
-                    android.util.Log.d("MonitorFragment", "RTS PTT mode does not support frequency control")
-                } else {
-                    android.util.Log.d("MonitorFragment", "Rig control not enabled or not supported type, skipping frequency change")
-                }
-            }
-
-            override fun onNothingSelected(parent: AdapterView<*>?) {
-                // Do nothing
-            }
-        }
-    }
-
-    /**
-     * Data class for audio device items in spinner.
-     */
-    private data class AudioDeviceItem(
-        val id: Int,
-        val name: String
-    ) {
-        override fun toString(): String = name
-    }
-
     companion object {
         private const val REQUEST_AUDIO_PERMISSION = 1
-        private const val PREF_LAST_AUDIO_DEVICE_ID = "last_audio_device_id"
+
+        // The ring aligns to the UTC minute, so anything past half a minute
+        // wraps onto a smaller offset and is never the value you want.
+        private const val DRIFT_LIMIT_MS = 30_000L
     }
 }

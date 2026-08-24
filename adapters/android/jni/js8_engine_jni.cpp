@@ -43,6 +43,8 @@ JNIEXPORT void JNICALL Java_com_js8call_core_JS8Engine_nativeStopTransmit(JNIEnv
 JNIEXPORT jboolean JNICALL Java_com_js8call_core_JS8Engine_nativeIsTransmitting(JNIEnv*, jobject, jlong);
 JNIEXPORT jboolean JNICALL Java_com_js8call_core_JS8Engine_nativeIsTransmittingAudio(JNIEnv*, jobject, jlong);
 JNIEXPORT jint JNICALL Java_com_js8call_core_JS8Engine_nativeTxMillisecondsUntilAudio(JNIEnv*, jobject, jlong);
+JNIEXPORT jint JNICALL Java_com_js8call_core_JS8Engine_nativeTxFrameIndex(JNIEnv*, jobject, jlong);
+JNIEXPORT jint JNICALL Java_com_js8call_core_JS8Engine_nativeTxFrameCount(JNIEnv*, jobject, jlong);
 JNIEXPORT void JNICALL Java_com_js8call_core_JS8Engine_nativeSetTxReady(JNIEnv*, jobject, jlong, jboolean);
 JNIEXPORT void JNICALL Java_com_js8call_core_JS8Engine_nativeSetTimeDriftMs(JNIEnv*, jobject, jlong, jlong);
 JNIEXPORT jlong JNICALL Java_com_js8call_core_JS8Engine_nativeGetTimeDriftMs(JNIEnv*, jobject, jlong);
@@ -223,6 +225,9 @@ static bool is_callsign_like(std::string const& token) {
   return has_digit;
 }
 
+// Only valid on a line's first frame. A continuation frame of a buffered
+// command is plain payload text, and rewriting "KA0XYZ N0CALL QRV" into
+// "KA0XYZ: N0CALL QRV" there corrupts the body and breaks its checksum.
 static std::string maybe_insert_callsign_prefix(std::string const& text) {
   std::size_t first_sep = std::string::npos;
   for (std::size_t i = 0; i < text.size(); ++i) {
@@ -269,6 +274,10 @@ static std::string render_decoded_text(js8core::events::Decoded const& decoded) 
   }
 
   bool is_data_flag = (decoded.type & 0b100) == 0b100;
+  // The transmitter sets this bit only on a line's first frame
+  // (varicode.cpp build_message_frames), so a continuation frame of a
+  // buffered command never carries it.
+  bool is_first_frame = (decoded.type & 0b1) == 0b1;
   // Try data payloads first (mirrors desktop unpack order).
   __android_log_print(ANDROID_LOG_DEBUG, "JS8FrameDebug",
                       "Trying data unpacker: frame='%s', decoded.type=0x%02x",
@@ -277,7 +286,9 @@ static std::string render_decoded_text(js8core::events::Decoded const& decoded) 
     auto data = unpack_fast_data_message(frame);
     __android_log_print(ANDROID_LOG_DEBUG, "JS8FrameDebug",
                         "unpack_fast_data returned: '%s'", data.c_str());
-    if (!data.empty()) return maybe_insert_callsign_prefix(data);
+    if (!data.empty()) {
+      return is_first_frame ? maybe_insert_callsign_prefix(data) : data;
+    }
     // Fast-data frames should not be treated as heartbeat/compound/directed.
     __android_log_print(ANDROID_LOG_WARN, "JS8FrameDebug",
                         "Fast data unpack failed, returning raw frame: '%s'", frame.c_str());
@@ -286,7 +297,9 @@ static std::string render_decoded_text(js8core::events::Decoded const& decoded) 
     auto data = unpack_data_message(frame);
     __android_log_print(ANDROID_LOG_DEBUG, "JS8FrameDebug",
                         "unpack_data returned: '%s'", data.c_str());
-    if (!data.empty()) return maybe_insert_callsign_prefix(data);
+    if (!data.empty()) {
+      return is_first_frame ? maybe_insert_callsign_prefix(data) : data;
+    }
   }
 
   // Heartbeat (most common for status beacons)
@@ -435,6 +448,17 @@ static void event_callback(JS8Engine_Native* native, js8core::events::Variant co
     if (method) {
       env->CallVoidMethod(native->callback_handler, method,
                          static_cast<jint>(decode_finished->decoded));
+    }
+  } else if (auto* timing = std::get_if<js8core::events::TimingSuggestion>(&event)) {
+    // Call onTimingSuggestion(int kind, int driftMs, int step, int steps)
+    jmethodID method = env->GetMethodID(handler_class, "onTimingSuggestion", "(IIIII)V");
+    if (method) {
+      env->CallVoidMethod(native->callback_handler, method,
+                          static_cast<jint>(timing->kind),
+                          static_cast<jint>(timing->drift_ms),
+                          static_cast<jint>(timing->step),
+                          static_cast<jint>(timing->steps),
+                          static_cast<jint>(timing->period_ms));
     }
   }
 
@@ -888,6 +912,16 @@ int js8_engine_tx_milliseconds_until_audio(JS8Engine_Native* engine) {
   return engine->engine->tx_milliseconds_until_audio();
 }
 
+int js8_engine_tx_frame_index(JS8Engine_Native* engine) {
+  if (!engine || !engine->engine) return 0;
+  return engine->engine->tx_frame_index();
+}
+
+int js8_engine_tx_frame_count(JS8Engine_Native* engine) {
+  if (!engine || !engine->engine) return 0;
+  return engine->engine->tx_frame_count();
+}
+
 void js8_engine_set_tx_ready(JS8Engine_Native* engine, bool ready) {
   if (!engine || !engine->engine) return;
   engine->engine->set_tx_ready(ready);
@@ -945,6 +979,10 @@ int js8_register_natives(JavaVM* vm, JNIEnv* env) {
       (void*)Java_com_js8call_core_JS8Engine_nativeIsTransmittingAudio},
     {"nativeTxMillisecondsUntilAudio", "(J)I",
      (void*)Java_com_js8call_core_JS8Engine_nativeTxMillisecondsUntilAudio},
+    {"nativeTxFrameIndex", "(J)I",
+     (void*)Java_com_js8call_core_JS8Engine_nativeTxFrameIndex},
+    {"nativeTxFrameCount", "(J)I",
+     (void*)Java_com_js8call_core_JS8Engine_nativeTxFrameCount},
     {"nativeSetTxReady", "(JZ)V",
      (void*)Java_com_js8call_core_JS8Engine_nativeSetTxReady},
     {"nativeSetTimeDriftMs", "(JJ)V",

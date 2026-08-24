@@ -27,7 +27,7 @@ Please open bug reports when you find things wrong, bug reports help me build th
   ViewModel-backed decode buffering for multipart messages.
 
 See `android/README.md` for build and usage details, and
-`android/ENGINE_INTEGRATION_COMPLETE.md` for the end-to-end architecture notes.
+`android/ARCHITECTURE.md` for how the app layer is put together.
 
 ## License
 

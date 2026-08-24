@@ -33,15 +33,26 @@ import com.js8call.example.MainActivity
 import com.js8call.example.MessageLogWriter
 import com.js8call.example.R
 import com.js8call.example.BuildConfig
+import com.js8call.example.data.LinkObservationEntity
+import com.js8call.example.data.LinkRepository
+import com.js8call.example.data.MailboxEntity
+import com.js8call.example.data.MailboxRepository
 import com.js8call.example.network.PskReporterClient
 import com.js8call.example.util.CallsignValidator
+import com.js8call.example.util.Js8Commands
+import com.js8call.example.util.LinkEvidence
+import com.js8call.example.util.RelayPath
 import com.js8call.example.util.TxMessageClassifier
 import java.util.Calendar
 import java.util.Locale
 import java.util.TimeZone
-import java.util.concurrent.CountDownLatch
 import java.util.concurrent.LinkedBlockingDeque
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 internal fun assembleMsgPayload(parts: List<String>): String = parts.joinToString(separator = "")
 
@@ -55,6 +66,13 @@ class JS8EngineService : Service() {
 
     private var engine: JS8Engine? = null
     private var audioHelper: JS8AudioHelper? = null
+
+    // Mailbox replies come off the decode path, but their DB reads must not
+    // block it. Main dispatcher so replies queue from the same thread the
+    // rest of the handlers run on.
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val mailboxRepository by lazy { MailboxRepository(this) }
+    private val linkRepository by lazy { LinkRepository.getInstance(this) }
     private var rigCtlClient: RigCtlClient? = null
     private var rigCtlConnected: Boolean = false
     private var rigCtlErrorShown: Boolean = false
@@ -129,6 +147,8 @@ class JS8EngineService : Service() {
     private var callsignWarningShown = false
     private var lastTxMessage: String = ""
     private var lastTxDirected: String = ""
+    private var lastTxFrameIndex: Int = 0
+    private var lastTxFrameCount: Int = 0
     private var lastTxSubmode: Int = SUBMODE_NORMAL
     private var lastTxFrequencyHz: Double = DEFAULT_AUDIO_FREQUENCY_HZ
     private var messageLogger: MessageLogWriter? = null
@@ -153,6 +173,18 @@ class JS8EngineService : Service() {
             val millisecondsUntilAudio = activeEngine.txMillisecondsUntilAudio()
             txSessionActive = sessionActive
             txAudioActive = audioActive
+            if (sessionActive) {
+                val frameIndex = activeEngine.txFrameIndex()
+                val frameCount = activeEngine.txFrameCount()
+                if (frameIndex != lastTxFrameIndex || frameCount != lastTxFrameCount) {
+                    lastTxFrameIndex = frameIndex
+                    lastTxFrameCount = frameCount
+                    broadcastTxProgress(frameIndex, frameCount)
+                }
+            } else {
+                lastTxFrameIndex = 0
+                lastTxFrameCount = 0
+            }
             if (!sessionActive) {
                 txMonitorActive = false
                 txMonitorWasAudioActive = false
@@ -244,6 +276,8 @@ class JS8EngineService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        pruneOtherGroupHistory()
+        pruneLinkObservations()
         usbSerialBridge = UsbSerialBridge(applicationContext)
         bluetoothSerialBridge = BluetoothSerialBridge(applicationContext)
         trusdxDirectSerial = TruSdxDirectSerial(applicationContext)
@@ -337,6 +371,48 @@ class JS8EngineService : Service() {
                 Log.i(TAG, "One-shot time sync armed; waiting for next decode")
                 timeSyncOncePending = true
             }
+            ACTION_DEBUG_INJECT_TIMING -> {
+                // Debug builds only: drive the timing banner without waiting
+                // for a real decode drought and a lucky shifted-window hit.
+                if (BuildConfig.DEBUG) {
+                    val kind = intent.getIntExtra(EXTRA_TIMING_KIND, TIMING_FOUND)
+                    val driftMs = intent.getLongExtra(EXTRA_TIME_DRIFT_MS, -5500L)
+                    val step = intent.getIntExtra(EXTRA_TIMING_STEP, 1)
+                    val steps = intent.getIntExtra(EXTRA_TIMING_STEPS, 3)
+                    val periodMs = intent.getIntExtra(EXTRA_TIMING_PERIOD_MS, 15_000)
+                    Log.i(TAG, "Injected timing suggestion: kind=$kind drift=$driftMs")
+                    mainHandler.post {
+                        broadcastTimingSuggestion(kind, driftMs, step, steps, periodMs)
+                    }
+                }
+            }
+            ACTION_DEBUG_INJECT_DECODE -> {
+                // Debug builds only: run a synthetic decode through the same
+                // path a real one takes. Protocol handling becomes testable on
+                // one emulator with no audio, including malformed frames and
+                // bad checksums no cooperating sender would produce.
+                if (BuildConfig.DEBUG) {
+                    val text = intent.getStringExtra(EXTRA_TEXT)
+                    if (!text.isNullOrBlank()) {
+                        val snr = intent.getIntExtra(EXTRA_SNR, -10)
+                        val freq = intent.getFloatExtra(EXTRA_FREQ, 1500f)
+                        val type = intent.getIntExtra(EXTRA_TYPE, 0)
+                        val submode = intent.getIntExtra(EXTRA_MODE, 0)
+                        Log.i(TAG, "Injected decode: '$text' type=$type submode=$submode")
+                        val cal = Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"))
+                        val utc = cal.get(Calendar.HOUR_OF_DAY) * 10000 +
+                            cal.get(Calendar.MINUTE) * 100 + cal.get(Calendar.SECOND)
+                        mainHandler.post {
+                            updateHeardCallsign(text)
+                            recordLinkEvidence(text, snr)
+                            broadcastDecode(utc, snr, 0f, freq, text, type, 1f, submode, 0)
+                            handleRelayFrame(text, snr, submode, freq, type)
+                            maybeHandleIncomingMessage(text, snr, freq, type, submode)
+                            maybeHandleAutoReply(text, snr, submode)
+                        }
+                    }
+                }
+            }
             ACTION_SET_TIME_DRIFT -> {
                 val driftMs = intent.getLongExtra(EXTRA_TIME_DRIFT_MS, 0L)
                 Log.i(TAG, "Setting time drift to $driftMs ms")
@@ -356,7 +432,8 @@ class JS8EngineService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         Log.i(TAG, "Service destroyed")
-        
+        serviceScope.cancel()
+
         val prefs = PreferenceManager.getDefaultSharedPreferences(this)
         prefs.unregisterOnSharedPreferenceChangeListener(preferenceChangeListener)
         heartbeatHandler.removeCallbacksAndMessages(null)
@@ -400,10 +477,10 @@ class JS8EngineService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(getString(R.string.notification_title))
             .setContentText(getString(R.string.notification_text))
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setSmallIcon(R.drawable.ic_graphic_eq)
             .setContentIntent(pendingIntent)
             .addAction(
-                android.R.drawable.ic_media_pause,
+                R.drawable.ic_pause,
                 getString(R.string.notification_action_stop),
                 stopPendingIntent
             )
@@ -475,9 +552,10 @@ class JS8EngineService : Service() {
                     mainHandler.post {
                         maybeApplyTimeSync(driftMs)
                         updateHeardCallsign(text)
+                        recordLinkEvidence(text, snr)
                         broadcastDecode(utc, snr, dt, freq, text, type, quality, mode, driftMs)
                         handleRelayFrame(text, snr, mode, freq, type)
-                        maybeHandleIncomingMessage(text, snr, freq, type)
+                        maybeHandleIncomingMessage(text, snr, freq, type, mode)
                         maybeHandleAutoReply(text, snr, mode)
                         maybeReportToPskReporter(utc, snr, freq, text)
                     }
@@ -508,6 +586,15 @@ class JS8EngineService : Service() {
                     Log.d(TAG, "Decode finished: count=$count")
                     mainHandler.post {
                         broadcastDecodeFinished(count)
+                    }
+                }
+
+                override fun onTimingSuggestion(
+                    kind: Int, driftMs: Int, step: Int, steps: Int, periodMs: Int
+                ) {
+                    Log.i(TAG, "Timing suggestion: kind=$kind drift=$driftMs step=$step/$steps period=$periodMs")
+                    mainHandler.post {
+                        broadcastTimingSuggestion(kind, driftMs.toLong(), step, steps, periodMs)
                     }
                 }
 
@@ -1380,6 +1467,16 @@ class JS8EngineService : Service() {
             stopTxMonitor()
             disableScoRouting()
 
+            // Stopping cancels the TX monitor, which is what would have
+            // reported the end of a send in flight. Without a terminal state
+            // the UI stays at Transmitting and the queue pump never sends again.
+            if (txSessionActive || txAudioActive) {
+                Log.i(TAG, "Engine stopped mid-transmission; failing the send in flight")
+                broadcastTxState(TX_STATE_FAILED)
+            }
+            txSessionActive = false
+            txAudioActive = false
+
             txHandler.removeCallbacksAndMessages(null)
             synchronized(pttStateLock) {
                 rigPttDesired = false
@@ -1387,14 +1484,23 @@ class JS8EngineService : Service() {
                 rigPttCommandPending = false
                 rigPttCompletion = null
             }
-            if (isRigControlConnected()) {
-                if (!releaseRigPttForShutdown()) {
-                    Log.e(TAG, "Unable to confirm PTT release during shutdown")
-                }
-            }
+            // Rig teardown belongs on the TX handler, not here. With the radio
+            // gone a CAT command blocks for hamlib's full timeout, and every
+            // HamlibRigControl method shares one monitor, so close() waits
+            // behind it. That was nine seconds on the main thread.
+            val shutdownMode = rigControlMode
+            val shutdownTransport = rtsPttTransport
+            val shutdownHamlib = hamlibRigControl
+            val shutdownUsb = usbSerialBridge
+            val shutdownBluetooth = bluetoothSerialBridge
+            val shutdownTruSdx = trusdxSerialSession
+            val shutdownNetwork = rigCtlClient
+            val shouldReleasePtt = isRigControlConnected()
 
-            // Disconnect rig control on background thread
-            val networkClientToDisconnect = rigCtlClient
+            hamlibRigControl = null
+            usbSerialBridge = null
+            bluetoothSerialBridge = null
+            trusdxSerialSession = null
             rigCtlClient = null
             rigCtlConnected = false
             rigCtlErrorShown = false
@@ -1409,8 +1515,6 @@ class JS8EngineService : Service() {
             trusdxRxKeepaliveCount = 0L
             rtsPttTransport = null
             rigControlMode = "none"
-            hamlibRigControl?.close()
-            trusdxSerialSession?.stop()
             if (isTruSdxDiagnosticsEnabled() &&
                 (trusdxRxFrames > 0 || trusdxTxFrames > 0 || trusdxParserResyncs > 0 || trusdxTxDrops > 0 || trusdxRxUnderruns > 0 || trusdxRxFrameDrops > 0)
             ) {
@@ -1419,15 +1523,36 @@ class JS8EngineService : Service() {
                     "TruSDX diagnostics: rxFrames=$trusdxRxFrames rxSamples=$trusdxRxSamples rxFrameDrops=$trusdxRxFrameDrops rxSubmitDrops=$trusdxRxSubmitDrops rxUnderruns=$trusdxRxUnderruns txFrames=$trusdxTxFrames txSamples=$trusdxTxSamples txSilent=$trusdxTxSilentFrames txDrops=$trusdxTxDrops parserResyncs=$trusdxParserResyncs"
                 )
             }
-            usbSerialBridge?.unregisterNative()
-            usbSerialBridge?.close()
-            bluetoothSerialBridge?.close()
-            bluetoothSerialBridge?.unregisterNative()
 
-            if (networkClientToDisconnect != null) {
-                Thread {
-                    networkClientToDisconnect.disconnect()
-                }.start()
+            txHandler.post {
+                if (shouldReleasePtt) {
+                    // Captured references, not setRigPtt: the fields are
+                    // cleared above so a restart cannot reuse a closing link.
+                    val released = when (shutdownMode) {
+                        "network" -> shutdownNetwork?.setPtt(false) == true
+                        "hamlib_usb" -> shutdownHamlib?.setPtt(false) == true
+                        "rts_ptt" -> when (shutdownTransport) {
+                            SerialTransport.USB -> shutdownUsb?.setRts(false) == true
+                            SerialTransport.BLUETOOTH -> shutdownBluetooth?.setRts(false) == true
+                            else -> false
+                        }
+                        "trusdx_serial" -> shutdownTruSdx?.setPtt(false) == true
+                        else -> false
+                    }
+                    if (released) {
+                        synchronized(pttStateLock) { rigPttAsserted = false }
+                    } else {
+                        Log.e(TAG, "Unable to confirm PTT release during shutdown")
+                    }
+                }
+                shutdownHamlib?.close()
+                shutdownTruSdx?.stop()
+                shutdownUsb?.unregisterNative()
+                shutdownUsb?.close()
+                shutdownBluetooth?.close()
+                shutdownBluetooth?.unregisterNative()
+                shutdownNetwork?.disconnect()
+                Log.i(TAG, "Rig control torn down")
             }
 
             pskReporterClient?.stop(flush = true)
@@ -1448,6 +1573,47 @@ class JS8EngineService : Service() {
     private fun broadcastEngineState(state: String) {
         val intent = Intent(ACTION_ENGINE_STATE).apply {
             putExtra(EXTRA_STATE, state)
+        }
+        LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
+
+        // The rig indicator on the Monitor strip needs the link state, and the
+        // connected flags are set in too many places to broadcast from each one.
+        // Poll while the engine runs instead, and report only on a change.
+        if (state == STATE_RUNNING || state == STATE_STARTING) {
+            startRigStatusPolling()
+        } else {
+            stopRigStatusPolling()
+        }
+    }
+
+    private val rigStatusHandler = Handler(Looper.getMainLooper())
+    private var rigStatusPolling = false
+    private var lastRigConnected: Boolean? = null
+    private val rigStatusRunnable = object : Runnable {
+        override fun run() {
+            if (!rigStatusPolling) return
+            broadcastRigStatus(isRigControlConnected())
+            rigStatusHandler.postDelayed(this, RIG_STATUS_POLL_INTERVAL_MS)
+        }
+    }
+
+    private fun startRigStatusPolling() {
+        if (rigStatusPolling) return
+        rigStatusPolling = true
+        rigStatusHandler.post(rigStatusRunnable)
+    }
+
+    private fun stopRigStatusPolling() {
+        rigStatusPolling = false
+        rigStatusHandler.removeCallbacks(rigStatusRunnable)
+        broadcastRigStatus(false)
+    }
+
+    private fun broadcastRigStatus(connected: Boolean) {
+        if (lastRigConnected == connected) return
+        lastRigConnected = connected
+        val intent = Intent(ACTION_RIG_STATUS).apply {
+            putExtra(EXTRA_RIG_CONNECTED, connected)
         }
         LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
     }
@@ -1516,6 +1682,19 @@ class JS8EngineService : Service() {
             Log.i(TAG, "Time drift restored: $driftMs ms")
         }
         broadcastTimeDrift(driftMs)
+    }
+
+    private fun broadcastTimingSuggestion(
+        kind: Int, driftMs: Long, step: Int, steps: Int, periodMs: Int
+    ) {
+        val intent = Intent(ACTION_TIMING_SUGGESTION).apply {
+            putExtra(EXTRA_TIMING_KIND, kind)
+            putExtra(EXTRA_TIME_DRIFT_MS, driftMs)
+            putExtra(EXTRA_TIMING_STEP, step)
+            putExtra(EXTRA_TIMING_STEPS, steps)
+            putExtra(EXTRA_TIMING_PERIOD_MS, periodMs)
+        }
+        LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
     }
 
     private fun broadcastTimeDrift(driftMs: Long) {
@@ -2248,8 +2427,25 @@ class JS8EngineService : Service() {
         heartbeatHandler.postDelayed(heartbeatRunnable, waitMs)
     }
 
-    private fun getFrameDurationMs(): Long {
-        return when (getPreferredTxSubmode()) {
+    /**
+     * Run [block] just before [submode]'s next frame boundary. The modulator
+     * assumes it was asked at a boundary, as the desktop's TX loop does;
+     * mid-period it joins the frame in progress and sends only its tail.
+     * The block must pass [TX_BOUNDARY_DELAY_S] as txDelaySec.
+     */
+    private fun scheduleAtNextTxBoundary(submode: Int, handler: Handler, block: () -> Unit) {
+        val period = framePeriodMs(submode)
+        val now = System.currentTimeMillis() + (engine?.timeDriftMs() ?: 0L)
+        val remaining = period - (((now % period) + period) % period)
+        if (remaining <= TX_BOUNDARY_LEAD_MS) {
+            block()
+        } else {
+            handler.postDelayed({ block() }, remaining - TX_BOUNDARY_LEAD_MS)
+        }
+    }
+
+    private fun framePeriodMs(submode: Int): Long {
+        return when (submode) {
             SUBMODE_SLOW -> 30000L
             SUBMODE_NORMAL -> 15000L
             SUBMODE_FAST -> 10000L
@@ -2257,6 +2453,8 @@ class JS8EngineService : Service() {
             else -> 15000L
         }
     }
+
+    private fun getFrameDurationMs(): Long = framePeriodMs(getPreferredTxSubmode())
 
     /**
      * True for messages that belong in the heartbeat sub-band: heartbeats
@@ -2329,25 +2527,32 @@ class JS8EngineService : Service() {
         val activeEngine = engine
         if (activeEngine != null) {
             val submode = getPreferredTxSubmode()
-            prepareEngineForTransmit(activeEngine)
-             val ok = activeEngine.transmitMessage(
-                text = payload,
-                myCall = callsign,
-                myGrid = grid,
-                selectedCall = "", // Broadcast-ish
-                submode = submode,
-                audioFrequencyHz = freq.toDouble(),
-                txDelaySec = 0.0,
-                forceIdentify = true, // Force ID to ensure callsign is sent
-                forceData = false
-            )
-            
-            if (ok) {
-                updateLastTxMessage(payload, "", submode, freq.toDouble())
-                broadcastTxState(TX_STATE_QUEUED)
-                startTxMonitor()
-            } else {
-                Log.e(TAG, "Failed to send heartbeat")
+            scheduleAtNextTxBoundary(submode, mainHandler) {
+                // Live query, not the monitor's cached flags: another
+                // deferred send may have started at this boundary.
+                if (engine !== activeEngine || activeEngine.isTransmitting()) {
+                    return@scheduleAtNextTxBoundary
+                }
+                prepareEngineForTransmit(activeEngine)
+                val ok = activeEngine.transmitMessage(
+                    text = payload,
+                    myCall = callsign,
+                    myGrid = grid,
+                    selectedCall = "", // Broadcast-ish
+                    submode = submode,
+                    audioFrequencyHz = freq.toDouble(),
+                    txDelaySec = TX_BOUNDARY_DELAY_S,
+                    forceIdentify = true, // Force ID to ensure callsign is sent
+                    forceData = false
+                )
+
+                if (ok) {
+                    updateLastTxMessage(payload, "", submode, freq.toDouble())
+                    broadcastTxState(TX_STATE_QUEUED)
+                    startTxMonitor()
+                } else {
+                    Log.e(TAG, "Failed to send heartbeat")
+                }
             }
         }
 
@@ -2420,28 +2625,33 @@ class JS8EngineService : Service() {
             "TX request: text='$payloadText', directed='${directed}', submode=$submode, freq=$audioFrequencyHz, delay=$txDelaySec, identify=$effectiveForceIdentify"
         )
 
-        prepareEngineForTransmit(activeEngine)
-        val ok = activeEngine.transmitMessage(
-            text = payloadText,
-            myCall = callsign,
-            myGrid = grid,
-            selectedCall = directed,
-            submode = submode,
-            audioFrequencyHz = audioFrequencyHz,
-            txDelaySec = txDelaySec,
-            forceIdentify = effectiveForceIdentify,
-            forceData = forceData
-        )
+        scheduleAtNextTxBoundary(submode, txHandler) {
+            if (engine !== activeEngine) return@scheduleAtNextTxBoundary
+            prepareEngineForTransmit(activeEngine)
+            val ok = activeEngine.transmitMessage(
+                text = payloadText,
+                myCall = callsign,
+                myGrid = grid,
+                selectedCall = directed,
+                submode = submode,
+                audioFrequencyHz = audioFrequencyHz,
+                txDelaySec = maxOf(txDelaySec, TX_BOUNDARY_DELAY_S),
+                forceIdentify = effectiveForceIdentify,
+                forceData = forceData
+            )
 
-        if (ok) {
-            Log.i(TAG, "TX request accepted")
-            updateLastTxMessage(payloadText, directed, submode, audioFrequencyHz)
-            broadcastTxState(TX_STATE_QUEUED)
-            startTxMonitor()
-        } else {
-            Log.e(TAG, "TX request rejected")
-            broadcastError("Failed to start transmit")
-            broadcastTxState(TX_STATE_FAILED)
+            if (ok) {
+                Log.i(TAG, "TX request accepted")
+                recordMailQuery(payloadText, directed)
+                updateLastTxMessage(payloadText, directed, submode, audioFrequencyHz)
+                broadcastTxSent(buildTxMessage(payloadText, directed), audioFrequencyHz)
+                broadcastTxState(TX_STATE_QUEUED)
+                startTxMonitor()
+            } else {
+                Log.e(TAG, "TX request rejected")
+                broadcastError("Failed to start transmit")
+                broadcastTxState(TX_STATE_FAILED)
+            }
         }
     }
 
@@ -2480,13 +2690,31 @@ class JS8EngineService : Service() {
         LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
     }
 
+    private fun broadcastTxProgress(frameIndex: Int, frameCount: Int) {
+        val intent = Intent(ACTION_TX_PROGRESS).apply {
+            putExtra(EXTRA_TX_FRAME_INDEX, frameIndex)
+            putExtra(EXTRA_TX_FRAME_COUNT, frameCount)
+        }
+        LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
+    }
+
+    private fun broadcastTxSent(text: String, frequencyHz: Double) {
+        if (text.isBlank()) return
+        val intent = Intent(ACTION_TX_SENT).apply {
+            putExtra(EXTRA_TX_SENT_TEXT, text)
+            putExtra(EXTRA_TX_SENT_FREQ, frequencyHz.toFloat())
+        }
+        LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
+    }
+
     private fun broadcastMessageReceived(
         from: String,
         text: String,
         snr: Int,
         freq: Float,
         relayPath: String?,
-        conversationId: String = from
+        conversationId: String = from,
+        silent: Boolean = false
     ) {
         val intent = Intent(ACTION_MESSAGE_RECEIVED).apply {
             putExtra(EXTRA_MESSAGE_FROM, from)
@@ -2494,29 +2722,55 @@ class JS8EngineService : Service() {
             putExtra(EXTRA_MESSAGE_SNR, snr)
             putExtra(EXTRA_MESSAGE_FREQ, freq)
             putExtra(EXTRA_MESSAGE_CONVERSATION_ID, conversationId)
+            putExtra(EXTRA_MESSAGE_SILENT, silent)
             relayPath?.let { putExtra(EXTRA_MESSAGE_RELAY_PATH, it) }
         }
         LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
-        
-        // Also show a notification
-        showMessageNotification(from, text)
+
+        if (!silent) {
+            showMessageNotification(conversationId, from, text)
+        }
     }
     
     /**
      * Broadcast a request to queue a TX message.
      * The UI layer (TransmitViewModel) will handle adding it to the TX queue.
      */
-    private fun broadcastQueueTx(text: String, directed: String?, priority: Int = 0) {
+    private fun broadcastQueueTx(
+        text: String,
+        directed: String?,
+        priority: Int = 0,
+        mailboxId: Long? = null,
+        mailboxRecipient: String? = null
+    ) {
         val intent = Intent(ACTION_QUEUE_TX).apply {
             putExtra(EXTRA_QUEUE_TX_TEXT, text)
             directed?.let { putExtra(EXTRA_QUEUE_TX_DIRECTED, it) }
             putExtra(EXTRA_QUEUE_TX_PRIORITY, priority)
+            mailboxId?.let { putExtra(EXTRA_QUEUE_TX_MAILBOX_ID, it) }
+            mailboxRecipient?.let { putExtra(EXTRA_QUEUE_TX_MAILBOX_RECIPIENT, it) }
         }
         LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
         Log.d(TAG, "Broadcast queue TX: text='$text' directed=$directed priority=$priority")
     }
 
-    private fun showMessageNotification(from: String, text: String) {
+    /** An ACK for our traffic arrived: the UI sets the double check. */
+    private fun broadcastMessageAcked(from: String) {
+        val intent = Intent(ACTION_MESSAGE_ACKED).apply {
+            putExtra(EXTRA_MESSAGE_FROM, from)
+        }
+        LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
+    }
+
+    /** A station we queried reported no mail waiting for us. */
+    private fun broadcastMailboxEmpty(station: String) {
+        val intent = Intent(ACTION_MAILBOX_EMPTY).apply {
+            putExtra(EXTRA_MESSAGE_FROM, station)
+        }
+        LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
+    }
+
+    private fun showMessageNotification(conversationId: String, from: String, text: String) {
         val notificationManager = getSystemService(NotificationManager::class.java)
         
         // Create message notification channel if it doesn't exist
@@ -2532,13 +2786,15 @@ class JS8EngineService : Service() {
         }
         
         // Create intent to open the app
+        // Tapping opens the thread the message landed in. For a group
+        // message that is the group, not a DM with whoever sent it.
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra("open_messages", true)
-            putExtra("callsign", from)
+            putExtra("callsign", conversationId)
         }
         val pendingIntent = PendingIntent.getActivity(
-            this, from.hashCode(), intent,
+            this, conversationId.hashCode(), intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         
@@ -2728,35 +2984,6 @@ class JS8EngineService : Service() {
         broadcastTxState(TX_STATE_FAILED)
     }
 
-    private fun releaseRigPttForShutdown(): Boolean {
-        if (Looper.myLooper() == txHandler.looper) {
-            val released = setRigPtt(false)
-            if (released) rigPttAsserted = false
-            return released
-        }
-
-        val completed = CountDownLatch(1)
-        var released = false
-        txHandler.post {
-            try {
-                released = setRigPtt(false)
-                if (released) {
-                    synchronized(pttStateLock) {
-                        rigPttAsserted = false
-                    }
-                }
-            } finally {
-                completed.countDown()
-            }
-        }
-        completed.await()
-        if (!released) {
-            released = setRigPtt(false)
-            if (released) rigPttAsserted = false
-        }
-        return released
-    }
-
     /**
      * Handle incoming MSG commands - always runs regardless of autoreply setting.
      * This ensures messages are saved to inbox even if auto-ACK is disabled.
@@ -2767,7 +2994,7 @@ class JS8EngineService : Service() {
      *   FROM: TO MSG            (multi-frame: command frame)
      *   payload...              (multi-frame: data frames follow)
      */
-    private fun maybeHandleIncomingMessage(text: String, snr: Int, freq: Float, type: Int) {
+    private fun maybeHandleIncomingMessage(text: String, snr: Int, freq: Float, type: Int, submode: Int) {
         val callsign = getConfiguredCallsign()
         Log.d(TAG, "maybeHandleIncomingMessage: text='$text' type=$type callsign=$callsign")
         if (callsign == null) {
@@ -2780,13 +3007,57 @@ class JS8EngineService : Service() {
         
         // Try parsing as a directed command (MSG header frame)
         val directed = parseDirectedCommand(text)
-        
+
+        // MSG TO: is a deposit into our mailbox for a third party, and must
+        // be caught before the MSG branch below would read it as mail for us.
+        if (directed != null && directed.command.uppercase() == Js8Commands.CMD_MSG_TO) {
+            handleMailboxDeposit(directed, snr, freq, type, submode, now)
+            return
+        }
+
+        // Replies to our own traffic.
+        if (directed != null && isSelfCallsign(callsign, directed.to) &&
+            !isSelfCallsign(callsign, directed.from)
+        ) {
+            when (directed.command.uppercase()) {
+                Js8Commands.CMD_ACK -> {
+                    // Receipt for a message we sent: light the double check.
+                    Log.i(TAG, "ACK received from ${directed.from}")
+                    broadcastMessageAcked(directed.from.trim().uppercase())
+                    return
+                }
+                Js8Commands.CMD_YES -> {
+                    // YES MSG ID {n}: mail is waiting for us; go collect it.
+                    val m = Regex("^MSG ID\\s+(\\d+)", RegexOption.IGNORE_CASE)
+                        .find(directed.payload.trim())
+                    if (m != null && expectingMailFrom(directed.from)) {
+                        fetchMailboxMessage(
+                            callsign,
+                            directed.from.trim().uppercase(),
+                            m.groupValues[1].toLong()
+                        )
+                        return
+                    }
+                }
+                Js8Commands.CMD_NO -> {
+                    if (expectingMailFrom(directed.from)) {
+                        Log.i(TAG, "No mail waiting at ${directed.from}")
+                        broadcastMailboxEmpty(directed.from.trim().uppercase())
+                        return
+                    }
+                }
+            }
+        }
+
         if (directed != null && (directed.command.uppercase() == "MSG" || directed.command.uppercase().startsWith("MSG"))) {
             // This is a MSG command frame
             val isForMe = isSelfCallsign(callsign, directed.to)
             val isForMyGroup = isSubscribedGroup(directed.to)
-            
-            if (!isForMe && !isForMyGroup) {
+            // Unsubscribed group traffic is stored too, silently, so the
+            // history is already there if the operator joins the group later.
+            val isOtherGroup = !isForMyGroup && isStorableGroup(directed.to)
+
+            if (!isForMe && !isForMyGroup && !isOtherGroup) {
                 Log.d(TAG, "maybeHandleIncomingMessage: MSG not for me ($callsign) or my groups, skipping")
                 return
             }
@@ -2811,20 +3082,14 @@ class JS8EngineService : Service() {
             
             // If this is the last frame and we have payload, deliver immediately
             if (isLastFrame(type) && initialPayload.isNotBlank()) {
-                val conversationId = if (isForMyGroup) directed.to else directed.from
+                val conversationId = if (isForMyGroup || isOtherGroup) directed.to else directed.from
                 // Strip checksum (3 uppercase alphanumeric chars at end, preceded by space)
                 val cleanPayload = initialPayload.trim()
                     .replace(Regex("\\s*[▪■]+\\s*$"), "")
                     .replace(Regex("\\s+[A-Z0-9]{3}$"), "")
                     .trim()
                 Log.i(TAG, "MSG received (single frame): from=${directed.from} to=${directed.to} text='$cleanPayload' conversationId=$conversationId")
-                broadcastMessageReceived(directed.from, cleanPayload, snr, freq, null, conversationId)
-                
-                // Queue auto-ACK now that full message is received (if autoreply enabled)
-                if (isAutoreplyEnabled()) {
-                    Log.i(TAG, "Auto ACK for MSG from=${directed.from}")
-                    broadcastQueueTx("$callsign: ${directed.from} ACK", null, priority = 2)
-                }
+                deliverIncomingMsg(callsign, directed.from.trim().uppercase(), cleanPayload, snr, freq, conversationId)
                 return
             }
             
@@ -2836,6 +3101,11 @@ class JS8EngineService : Service() {
                 snr = snr,
                 frequency = freq,
                 lastUpdated = now,
+                // Four frame periods of the submode the command arrived in.
+                // A flat 60 seconds expires a Slow-mode message between its
+                // own 30-second frames if one decode runs late or one frame
+                // is missed.
+                timeoutMs = maxOf(MSG_BUFFER_TIMEOUT_MS, 4 * framePeriodMs(submode)),
                 parts = if (initialPayload.isNotBlank()) mutableListOf(initialPayload) else mutableListOf()
             )
             synchronized(msgLock) {
@@ -2883,17 +3153,30 @@ class JS8EngineService : Service() {
         val snr: Int,
         val frequency: Float,
         var lastUpdated: Long,
+        val timeoutMs: Long,
+        /** MSG for direct mail, MSG TO: for a mailbox deposit */
+        val command: String = Js8Commands.CMD_MSG,
         val parts: MutableList<String> = mutableListOf()
     )
     
     private val msgBuffers = mutableMapOf<Int, MsgBuffer>()
     private val msgLock = Any()
+    // Floor for the per-buffer timeout; slow submodes get four frame periods.
     private val MSG_BUFFER_TIMEOUT_MS = 60_000L
+
+    // One mailbox reply per peer inside this window.
+    private val MAILBOX_REPLY_WINDOW_MS = 60_000L
+
+    // How long a QUERY MSGS keeps mailbox replies from that station expected.
+    private val MAIL_RETRIEVAL_WINDOW_MS = 10 * 60_000L
+
+    // Retention for stored traffic of groups the operator is not in.
+    private val OTHER_GROUP_RETENTION_MS = 30L * 24 * 60 * 60 * 1000
     
     private fun cleanupMsgBuffers(now: Long) {
         synchronized(msgLock) {
             msgBuffers.entries.removeIf { (_, buffer) ->
-                now - buffer.lastUpdated > MSG_BUFFER_TIMEOUT_MS
+                now - buffer.lastUpdated > buffer.timeoutMs
             }
         }
     }
@@ -2910,7 +3193,113 @@ class JS8EngineService : Service() {
         return null
     }
     
+    /**
+     * A MSG TO: command frame: another station asks us to hold mail for a
+     * third party. The destination and text follow in data frames, so this
+     * opens a buffer; [completeMailboxDeposit] runs on the last frame.
+     */
+    private fun handleMailboxDeposit(
+        directed: DirectedCommand, snr: Int, freq: Float, type: Int, submode: Int, now: Long
+    ) {
+        val callsign = getConfiguredCallsign() ?: return
+        if (!isSelfCallsign(callsign, directed.to)) return
+        if (isSelfCallsign(callsign, directed.from)) return
+        if (!isMailboxEnabled()) {
+            Log.i(TAG, "Mailbox deposit from=${directed.from} ignored: mailbox disabled")
+            return
+        }
+
+        if (isLastFrame(type)) {
+            if (directed.payload.isNotBlank()) {
+                completeMailboxDeposit(directed.from.trim().uppercase(), directed.payload, snr, freq)
+            }
+            return
+        }
+
+        val key = findMatchingMsgBufferKey(freq) ?: Math.round(freq)
+        val buffer = MsgBuffer(
+            from = directed.from.trim().uppercase(),
+            to = directed.to.trim().uppercase(),
+            snr = snr,
+            frequency = freq,
+            lastUpdated = now,
+            timeoutMs = maxOf(MSG_BUFFER_TIMEOUT_MS, 4 * framePeriodMs(submode)),
+            command = Js8Commands.CMD_MSG_TO,
+            parts = if (directed.payload.isNotBlank()) mutableListOf(directed.payload) else mutableListOf()
+        )
+        synchronized(msgLock) {
+            msgBuffers[key] = buffer
+        }
+        Log.d(TAG, "handleMailboxDeposit: buffered MSG TO: command, waiting for data frames")
+    }
+
+    /**
+     * The reassembled text of a deposit: "DEST message CHK". Validates the
+     * checksum, stores the message, and confirms with ACK.
+     */
+    private fun completeMailboxDeposit(
+        from: String,
+        payload: String,
+        snr: Int,
+        freq: Float,
+        originatorOverride: String? = null,
+        replyPath: String? = null
+    ) {
+        val callsign = getConfiguredCallsign() ?: return
+        var text = payload.trim().replace(Regex("\\s*[▪■]+\\s*$"), "").trim()
+
+        // The last token is a 3-character checksum over everything before it.
+        val (checksumOk, checked) = validateRelayChecksum(text)
+        if (!checksumOk) {
+            Log.w(TAG, "Mailbox deposit checksum mismatch from=$from text='$text'")
+            if (isMailboxStrictChecksum()) return
+        }
+        text = if (checksumOk) checked.trim() else stripOptionalRelayChecksum(text).trim()
+
+        // First token is who the mail is for; the rest is the message.
+        val dest = text.substringBefore(' ').trim().uppercase()
+        val body = text.substringAfter(' ', "").trim()
+        if (dest.isBlank() || body.isBlank()) {
+            Log.w(TAG, "Mailbox deposit from=$from missing destination or text, dropping")
+            return
+        }
+
+        // A from of A>B means A originated the message and B relayed it here.
+        // A deposit that arrived over a relay path has both already resolved
+        // by the caller, whose path runs the other way round.
+        val hops = from.split(">").map { it.trim() }.filter { it.isNotEmpty() }
+        val originator = originatorOverride ?: hops.firstOrNull() ?: from
+        val relayPath = replyPath ?: if (hops.size > 1) from else null
+        val ackTarget = replyPath ?: from
+
+        serviceScope.launch {
+            val id = mailboxRepository.store(
+                MailboxEntity(
+                    originator = originator,
+                    destination = dest,
+                    text = body,
+                    receivedAt = System.currentTimeMillis(),
+                    relayPath = relayPath,
+                    snr = snr,
+                    offsetHz = freq
+                )
+            )
+            Log.i(TAG, "Mailbox deposit stored: id=$id from=$originator dest=$dest text='$body'")
+            // Accepted mail is confirmed no matter what autoreply says.
+            // Taking the message and refusing to say so is the worst of both.
+            val ack = if (replyPath != null) "$ackTarget ACK" else "$callsign: $ackTarget ACK"
+            broadcastQueueTx(ack, null, priority = 2)
+        }
+    }
+
     private fun processMsgBuffer(buffer: MsgBuffer, myCallsign: String) {
+        if (buffer.command == Js8Commands.CMD_MSG_TO) {
+            val assembled = assembleMsgPayload(buffer.parts).trim()
+            if (assembled.isNotBlank()) {
+                completeMailboxDeposit(buffer.from, assembled, buffer.snr, buffer.frequency)
+            }
+            return
+        }
         // Data frames split at arbitrary byte boundaries, not word boundaries.
         val fullText = assembleMsgPayload(buffer.parts).trim()
         // Remove end-of-message marker if present
@@ -2925,17 +3314,73 @@ class JS8EngineService : Service() {
             return
         }
         
-        val isForMyGroup = isSubscribedGroup(buffer.to)
-        val conversationId = if (isForMyGroup) buffer.to else buffer.from
-        
+        val groupConversation = buffer.to.startsWith("@")
+        val conversationId = if (groupConversation) buffer.to else buffer.from
+
         Log.i(TAG, "MSG received (multi-frame): from=${buffer.from} to=${buffer.to} text='$cleanText' conversationId=$conversationId")
-        broadcastMessageReceived(buffer.from, cleanText, buffer.snr, buffer.frequency, null, conversationId)
-        
-        // Queue auto-ACK now that full message is received (if autoreply enabled)
-        if (isAutoreplyEnabled()) {
-            Log.i(TAG, "Auto ACK for MSG from=${buffer.from}")
-            broadcastQueueTx("$myCallsign: ${buffer.from} ACK", null, priority = 2)
+        deliverIncomingMsg(myCallsign, buffer.from, cleanText, buffer.snr, buffer.frequency, conversationId)
+    }
+
+    /**
+     * A complete MSG for us. Collected mailbox mail arrives here too, as
+     * "{text} FROM {originator}" with "NEXT MSG ID {n}" appended while the
+     * mailbox holds more: it threads under the originator with the mailbox
+     * station as the relay hop, and the next message is fetched.
+     */
+    private fun deliverIncomingMsg(
+        callsign: String,
+        from: String,
+        cleanText: String,
+        snr: Int,
+        freq: Float,
+        conversationId: String
+    ) {
+        val delivered = parseDeliveredMail(from, cleanText)
+        if (delivered != null) {
+            Log.i(
+                TAG,
+                "Mailbox mail collected: originator=${delivered.originator} via=$from next=${delivered.nextId}"
+            )
+            broadcastMessageReceived(
+                delivered.originator, delivered.text, snr, freq, from, delivered.originator
+            )
+            delivered.nextId?.let { fetchMailboxMessage(callsign, from, it) }
+        } else {
+            // Traffic for a group we are not in is stored without sound:
+            // no notification, and it arrives already read.
+            val silent = conversationId.startsWith("@") && !isSubscribedGroup(conversationId)
+            broadcastMessageReceived(from, cleanText, snr, freq, null, conversationId, silent)
         }
+
+        // Queue auto-ACK now that full message is received (if autoreply
+        // enabled). Never for a group: every subscriber ACKing at once
+        // would pile the band with confirmations.
+        if (isAutoreplyEnabled() && !conversationId.startsWith("@")) {
+            Log.i(TAG, "Auto ACK for MSG from=$from")
+            broadcastQueueTx("$callsign: $from ACK", null, priority = 2)
+        }
+    }
+
+    private data class DeliveredMail(val text: String, val originator: String, val nextId: Long?)
+
+    /**
+     * Parse "{text} FROM {originator}[ NEXT MSG ID {n}]", but only when we
+     * asked [sender] for mail. Ordinary messages can end in FROM too.
+     */
+    private fun parseDeliveredMail(sender: String, payload: String): DeliveredMail? {
+        if (!expectingMailFrom(sender)) return null
+        var text = payload.trim()
+        var nextId: Long? = null
+        Regex("\\sNEXT MSG ID\\s+(\\d+)$", RegexOption.IGNORE_CASE).find(text)?.let {
+            nextId = it.groupValues[1].toLong()
+            text = text.removeRange(it.range).trim()
+        }
+        val from = Regex("\\sFROM\\s+([A-Za-z0-9/]+)$", RegexOption.IGNORE_CASE).find(text)
+            ?: return null
+        val originator = from.groupValues[1].uppercase()
+        text = text.removeRange(from.range).trim()
+        if (text.isBlank()) return null
+        return DeliveredMail(text, originator, nextId)
     }
     
     private fun isDataFrame(type: Int): Boolean = (type and 0x4) != 0
@@ -2946,6 +3391,29 @@ class JS8EngineService : Service() {
         val groupsStr = prefs.getString("my_groups", "") ?: ""
         val groups = groupsStr.split(",").map { it.trim().uppercase() }.filter { it.isNotEmpty() }
         return groups.contains(target.uppercase())
+    }
+
+    /** Drop unsubscribed group traffic older than 30 days. */
+    private fun pruneOtherGroupHistory() {
+        val prefs = PreferenceManager.getDefaultSharedPreferences(this)
+        val subscribed = (prefs.getString("my_groups", "") ?: "")
+            .split(",").map { it.trim().uppercase() }.filter { it.isNotEmpty() }
+        val cutoff = System.currentTimeMillis() - OTHER_GROUP_RETENTION_MS
+        serviceScope.launch {
+            com.js8call.example.data.MessageRepository(this@JS8EngineService)
+                .deleteOldGroupMessages(cutoff, subscribed)
+        }
+    }
+
+    /**
+     * Groups whose traffic is stored even without a subscription, so the
+     * history exists when the operator joins later. @ALLCALL and @HB are
+     * broadcast addresses, not communities; storing them would bury the
+     * real groups under every heartbeat on the band.
+     */
+    private fun isStorableGroup(target: String): Boolean {
+        if (!target.startsWith("@")) return false
+        return target.uppercase() !in setOf("@ALLCALL", "@HB")
     }
 
     private fun maybeHandleAutoReply(text: String, snr: Int, mode: Int) {
@@ -2971,6 +3439,24 @@ class JS8EngineService : Service() {
         }
 
         val directed = parseDirectedCommand(text) ?: return
+
+        // Mailbox queries route before shouldReplyToDirected because a group
+        // query (A: @ALLCALL QUERY MSGS?) is legitimate and that check
+        // rejects every @ destination.
+        val mailboxCmd = directed.command.uppercase()
+        if (mailboxCmd == Js8Commands.CMD_QUERY_MSGS || mailboxCmd == "QUERY MSGS?") {
+            handleQueryMsgs(callsign, directed)
+            return
+        }
+        if (mailboxCmd == Js8Commands.CMD_QUERY) {
+            val idMatch = Regex("^MSG\\s+(\\d+)$", RegexOption.IGNORE_CASE)
+                .matchEntire(directed.payload.trim())
+            if (idMatch != null) {
+                handleQueryMsg(callsign, directed, idMatch.groupValues[1].toLong())
+                return
+            }
+        }
+
         if (!shouldReplyToDirected(callsign, directed)) return
         val cmdUpper = directed.command.uppercase()
         when {
@@ -3018,8 +3504,169 @@ class JS8EngineService : Service() {
         }
     }
 
+    /**
+     * A: ME QUERY MSGS — does our mailbox hold anything for A? Reply
+     * YES MSG ID {id} or NO. A group-addressed query gets YES or silence:
+     * every idle station replying NO to an @ALLCALL sweep floods the band.
+     */
+    private fun handleQueryMsgs(callsign: String, directed: DirectedCommand) {
+        val requester = directed.from.trim().uppercase()
+        val groupAddressed = directed.to.startsWith("@")
+        if (!groupAddressed && !isSelfCallsign(callsign, directed.to)) return
+        serveQueryMsgs(callsign, requester, groupAddressed, replyPath = null)
+    }
+
+    /**
+     * A reply goes straight back to the asker, or down [replyPath] when the
+     * question came over a relay. The path already reads nearest hop first,
+     * which is the order a reply needs.
+     */
+    private fun serveQueryMsgs(
+        callsign: String,
+        requester: String,
+        groupAddressed: Boolean,
+        replyPath: String?
+    ) {
+        if (!isMailboxEnabled()) return
+        if (isSelfCallsign(callsign, requester)) return
+        if (!mailboxReplyAllowed(requester, "QUERY MSGS")) return
+        val prefix = replyPath ?: "$callsign: $requester"
+        serviceScope.launch {
+            val next = mailboxRepository.nextForRecipient(requester)
+            if (next != null) {
+                Log.i(TAG, "Mailbox query from=$requester: offering MSG ID ${next.id}")
+                broadcastQueueTx("$prefix YES MSG ID ${next.id}", null, priority = 1)
+            } else if (!groupAddressed) {
+                Log.i(TAG, "Mailbox query from=$requester: nothing held")
+                broadcastQueueTx("$prefix NO", null, priority = 1)
+            }
+        }
+    }
+
+    /**
+     * A: ME QUERY MSG {id} — deliver it. The reply threads under the
+     * originator on A's side: MSG {text} FROM {originator}, plus
+     * NEXT MSG ID {n} when more mail waits. Delivery is marked when the
+     * transmission finishes, not here; a failed send must stay held.
+     */
+    private fun handleQueryMsg(callsign: String, directed: DirectedCommand, msgId: Long) {
+        val requester = directed.from.trim().uppercase()
+        if (!directed.to.startsWith("@") && !isSelfCallsign(callsign, directed.to)) return
+        serveQueryMsg(callsign, requester, msgId, replyPath = null)
+    }
+
+    private fun serveQueryMsg(
+        callsign: String,
+        requester: String,
+        msgId: Long,
+        replyPath: String?
+    ) {
+        if (!isMailboxEnabled()) return
+        if (isSelfCallsign(callsign, requester)) return
+        if (!mailboxReplyAllowed(requester, "QUERY MSG $msgId")) return
+        val prefix = replyPath ?: "$callsign: $requester"
+        serviceScope.launch {
+            val msg = mailboxRepository.getEligible(msgId, requester)
+            if (msg == null) {
+                Log.i(TAG, "Mailbox retrieve from=$requester id=$msgId: not eligible")
+                return@launch
+            }
+            val lookahead = mailboxRepository.nextForRecipient(requester, afterId = msg.id)
+            val reply = buildString {
+                append("$prefix MSG ${msg.text} FROM ${msg.originator}")
+                if (lookahead != null) append(" NEXT MSG ID ${lookahead.id}")
+            }
+            Log.i(TAG, "Mailbox retrieve from=$requester id=${msg.id}, lookahead=${lookahead?.id}")
+            broadcastQueueTx(
+                reply, null, priority = 1,
+                mailboxId = msg.id,
+                // A group message is recorded per collector; individual mail
+                // is marked delivered outright.
+                mailboxRecipient = if (msg.destination.startsWith("@")) requester else null
+            )
+        }
+    }
+
+    // Stations we asked for mail. A "MSG {text} FROM {call}" reply is only
+    // read as mailbox attribution when we actually asked the sender:
+    // ordinary text can end the same way ("GREETINGS FROM W1AW"), and
+    // misreading it would thread the message under the wrong callsign.
+    private val pendingMailRetrievals = mutableMapOf<String, Long>()
+
+    private fun recordMailQuery(text: String, directed: String) {
+        val trimmed = text.trim().uppercase()
+
+        // A relay carries the destination in the payload rather than the
+        // directed field, so the station we are asking is the last callsign
+        // of the ">" chain, not the first. Reading the first would arm the
+        // window against the nearest hop and the reply would be ignored.
+        val relayMatch = Regex("^((?:[A-Z0-9/]+>)+)([A-Z0-9/]+)\\s+QUERY MSG").find(trimmed)
+        val peer = when {
+            relayMatch != null -> {
+                mailRetrievalHops = relayMatch.groupValues[1].count { it == '>' }
+                relayMatch.groupValues[2]
+            }
+            directed.isNotBlank() -> {
+                if (!trimmed.startsWith("QUERY MSG")) return
+                mailRetrievalHops = 0
+                directed.trim().uppercase()
+            }
+            else -> {
+                val m = Regex("^\\S+:\\s+(\\S+)\\s+QUERY MSG").find(trimmed) ?: return
+                mailRetrievalHops = 0
+                m.groupValues[1]
+            }
+        }
+        if (peer.startsWith("@")) return
+        pendingMailRetrievals[peer] = System.currentTimeMillis()
+        Log.d(TAG, "Expecting mailbox replies from $peer (hops=$mailRetrievalHops)")
+    }
+
+    /**
+     * Hops on the path of the last query. Every hop is a full retransmission,
+     * so a two-hop exchange in a slow submode will not finish inside the
+     * direct window.
+     */
+    private var mailRetrievalHops = 0
+
+    private fun expectingMailFrom(peer: String): Boolean {
+        val asked = pendingMailRetrievals[peer.trim().uppercase()] ?: return false
+        val window = MAIL_RETRIEVAL_WINDOW_MS * (mailRetrievalHops + 1)
+        return System.currentTimeMillis() - asked < window
+    }
+
+    /** Ask [station] for held message [id], guarding against reply loops. */
+    private fun fetchMailboxMessage(callsign: String, station: String, id: Long) {
+        if (!mailboxReplyAllowed(station, "FETCH $id")) return
+        pendingMailRetrievals[station.trim().uppercase()] = System.currentTimeMillis()
+        Log.i(TAG, "Fetching mailbox message $id from $station")
+        broadcastQueueTx("$callsign: $station QUERY MSG $id", null, priority = 1)
+    }
+
+    // One answer per peer per question inside the window. Keyed on the
+    // question, not the peer alone: the normal retrieval flow is QUERY MSGS,
+    // then QUERY MSG {id} right after our YES, and a per-peer limit would
+    // suppress the very retrieval the YES invited. What this stops is a
+    // stuck station asking the same thing over and over.
+    private val mailboxReplyTimes = mutableMapOf<String, Long>()
+
+    private fun mailboxReplyAllowed(peer: String, query: String): Boolean {
+        val now = System.currentTimeMillis()
+        val key = "$peer $query"
+        val last = mailboxReplyTimes[key]
+        if (last != null && now - last < MAILBOX_REPLY_WINDOW_MS) {
+            Log.d(TAG, "Mailbox reply to $peer for '$query' suppressed: rate limit")
+            return false
+        }
+        mailboxReplyTimes[key] = now
+        return true
+    }
+
+    // Relayed traffic addressed to us is always taken in. The relay_enabled
+    // preference governs carrying other people's traffic onward, which is
+    // the choice an operator actually makes, and it is checked at the point
+    // of forwarding in processRelayBuffer.
     private fun handleRelayFrame(text: String, snr: Int, mode: Int, freq: Float, type: Int) {
-        if (!isRelayEnabled()) return
         val callsign = getConfiguredCallsign() ?: return
         val now = System.currentTimeMillis()
         cleanupRelayBuffers(now)
@@ -3111,25 +3758,33 @@ class JS8EngineService : Service() {
         }
 
         var to = toToken
-        var command: String
-        var payloadStart = index + 1
+        val command: String
+        val payload: String
 
         if (toToken.endsWith(">")) {
             to = toToken.trimEnd('>')
             command = ">"
+            payload = tokens.drop(index + 1).joinToString(" ")
         } else {
             if (index + 1 >= tokens.size) return null
-            command = tokens[index + 1]
-            payloadStart = index + 2
+            // Match the command table rather than taking one token, so the
+            // two-word names survive: MSG TO: and QUERY MSGS would otherwise
+            // split at the space and arrive as MSG and QUERY.
+            val remainder = tokens.drop(index + 1).joinToString(" ")
+            val match = Js8Commands.matchAt(remainder)
+            if (match != null) {
+                command = match.command
+                payload = match.payload
+            } else {
+                // Unknown text keeps the old single-token shape, so free-text
+                // frames reach callers exactly as they did before.
+                command = tokens[index + 1]
+                payload = tokens.drop(index + 2).joinToString(" ")
+            }
         }
 
         if (to.isBlank() || command.isBlank()) return null
         if (from.isBlank() && command != ">") return null
-        val payload = if (payloadStart < tokens.size) {
-            tokens.subList(payloadStart, tokens.size).joinToString(" ")
-        } else {
-            ""
-        }
         return DirectedCommand(from, to, command, payload)
     }
 
@@ -3171,6 +3826,19 @@ class JS8EngineService : Service() {
     private fun isRelayEnabled(): Boolean {
         val prefs = PreferenceManager.getDefaultSharedPreferences(this)
         return prefs.getBoolean(PREF_RELAY_ENABLED, false)
+    }
+
+    // Off by default and separate from autoreply: holding and forwarding
+    // third-party traffic is a regulatory question in some jurisdictions,
+    // so an operator opts into it deliberately.
+    private fun isMailboxEnabled(): Boolean {
+        val prefs = PreferenceManager.getDefaultSharedPreferences(this)
+        return prefs.getBoolean(PREF_MAILBOX_ENABLED, false)
+    }
+
+    private fun isMailboxStrictChecksum(): Boolean {
+        val prefs = PreferenceManager.getDefaultSharedPreferences(this)
+        return prefs.getBoolean(PREF_MAILBOX_STRICT_CHECKSUM, false)
     }
 
     private fun getPreferredTxSubmode(): Int {
@@ -3383,8 +4051,18 @@ class JS8EngineService : Service() {
 
         if (payload.isBlank()) return
 
+        // The *DE* trail is link evidence regardless of whether we forward,
+        // deliver, or drop this traffic. Observing is passive.
+        recordRelayLinkEvidence(buffer.from, payload)
+
         val forwardPayload = buildRelayForwardPayload(payload)
         if (forwardPayload != null) {
+            // Carrying somebody else's traffic is the part an operator opts
+            // into. Mail addressed to us is delivered below either way.
+            if (!isRelayEnabled()) {
+                Log.i(TAG, "Relay forwarding disabled, dropping transit traffic")
+                return
+            }
             val forwardText = if (buffer.from.isNotBlank()) {
                 "$forwardPayload *DE* ${buffer.from}"
             } else {
@@ -3394,18 +4072,172 @@ class JS8EngineService : Service() {
             return
         }
 
-        val trimmed = payload.trimStart()
-        if (trimmed.startsWith("ACK", ignoreCase = true)) {
-            return
-        }
-
         val relayPath = parseRelayPathCallsigns(buffer.from, payload).joinToString(">")
         if (relayPath.isBlank()) return
 
-        val handled = maybeHandleRelayedAutoreply(payload, relayPath, buffer.snr, buffer.submode)
-        if (!handled) {
-            sendRelayMessage("$relayPath ACK", buffer.submode)
+        handleRelayedArrival(payload, relayPath, buffer.snr, buffer.frequency, buffer.submode)
+    }
+
+    /**
+     * A relayed message that reached its destination, which is us. The path
+     * runs nearest hop first, so the station we are really talking to is at
+     * the far end of it. Everything here answers back down the same path.
+     */
+    private fun handleRelayedArrival(
+        payload: String,
+        relayPath: String,
+        snr: Int,
+        freq: Float,
+        submode: Int
+    ) {
+        val callsign = getConfiguredCallsign() ?: return
+        val originator = RelayPath.originatorOfReturnPath(relayPath) ?: return
+
+        // Every hop appended itself, and that trail is what the return path
+        // was built from. It is not part of what the operator wrote, so it
+        // comes off before anything reads the text as a command or a message.
+        val trimmed = stripRelayAttribution(payload)
+        if (trimmed.isBlank()) return
+
+        if (trimmed.equals("ACK", ignoreCase = true) ||
+            trimmed.startsWith("ACK ", ignoreCase = true)
+        ) {
+            Log.i(TAG, "Relayed ACK from $originator via $relayPath")
+            broadcastMessageAcked(originator)
+            return
         }
+
+        if (handleRelayedMailboxReply(originator, relayPath, trimmed, snr, freq)) return
+        if (handleRelayedMailboxQuery(callsign, originator, relayPath, trimmed, snr, freq)) return
+        if (maybeHandleRelayedAutoreply(trimmed, relayPath, snr, submode)) return
+
+        // A question we have no answer for stays a question. Storing "SNR?"
+        // as a chat message would just be noise in the thread.
+        if (trimmed.substringBefore(' ').endsWith("?")) {
+            Log.d(TAG, "Relayed query '$trimmed' from $originator went unanswered")
+            return
+        }
+
+        // Not a command, so it is a message. Thread it under the station that
+        // wrote it rather than the neighbor that handed it over.
+        Log.i(TAG, "Relayed message from $originator via $relayPath: '$trimmed'")
+        broadcastMessageReceived(
+            originator, trimmed, snr, freq, carriersOf(relayPath, endIsOriginator = true), originator
+        )
+        broadcastQueueTx("$relayPath ACK", null, priority = 2)
+    }
+
+    /**
+     * The stations that carried a message, in the order it travelled, which
+     * is what a thread shows. A return path runs the other way and ends at
+     * the station we were talking to, so it is reversed and, when that far
+     * end wrote the message rather than carrying it, trimmed.
+     */
+    private fun carriersOf(relayPath: String, endIsOriginator: Boolean): String? {
+        val hops = RelayPath.parse(relayPath)
+        val carriers = if (endIsOriginator) hops.dropLast(1) else hops
+        return RelayPath.format(carriers.reversed())
+    }
+
+    /** Remove the "*DE* CALL" trail each hop appends, leaving the original text. */
+    private fun stripRelayAttribution(payload: String): String {
+        return relayPathRegex.replace(payload, "").trim()
+    }
+
+    /**
+     * An answer to a mailbox question we asked over this path. Keyed on the
+     * originator, because the station handing it to us is only the near hop.
+     */
+    private fun handleRelayedMailboxReply(
+        originator: String,
+        relayPath: String,
+        payload: String,
+        snr: Int,
+        freq: Float
+    ): Boolean {
+        if (!expectingMailFrom(originator)) return false
+
+        Regex("^YES\\s+MSG\\s+ID\\s+(\\d+)", RegexOption.IGNORE_CASE).find(payload)?.let {
+            val id = it.groupValues[1].toLong()
+            if (!mailboxReplyAllowed(originator, "FETCH $id")) return true
+            pendingMailRetrievals[originator] = System.currentTimeMillis()
+            Log.i(TAG, "Fetching mailbox message $id from $originator via $relayPath")
+            broadcastQueueTx("$relayPath QUERY MSG $id", null, priority = 1)
+            return true
+        }
+
+        if (payload.equals("NO", ignoreCase = true)) {
+            Log.i(TAG, "No mail waiting at $originator (via $relayPath)")
+            broadcastMailboxEmpty(originator)
+            return true
+        }
+
+        if (payload.startsWith("MSG ", ignoreCase = true)) {
+            val body = payload.substring(4).trim()
+            val delivered = parseDeliveredMail(originator, body) ?: return false
+            Log.i(
+                TAG,
+                "Mailbox mail collected via relay: originator=${delivered.originator} " +
+                    "path=$relayPath next=${delivered.nextId}"
+            )
+            // The far end here is the mailbox that held the message, so it
+            // carried it and stays in the list. The author is separate.
+            broadcastMessageReceived(
+                delivered.originator, delivered.text, snr, freq,
+                carriersOf(relayPath, endIsOriginator = false), delivered.originator
+            )
+            delivered.nextId?.let { next ->
+                if (mailboxReplyAllowed(originator, "FETCH $next")) {
+                    pendingMailRetrievals[originator] = System.currentTimeMillis()
+                    broadcastQueueTx("$relayPath QUERY MSG $next", null, priority = 1)
+                }
+            }
+            return true
+        }
+
+        return false
+    }
+
+    /** A mailbox question asked of us over a path. Answers ride back down it. */
+    private fun handleRelayedMailboxQuery(
+        callsign: String,
+        originator: String,
+        relayPath: String,
+        payload: String,
+        snr: Int,
+        freq: Float
+    ): Boolean {
+        if (isSelfCallsign(callsign, originator)) return false
+
+        if (payload.equals("QUERY MSGS", ignoreCase = true) ||
+            payload.equals("QUERY MSGS?", ignoreCase = true)
+        ) {
+            serveQueryMsgs(callsign, originator, groupAddressed = false, replyPath = relayPath)
+            return true
+        }
+
+        Regex("^QUERY\\s+MSG\\s+(\\d+)$", RegexOption.IGNORE_CASE).matchEntire(payload)?.let {
+            serveQueryMsg(callsign, originator, it.groupValues[1].toLong(), replyPath = relayPath)
+            return true
+        }
+
+        if (payload.startsWith("MSG TO:", ignoreCase = true)) {
+            if (!isMailboxEnabled()) {
+                Log.i(TAG, "Relayed mailbox deposit from=$originator ignored: mailbox disabled")
+                return true
+            }
+            completeMailboxDeposit(
+                from = originator,
+                payload = payload.substring("MSG TO:".length).trim(),
+                snr = snr,
+                freq = freq,
+                originatorOverride = originator,
+                replyPath = relayPath
+            )
+            return true
+        }
+
+        return false
     }
 
     private fun buildRelayForwardPayload(message: String): String? {
@@ -3573,25 +4405,30 @@ class JS8EngineService : Service() {
         val payload = text.trim()
         if (payload.isEmpty()) return false
 
-        prepareEngineForTransmit(activeEngine)
-        val ok = activeEngine.transmitMessage(
-            text = payload,
-            myCall = callsign,
-            myGrid = grid,
-            selectedCall = "",
-            submode = submode,
-            audioFrequencyHz = currentTxOffsetHz.toDouble(),
-            txDelaySec = 0.0,
-            forceIdentify = callsign.isNotBlank(),
-            forceData = false
-        )
+        scheduleAtNextTxBoundary(submode, mainHandler) {
+            if (engine !== activeEngine || activeEngine.isTransmitting()) {
+                return@scheduleAtNextTxBoundary
+            }
+            prepareEngineForTransmit(activeEngine)
+            val ok = activeEngine.transmitMessage(
+                text = payload,
+                myCall = callsign,
+                myGrid = grid,
+                selectedCall = "",
+                submode = submode,
+                audioFrequencyHz = currentTxOffsetHz.toDouble(),
+                txDelaySec = TX_BOUNDARY_DELAY_S,
+                forceIdentify = callsign.isNotBlank(),
+                forceData = false
+            )
 
-        if (ok) {
-            updateLastTxMessage(payload, "", submode, currentTxOffsetHz.toDouble())
-            broadcastTxState(TX_STATE_QUEUED)
-            startTxMonitor()
+            if (ok) {
+                updateLastTxMessage(payload, "", submode, currentTxOffsetHz.toDouble())
+                broadcastTxState(TX_STATE_QUEUED)
+                startTxMonitor()
+            }
         }
-        return ok
+        return true
     }
 
     private fun sendAutoReply(
@@ -3614,28 +4451,33 @@ class JS8EngineService : Service() {
         val directedCall = directed?.trim().orEmpty().uppercase()
         if (requireDirected && directedCall.isBlank()) return
 
-        prepareEngineForTransmit(activeEngine)
-        val ok = activeEngine.transmitMessage(
-            text = payloadText,
-            myCall = callsign,
-            myGrid = grid,
-            selectedCall = directedCall,
-            submode = submode,
-            audioFrequencyHz = currentTxOffsetHz.toDouble(),
-            txDelaySec = 0.0,
-            forceIdentify = callsign.isNotBlank(),
-            forceData = forceData
-        )
+        scheduleAtNextTxBoundary(submode, mainHandler) {
+            if (engine !== activeEngine || activeEngine.isTransmitting()) {
+                return@scheduleAtNextTxBoundary
+            }
+            prepareEngineForTransmit(activeEngine)
+            val ok = activeEngine.transmitMessage(
+                text = payloadText,
+                myCall = callsign,
+                myGrid = grid,
+                selectedCall = directedCall,
+                submode = submode,
+                audioFrequencyHz = currentTxOffsetHz.toDouble(),
+                txDelaySec = TX_BOUNDARY_DELAY_S,
+                forceIdentify = callsign.isNotBlank(),
+                forceData = forceData
+            )
 
-        if (ok) {
-            Log.i(TAG, "Autoreply queued: to=$directedCall text='$payloadText'")
-            updateLastTxMessage(payloadText, directedCall, submode, currentTxOffsetHz.toDouble())
-            broadcastTxState(TX_STATE_QUEUED)
-            startTxMonitor()
-        } else {
-            Log.e(TAG, "Autoreply rejected")
-            broadcastError("Failed to start transmit")
-            broadcastTxState(TX_STATE_FAILED)
+            if (ok) {
+                Log.i(TAG, "Autoreply queued: to=$directedCall text='$payloadText'")
+                updateLastTxMessage(payloadText, directedCall, submode, currentTxOffsetHz.toDouble())
+                broadcastTxState(TX_STATE_QUEUED)
+                startTxMonitor()
+            } else {
+                Log.e(TAG, "Autoreply rejected")
+                broadcastError("Failed to start transmit")
+                broadcastTxState(TX_STATE_FAILED)
+            }
         }
     }
 
@@ -3646,6 +4488,47 @@ class JS8EngineService : Service() {
             heardCallsigns[callsign] = now
             pruneHeardEntries(now)
         }
+    }
+
+    /**
+     * Mine one decoded frame for who-hears-whom evidence and store it. Runs
+     * on every decode, addressed to us or not: overheard heartbeat ACKs and
+     * SNR reports between other stations are what the network map is made of.
+     */
+    private fun recordLinkEvidence(text: String, snr: Int) {
+        val callsign = getConfiguredCallsign() ?: return
+        storeLinkObservations(LinkEvidence.fromDecode(callsign, text, snr))
+    }
+
+    /**
+     * Mine a reassembled relay payload's *DE* trail: each hop demonstrably
+     * received a checksummed transfer from the station before it.
+     */
+    private fun recordRelayLinkEvidence(transmitter: String, payload: String) {
+        storeLinkObservations(LinkEvidence.fromRelayChain(transmitter, payload))
+    }
+
+    private fun storeLinkObservations(observations: List<LinkEvidence.Observation>) {
+        if (observations.isEmpty()) return
+        val now = System.currentTimeMillis()
+        val dial = currentDialHz.takeIf { it > 0 }
+        val rows = observations.map {
+            LinkObservationEntity(
+                reporter = it.reporter,
+                heard = it.heard,
+                snr = it.snr,
+                source = it.source.name,
+                dialFreqHz = dial,
+                observedAt = now
+            )
+        }
+        serviceScope.launch { linkRepository.record(rows) }
+    }
+
+    private fun pruneLinkObservations() {
+        val prefs = PreferenceManager.getDefaultSharedPreferences(this)
+        val days = prefs.getString(PREF_LINK_RETENTION_DAYS, "30")?.toLongOrNull() ?: 30L
+        serviceScope.launch { linkRepository.pruneOlderThan(days * 24 * 60 * 60 * 1000L) }
     }
 
     private fun getRecentHeardCallsigns(exclude: Set<String>, limit: Int): List<String> {
@@ -3811,15 +4694,24 @@ class JS8EngineService : Service() {
         private const val TAG = "JS8EngineService"
         private const val PREF_AUTOREPLY_ENABLED = "autoreply_enabled"
         private const val PREF_RELAY_ENABLED = "relay_enabled"
+        private const val PREF_MAILBOX_ENABLED = "mailbox_enabled"
+        // No UI yet: a diagnostic gate for rejecting deposits whose checksum
+        // fails, in case our reassembly disagrees with the desktop's spacing.
+        private const val PREF_MAILBOX_STRICT_CHECKSUM = "mailbox_strict_checksum"
         private const val PREF_TX_SUBMODE = "tx_submode"
         private const val PREF_MY_INFO = "my_info"
         private const val PREF_MY_STATUS = "my_status"
         private const val PREF_PSK_REPORTER = "psk_reporter"
         private const val PREF_TRUSDX_DIAGNOSTICS_ENABLED = "trusdx_diagnostics_enabled"
+        private const val PREF_LINK_RETENTION_DAYS = "link_retention_days"
         private const val HEARD_LIMIT = 4
         private const val HEARD_WINDOW_MS = 15 * 60 * 1000L
         private val HEARD_EXCLUDE_TOKENS = setOf("CQ", "HB", "HEARTBEAT", "ALLCALL", "@ALLCALL")
         private const val RELAY_BUFFER_TIMEOUT_MS = 90_000L
+        // Fire this far before the boundary; the delay must exceed the lead
+        // or the modulator joins the frame already in progress.
+        private const val TX_BOUNDARY_LEAD_MS = 1500L
+        private const val TX_BOUNDARY_DELAY_S = 2.0
         private const val RELAY_FREQUENCY_TOLERANCE_HZ = 10.0f
         private const val RELAY_EOM_MARKER = "\u2662"
         private const val SUBMODE_NORMAL = 0
@@ -3853,12 +4745,29 @@ class JS8EngineService : Service() {
         const val ACTION_ERROR = "com.js8call.example.ACTION_ERROR"
         const val ACTION_TRANSMIT_MESSAGE = "com.js8call.example.ACTION_TRANSMIT_MESSAGE"
         const val ACTION_TX_STATE = "com.js8call.example.ACTION_TX_STATE"
+        const val ACTION_TX_SENT = "com.js8call.example.ACTION_TX_SENT"
+        const val ACTION_TX_PROGRESS = "com.js8call.example.ACTION_TX_PROGRESS"
         const val ACTION_RADIO_FREQUENCY = "com.js8call.example.ACTION_RADIO_FREQUENCY"
         const val ACTION_MESSAGE_RECEIVED = "com.js8call.example.ACTION_MESSAGE_RECEIVED"
+        const val ACTION_MESSAGE_ACKED = "com.js8call.example.ACTION_MESSAGE_ACKED"
+        const val EXTRA_MESSAGE_SILENT = "message_silent"
+        const val ACTION_MAILBOX_EMPTY = "com.js8call.example.ACTION_MAILBOX_EMPTY"
         const val ACTION_QUEUE_TX = "com.js8call.example.ACTION_QUEUE_TX"
         const val ACTION_TIME_SYNC_ONCE = "com.js8call.example.ACTION_TIME_SYNC_ONCE"
         const val ACTION_SET_TIME_DRIFT = "com.js8call.example.ACTION_SET_TIME_DRIFT"
         const val ACTION_TIME_DRIFT = "com.js8call.example.ACTION_TIME_DRIFT"
+        const val ACTION_TIMING_SUGGESTION = "com.js8call.example.ACTION_TIMING_SUGGESTION"
+        const val ACTION_DEBUG_INJECT_TIMING = "com.js8call.example.ACTION_DEBUG_INJECT_TIMING"
+        const val EXTRA_TIMING_KIND = "timing_kind"
+        const val EXTRA_TIMING_STEP = "timing_step"
+        const val EXTRA_TIMING_STEPS = "timing_steps"
+        const val EXTRA_TIMING_PERIOD_MS = "timing_period_ms"
+        const val TIMING_SEARCHING = 0
+        const val TIMING_FOUND = 1
+        const val TIMING_GAVE_UP = 2
+        const val ACTION_RIG_STATUS = "com.js8call.example.ACTION_RIG_STATUS"
+        // Debug builds only; ignored in release. See onStartCommand.
+        const val ACTION_DEBUG_INJECT_DECODE = "com.js8call.example.ACTION_DEBUG_INJECT_DECODE"
 
         // Engine states
         const val STATE_STOPPED = "stopped"
@@ -3878,6 +4787,7 @@ class JS8EngineService : Service() {
         const val EXTRA_MODE = "mode"
         const val EXTRA_DRIFT_MS = "drift_ms"
         const val EXTRA_TIME_DRIFT_MS = "time_drift_ms"
+        const val EXTRA_RIG_CONNECTED = "rig_connected"
         const val EXTRA_BINS = "bins"
         const val EXTRA_BIN_HZ = "bin_hz"
         const val EXTRA_POWER_DB = "power_db"
@@ -3897,6 +4807,10 @@ class JS8EngineService : Service() {
         const val EXTRA_TX_FORCE_IDENTIFY = "tx_force_identify"
         const val EXTRA_TX_FORCE_DATA = "tx_force_data"
         const val EXTRA_TX_STATE = "tx_state"
+        const val EXTRA_TX_FRAME_INDEX = "tx_frame_index"
+        const val EXTRA_TX_FRAME_COUNT = "tx_frame_count"
+        const val EXTRA_TX_SENT_TEXT = "tx_sent_text"
+        const val EXTRA_TX_SENT_FREQ = "tx_sent_freq"
         const val EXTRA_RADIO_FREQUENCY_HZ = "radio_frequency_hz"
         const val EXTRA_MESSAGE_FROM = "message_from"
         const val EXTRA_MESSAGE_TEXT = "message_text"
@@ -3907,6 +4821,10 @@ class JS8EngineService : Service() {
         const val EXTRA_QUEUE_TX_TEXT = "queue_tx_text"
         const val EXTRA_QUEUE_TX_DIRECTED = "queue_tx_directed"
         const val EXTRA_QUEUE_TX_PRIORITY = "queue_tx_priority"
+        // A mailbox delivery in flight: the row to mark once the send finishes.
+        // A recipient callsign means a group message, recorded per callsign.
+        const val EXTRA_QUEUE_TX_MAILBOX_ID = "queue_tx_mailbox_id"
+        const val EXTRA_QUEUE_TX_MAILBOX_RECIPIENT = "queue_tx_mailbox_recipient"
         const val PREF_TRANSMIT_MODE = "transmit_mode"
         const val PREF_HEARTBEAT_INTERVAL = "heartbeat_interval"
         const val PREF_TIME_SYNC_AUTO = "time_sync_auto"
@@ -3934,6 +4852,7 @@ class JS8EngineService : Service() {
         private const val PTT_COMMAND_RETRIES = 1
         private const val TX_PREKEY_MONITOR_INTERVAL_MS = 25L
         private const val TX_MONITOR_INTERVAL_MS = 250L
+        private const val RIG_STATUS_POLL_INTERVAL_MS = 2000L
         private const val SCO_START_WAIT_INTERVAL_MS = 200L
         private const val SCO_START_MAX_ATTEMPTS = 10
         private const val SCO_SILENCE_CHECK_DELAY_MS = 2000L

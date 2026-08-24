@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Commands that make sense aimed at a group. The per-station queries
+     (SNR?, GRID?, INFO?) do not. -->
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/cmd_query_msgs"
+        android:title="@string/cmd_query_msgs" />
+</menu>

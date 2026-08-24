@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- M3 list item: avatar, callsign + signal details, trailing age and star. -->
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="?attr/selectableItemBackground"
+    android:minHeight="72dp"
+    android:paddingStart="16dp"
+    android:paddingEnd="4dp"
+    android:paddingVertical="12dp">
+
+    <FrameLayout
+        android:id="@+id/avatar_frame"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:background="@drawable/avatar_circle_background"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
+
+        <TextView
+            android:id="@+id/avatar_text"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:textColor="@color/md_theme_light_onPrimary"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            tools:text="K" />
+
+    </FrameLayout>
+
+    <TextView
+        android:id="@+id/callsign_text"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="16dp"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:textAppearance="?attr/textAppearanceTitleMedium"
+        app:layout_constraintStart_toEndOf="@id/avatar_frame"
+        app:layout_constraintTop_toTopOf="@id/avatar_frame"
+        tools:text="KN4CRD" />
+
+    <!-- Shown once the station has sent us a directed message -->
+    <ImageView
+        android:id="@+id/hears_us_icon"
+        android:layout_width="16dp"
+        android:layout_height="16dp"
+        android:layout_marginStart="6dp"
+        android:contentDescription="@string/contact_hears_us"
+        android:src="@drawable/ic_done_all"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="@id/callsign_text"
+        app:layout_constraintStart_toEndOf="@id/callsign_text"
+        app:layout_constraintTop_toTopOf="@id/callsign_text"
+        app:tint="?attr/colorPrimary"
+        tools:visibility="visible" />
+
+    <!-- Age, top right like a message timestamp -->
+    <TextView
+        android:id="@+id/age_text"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginEnd="8dp"
+        android:textAppearance="?attr/textAppearanceLabelSmall"
+        android:textColor="?attr/colorOnSurfaceVariant"
+        app:layout_constraintEnd_toStartOf="@id/star_button"
+        app:layout_constraintTop_toTopOf="@id/callsign_text"
+        app:layout_constraintBottom_toBottomOf="@id/callsign_text"
+        tools:text="3m" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/star_button"
+        style="@style/Widget.Material3.Button.IconButton"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:contentDescription="@string/contact_star"
+        app:icon="@drawable/ic_star_outline"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <!-- SNR · offset · grid -->
+    <TextView
+        android:id="@+id/detail_text"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="16dp"
+        android:layout_marginTop="2dp"
+        android:layout_marginEnd="8dp"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:textAppearance="?attr/textAppearanceBodyMedium"
+        android:textColor="?attr/colorOnSurfaceVariant"
+        app:layout_constraintEnd_toStartOf="@id/age_text"
+        app:layout_constraintStart_toEndOf="@id/avatar_frame"
+        app:layout_constraintTop_toBottomOf="@id/callsign_text"
+        tools:text="SNR -8 dB  ·  1500 Hz  ·  EM73" />
+
+    <!-- Station info from an INFO reply -->
+    <TextView
+        android:id="@+id/info_text"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="16dp"
+        android:layout_marginTop="2dp"
+        android:layout_marginEnd="8dp"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:textAppearance="?attr/textAppearanceBodySmall"
+        android:textColor="?attr/colorOnSurfaceVariant"
+        android:visibility="gone"
+        app:layout_constraintEnd_toStartOf="@id/star_button"
+        app:layout_constraintStart_toEndOf="@id/avatar_frame"
+        app:layout_constraintTop_toBottomOf="@id/detail_text"
+        tools:text="QRP 5W VERTICAL OHIO"
+        tools:visibility="visible" />
+
+    <!-- User note -->
+    <TextView
+        android:id="@+id/comment_text"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="16dp"
+        android:layout_marginTop="2dp"
+        android:layout_marginEnd="8dp"
+        android:ellipsize="end"
+        android:maxLines="2"
+        android:textAppearance="?attr/textAppearanceBodySmall"
+        android:textColor="?attr/colorOnSurfaceVariant"
+        android:textStyle="italic"
+        android:visibility="gone"
+        app:layout_constraintEnd_toStartOf="@id/star_button"
+        app:layout_constraintStart_toEndOf="@id/avatar_frame"
+        app:layout_constraintTop_toBottomOf="@id/info_text"
+        tools:text="Regular sked partner, QRP from Ohio"
+        tools:visibility="visible" />
+
+</androidx.constraintlayout.widget.ConstraintLayout>

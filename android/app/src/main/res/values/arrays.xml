@@ -101,4 +101,22 @@
         <item>30</item>
         <item>60</item>
     </string-array>
+    <string-array name="distance_units_entries">
+        <item>Miles</item>
+        <item>Kilometers</item>
+    </string-array>
+    <string-array name="distance_units_values">
+        <item>mi</item>
+        <item>km</item>
+    </string-array>
+    <string-array name="link_retention_entries">
+        <item>7 days</item>
+        <item>30 days</item>
+        <item>90 days</item>
+    </string-array>
+    <string-array name="link_retention_values">
+        <item>7</item>
+        <item>30</item>
+        <item>90</item>
+    </string-array>
 </resources>

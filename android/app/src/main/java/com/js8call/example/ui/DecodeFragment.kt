@@ -13,15 +13,15 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import com.google.android.material.floatingactionbutton.FloatingActionButton
-import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.google.android.material.snackbar.Snackbar
 import com.js8call.example.R
 
 /**
  * Fragment showing list of decoded messages.
  */
-class DecodeFragment : Fragment() {
+open class DecodeFragment : Fragment() {
+
+    protected open val layoutRes: Int = R.layout.fragment_decodes
 
     private lateinit var viewModel: DecodeViewModel
     private lateinit var transmitViewModel: TransmitViewModel
@@ -29,16 +29,20 @@ class DecodeFragment : Fragment() {
 
     private lateinit var recyclerView: RecyclerView
     private lateinit var emptyText: TextView
-    private lateinit var clearFab: FloatingActionButton
+    private var clearFab: View? = null
 
     private var myGroups: Set<String> = emptySet()
+
+    // Row that currently carries the live TX label, so it can be cleared
+    // when a newer outgoing bubble arrives.
+    private var labeledPosition = -1
 
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
         savedInstanceState: Bundle?
     ): View? {
-        return inflater.inflate(R.layout.fragment_decodes, container, false)
+        return inflater.inflate(layoutRes, container, false)
     }
 
     override fun onStart() {
@@ -79,15 +83,48 @@ class DecodeFragment : Fragment() {
             }
         }
         recyclerView.adapter = adapter
+        // Pin content to the bottom, texting style
+        (recyclerView.layoutManager as? androidx.recyclerview.widget.LinearLayoutManager)?.stackFromEnd = true
+        // No cross-fade on rebinds; the TX label ticks every second
+        (recyclerView.itemAnimator as? androidx.recyclerview.widget.SimpleItemAnimator)
+            ?.supportsChangeAnimations = false
 
-        // Set up FAB
-        clearFab.setOnClickListener {
+        // Set up the clear button (absent in the bare layout)
+        clearFab?.setOnClickListener {
             confirmClearDecodes()
+        }
+
+        // Header quick actions (also absent in the bare layout; the All
+        // activity thread has its own compose bar for these)
+        view.findViewById<View>(R.id.cq_button)?.setOnClickListener {
+            queueBroadcast("CQ CQ CQ")
+        }
+        view.findViewById<View>(R.id.heartbeat_button)?.setOnClickListener {
+            queueBroadcast("HB")
+        }
+        view.findViewById<View>(R.id.open_all_activity_button)?.setOnClickListener {
+            findNavController().navigate(R.id.navigation_everything)
         }
 
         // Observe decodes
         viewModel.decodes.observe(viewLifecycleOwner) { decodes ->
-            adapter.submitList(decodes)
+            // Stick to the newest message unless the user scrolled up to read history.
+            val wasAtBottom = !recyclerView.canScrollVertically(1)
+            val firstLoad = adapter.itemCount == 0
+
+            // submitList diffs on a background thread; scroll in its commit
+            // callback so the new row exists when the scroll runs.
+            adapter.submitList(decodes) {
+                // The newest-outgoing position may have shifted; move the TX label with it
+                updateTxLabel()
+                if (decodes.isNotEmpty() && (wasAtBottom || firstLoad)) {
+                    if (firstLoad) {
+                        recyclerView.scrollToPosition(decodes.size - 1)
+                    } else {
+                        recyclerView.smoothScrollToPosition(decodes.size - 1)
+                    }
+                }
+            }
 
             // Show/hide empty state
             if (decodes.isEmpty()) {
@@ -96,11 +133,36 @@ class DecodeFragment : Fragment() {
             } else {
                 emptyText.visibility = View.GONE
                 recyclerView.visibility = View.VISIBLE
-
-                // Auto-scroll to top for new messages
-                recyclerView.scrollToPosition(0)
             }
         }
+
+        // TX frame countdown and progress on the newest outgoing bubble
+        transmitViewModel.txCountdownSeconds.observe(viewLifecycleOwner) { updateTxLabel() }
+        transmitViewModel.txFrameProgress.observe(viewLifecycleOwner) { updateTxLabel() }
+    }
+
+    private fun updateTxLabel() {
+        val countdown = transmitViewModel.txCountdownSeconds.value
+        val progress = transmitViewModel.txFrameProgress.value
+        val label = when {
+            countdown == null -> null
+            progress != null && progress.second > 1 ->
+                getString(R.string.decodes_tx_countdown_frames, progress.first, progress.second, countdown)
+            else -> getString(R.string.decodes_tx_countdown, countdown)
+        }
+        val position = adapter.lastOutgoingPosition()
+        if (label == adapter.txLabel && position == labeledPosition) return
+        adapter.txLabel = label
+        // Clear the label off the bubble that used to be newest
+        if (labeledPosition >= 0 && labeledPosition != position &&
+            labeledPosition < adapter.itemCount
+        ) {
+            adapter.notifyItemChanged(labeledPosition, DecodeListAdapter.PAYLOAD_TX_LABEL)
+        }
+        if (position >= 0) {
+            adapter.notifyItemChanged(position, DecodeListAdapter.PAYLOAD_TX_LABEL)
+        }
+        labeledPosition = if (label != null) position else -1
     }
 
     private fun showDecodeOptions(decode: com.js8call.example.model.DecodedMessage) {
@@ -149,13 +211,9 @@ class DecodeFragment : Fragment() {
             Snackbar.make(requireView(), "No callsign found", Snackbar.LENGTH_SHORT).show()
             return
         }
-        transmitViewModel.setDirectedTo(callsign)
-        val bottomNav = activity?.findViewById<BottomNavigationView>(R.id.bottom_navigation)
-        if (bottomNav != null) {
-            bottomNav.selectedItemId = R.id.navigation_transmit
-        } else {
-            findNavController().navigate(R.id.navigation_transmit)
-        }
+        // Open the DM thread with this station
+        val bundle = Bundle().apply { putString("callsign", callsign) }
+        findNavController().navigate(R.id.navigation_conversation, bundle)
     }
 
     private fun extractCallsign(text: String): String? {
@@ -177,6 +235,23 @@ class DecodeFragment : Fragment() {
         if (!token.any { it.isLetter() }) return false
         if (!token.any { it.isDigit() }) return false
         return true
+    }
+
+    private fun queueBroadcast(text: String) {
+        val monitorViewModel = ViewModelProvider(requireActivity())[MonitorViewModel::class.java]
+        if (monitorViewModel.status.value?.state != com.js8call.example.model.EngineState.RUNNING) {
+            Snackbar.make(requireView(), R.string.decodes_start_first, Snackbar.LENGTH_SHORT).show()
+            return
+        }
+        val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext())
+        if (prefs.getString("callsign", "")?.isNotBlank() != true) {
+            Snackbar.make(requireView(), R.string.error_callsign_required, Snackbar.LENGTH_LONG).show()
+            return
+        }
+        transmitViewModel.queueMessage(text, directed = null, priority = 1)
+        androidx.localbroadcastmanager.content.LocalBroadcastManager.getInstance(requireContext())
+            .sendBroadcast(android.content.Intent(com.js8call.example.MainActivity.ACTION_PROCESS_TX_QUEUE))
+        Snackbar.make(requireView(), getString(R.string.decodes_queued, text), Snackbar.LENGTH_SHORT).show()
     }
 
     private fun confirmClearDecodes() {

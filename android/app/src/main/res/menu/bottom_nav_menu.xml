@@ -2,26 +2,21 @@
 <menu xmlns:android="http://schemas.android.com/apk/res/android">
     <item
         android:id="@+id/navigation_monitor"
-        android:icon="@android:drawable/ic_menu_view"
+        android:icon="@drawable/ic_graphic_eq"
         android:title="@string/nav_monitor" />
 
     <item
-        android:id="@+id/navigation_decodes"
-        android:icon="@android:drawable/ic_menu_sort_by_size"
-        android:title="@string/nav_decodes" />
-
-    <item
         android:id="@+id/navigation_messages"
-        android:icon="@android:drawable/ic_dialog_email"
+        android:icon="@drawable/ic_chat_bubble"
         android:title="@string/nav_messages" />
 
     <item
-        android:id="@+id/navigation_transmit"
-        android:icon="@android:drawable/ic_menu_send"
-        android:title="@string/nav_transmit" />
+        android:id="@+id/navigation_contacts"
+        android:icon="@drawable/ic_group"
+        android:title="@string/nav_contacts" />
 
     <item
         android:id="@+id/navigation_settings"
-        android:icon="@android:drawable/ic_menu_preferences"
+        android:icon="@drawable/ic_settings"
         android:title="@string/nav_settings" />
 </menu>

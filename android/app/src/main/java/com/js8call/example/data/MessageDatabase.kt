@@ -4,18 +4,35 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 
 /**
- * Room database for storing JS8 messages.
+ * Room database for storing JS8 messages and heard-station contacts.
  */
 @Database(
-    entities = [MessageEntity::class],
-    version = 2,
-    exportSchema = false
+    entities = [
+        MessageEntity::class,
+        ContactEntity::class,
+        MailboxEntity::class,
+        MailboxGroupDeliveryEntity::class,
+        ConversationSettingsEntity::class,
+        LinkObservationEntity::class
+    ],
+    version = 7,
+    exportSchema = true
 )
 abstract class MessageDatabase : RoomDatabase() {
 
     abstract fun messageDao(): MessageDao
+
+    abstract fun contactDao(): ContactDao
+
+    abstract fun mailboxDao(): MailboxDao
+
+    abstract fun conversationSettingsDao(): ConversationSettingsDao
+
+    abstract fun linkObservationDao(): LinkObservationDao
 
     companion object {
         private const val DATABASE_NAME = "js8_messages.db"
@@ -29,13 +46,127 @@ abstract class MessageDatabase : RoomDatabase() {
             }
         }
 
+        // Adding the contacts table must not wipe stored messages.
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `contacts` (
+                        `callsign` TEXT NOT NULL,
+                        `lastHeard` INTEGER NOT NULL,
+                        `snr` INTEGER,
+                        `offset` REAL,
+                        `grid` TEXT,
+                        `info` TEXT,
+                        `heardUs` INTEGER NOT NULL DEFAULT 0,
+                        `starred` INTEGER NOT NULL DEFAULT 0,
+                        `comment` TEXT,
+                        PRIMARY KEY(`callsign`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_contacts_lastHeard` ON `contacts` (`lastHeard`)")
+            }
+        }
+
+        // The store-and-forward mailbox: messages held for other stations,
+        // with per-callsign delivery tracking for group destinations.
+        internal val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `mailbox_messages` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `originator` TEXT NOT NULL,
+                        `destination` TEXT NOT NULL,
+                        `text` TEXT NOT NULL,
+                        `receivedAt` INTEGER NOT NULL,
+                        `originatedAt` INTEGER,
+                        `relayPath` TEXT,
+                        `snr` INTEGER,
+                        `offsetHz` REAL,
+                        `state` INTEGER NOT NULL,
+                        `deliveredAt` INTEGER,
+                        `origin` INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_mailbox_messages_destination` ON `mailbox_messages` (`destination`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_mailbox_messages_state` ON `mailbox_messages` (`state`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_mailbox_messages_receivedAt` ON `mailbox_messages` (`receivedAt`)")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `mailbox_group_delivery` (
+                        `msgId` INTEGER NOT NULL,
+                        `callsign` TEXT NOT NULL,
+                        `deliveredAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`msgId`, `callsign`),
+                        FOREIGN KEY(`msgId`) REFERENCES `mailbox_messages`(`id`)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
+
+        // Per-thread settings, currently just the relay path. Threads are
+        // derived from the messages table rather than stored, so a thread
+        // setting had nowhere to live before this.
+        internal val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `conversation_settings` (
+                        `conversationId` TEXT NOT NULL,
+                        `relayPath` TEXT,
+                        PRIMARY KEY(`conversationId`)
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
+
+        // A station can be given a name, which is what the app shows in place
+        // of the callsign. Nullable, so every existing row stays valid.
+        internal val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `contacts` ADD COLUMN `name` TEXT")
+            }
+        }
+
+        // Link observations: append-only who-hears-whom evidence mined from
+        // decoded traffic, feeding the network map and relay recommendations.
+        internal val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `link_observations` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `reporter` TEXT NOT NULL,
+                        `heard` TEXT NOT NULL,
+                        `snr` INTEGER,
+                        `source` TEXT NOT NULL,
+                        `dialFreqHz` INTEGER,
+                        `observedAt` INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_link_observations_reporter` ON `link_observations` (`reporter`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_link_observations_heard` ON `link_observations` (`heard`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_link_observations_observedAt` ON `link_observations` (`observedAt`)")
+            }
+        }
+
         private fun buildDatabase(context: Context): MessageDatabase {
+            // No destructive fallback: this database now holds traffic we
+            // promised a third party we would forward, so a migration gap
+            // must fail loudly instead of silently wiping it.
             return Room.databaseBuilder(
                 context.applicationContext,
                 MessageDatabase::class.java,
                 DATABASE_NAME
             )
-                .fallbackToDestructiveMigration()
+                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                 .build()
         }
     }

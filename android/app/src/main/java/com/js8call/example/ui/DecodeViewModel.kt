@@ -5,9 +5,12 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
+import androidx.lifecycle.viewModelScope
 import androidx.preference.PreferenceManager
+import com.js8call.example.data.ContactRepository
 import com.js8call.example.model.DecodedMessage
 import com.js8call.example.model.MessageBuffer
+import kotlinx.coroutines.launch
 import java.io.File
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -85,11 +88,11 @@ class DecodeViewModel(application: Application) : AndroidViewModel(application) 
      * Add a new decoded message.
      */
     fun addDecode(message: DecodedMessage) {
-        allDecodes.add(0, message) // Add to beginning
+        allDecodes.add(message) // Newest at the end, like a texting thread
 
-        // Limit size
+        // Limit size by dropping the oldest
         if (allDecodes.size > maxDecodes) {
-            allDecodes.removeAt(allDecodes.size - 1)
+            allDecodes.removeAt(0)
         }
 
         applyFilter()
@@ -130,7 +133,8 @@ class DecodeViewModel(application: Application) : AndroidViewModel(application) 
                         quality = obj.optDouble("quality").toFloat(),
                         mode = obj.optInt("mode"),
                         driftMs = obj.optInt("driftMs"),
-                        timestamp = obj.optLong("timestamp", System.currentTimeMillis())
+                        timestamp = obj.optLong("timestamp", System.currentTimeMillis()),
+                        outgoing = obj.optBoolean("outgoing")
                     )
                 )
             }
@@ -141,7 +145,8 @@ class DecodeViewModel(application: Application) : AndroidViewModel(application) 
 
         if (loaded.isEmpty()) return
         allDecodes.clear()
-        allDecodes.addAll(loaded.take(maxDecodes))
+        // Sort oldest to newest so files saved before the newest-last change load correctly.
+        allDecodes.addAll(loaded.sortedBy { it.timestamp }.takeLast(maxDecodes))
         applyFilter()
     }
 
@@ -231,14 +236,55 @@ class DecodeViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     /**
+     * Add a message this station transmitted. It skips multipart buffering
+     * because the full text is known at submit time.
+     */
+    fun addOutgoing(text: String, frequency: Float) {
+        if (text.isBlank()) return
+        val cal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"))
+        val utc = cal.get(java.util.Calendar.HOUR_OF_DAY) * 10000 +
+            cal.get(java.util.Calendar.MINUTE) * 100 +
+            cal.get(java.util.Calendar.SECOND)
+        addDecodeToDisplay(
+            DecodedMessage(
+                utc = utc,
+                snr = 0,
+                dt = 0f,
+                frequency = frequency,
+                text = text,
+                type = 3,
+                quality = 1f,
+                mode = 0,
+                outgoing = true
+            )
+        )
+    }
+
+    /**
      * Add a decoded message directly to the display list.
      */
     private fun addDecodeToDisplay(message: DecodedMessage) {
-        allDecodes.add(0, message) // Add to beginning
+        // Every heard station lands in the contact list
+        if (!message.outgoing) {
+            val app = getApplication<Application>()
+            val myCallsign = PreferenceManager.getDefaultSharedPreferences(app)
+                .getString("callsign", null)
+            viewModelScope.launch {
+                ContactRepository.getInstance(app).recordDecode(
+                    text = message.text,
+                    snr = message.snr,
+                    offsetHz = message.frequency,
+                    timestamp = message.timestamp,
+                    myCallsign = myCallsign
+                )
+            }
+        }
 
-        // Limit size
+        allDecodes.add(message) // Newest at the end, like a texting thread
+
+        // Limit size by dropping the oldest
         if (allDecodes.size > maxDecodes) {
-            allDecodes.removeAt(allDecodes.size - 1)
+            allDecodes.removeAt(0)
         }
 
         applyFilter()
@@ -403,6 +449,7 @@ class DecodeViewModel(application: Application) : AndroidViewModel(application) 
             obj.put("mode", decode.mode)
             obj.put("driftMs", decode.driftMs)
             obj.put("timestamp", decode.timestamp)
+            obj.put("outgoing", decode.outgoing)
             arr.put(obj)
         }
 
@@ -415,9 +462,10 @@ class DecodeViewModel(application: Application) : AndroidViewModel(application) 
 
     /**
      * Sender callsigns from the in-memory decode list, newest first.
+     * The list stores newest last, so iterate in reverse.
      */
     fun heardCallsigns(): List<String> {
-        return allDecodes.mapNotNull { senderCallsign(it.text) }.distinct()
+        return allDecodes.asReversed().mapNotNull { senderCallsign(it.text) }.distinct()
     }
 
     private fun senderCallsign(text: String): String? {

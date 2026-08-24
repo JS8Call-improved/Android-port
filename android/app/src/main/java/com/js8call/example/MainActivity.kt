@@ -8,18 +8,27 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.view.MenuItem
+import android.view.View
 import android.view.WindowManager
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.lifecycleScope
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
+import kotlinx.coroutines.launch
+import androidx.navigation.NavController
 import androidx.navigation.fragment.NavHostFragment
+import androidx.navigation.ui.NavigationUI
 import androidx.navigation.ui.setupWithNavController
 import androidx.preference.PreferenceManager
 import com.google.android.material.bottomnavigation.BottomNavigationView
+import com.google.android.material.navigation.NavigationBarView
 import com.google.android.material.snackbar.Snackbar
+import com.js8call.example.data.MailboxRepository
 import com.js8call.example.model.EngineState
+import com.js8call.example.model.TransmitMessage
 import com.js8call.example.service.JS8EngineService
 import com.js8call.example.ui.DecodeViewModel
 import com.js8call.example.ui.MessagesViewModel
@@ -28,12 +37,13 @@ import com.js8call.example.ui.TransmitViewModel
 
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var bottomNav: BottomNavigationView
+    private lateinit var bottomNav: NavigationBarView
     private lateinit var decodeViewModel: DecodeViewModel
     private lateinit var monitorViewModel: MonitorViewModel
     private var spectrumBroadcastCount: Long = 0
     private lateinit var messagesViewModel: MessagesViewModel
     private lateinit var transmitViewModel: TransmitViewModel
+    private val mailboxRepository by lazy { MailboxRepository(this) }
 
     private val decodeReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -58,13 +68,38 @@ class MainActivity : AppCompatActivity() {
                     val freq = intent.getFloatExtra(JS8EngineService.EXTRA_MESSAGE_FREQ, 0f)
                     val relayPath = intent.getStringExtra(JS8EngineService.EXTRA_MESSAGE_RELAY_PATH)
                     val conversationId = intent.getStringExtra(JS8EngineService.EXTRA_MESSAGE_CONVERSATION_ID) ?: from
-                    messagesViewModel.insertIncomingMessage(conversationId, from, msgText, snr, freq, relayPath)
+                    val silent = intent.getBooleanExtra(JS8EngineService.EXTRA_MESSAGE_SILENT, false)
+                    messagesViewModel.insertIncomingMessage(
+                        conversationId, from, msgText, snr, freq, relayPath,
+                        // Other-group traffic arrives read, so it never
+                        // counts toward the tab badge.
+                        markRead = silent
+                    )
+                }
+                JS8EngineService.ACTION_MESSAGE_ACKED -> {
+                    val from = intent.getStringExtra(JS8EngineService.EXTRA_MESSAGE_FROM) ?: return
+                    messagesViewModel.markLatestSentAcked(from)
+                }
+                JS8EngineService.ACTION_MAILBOX_EMPTY -> {
+                    val station = intent.getStringExtra(JS8EngineService.EXTRA_MESSAGE_FROM) ?: return
+                    Snackbar.make(
+                        findViewById(android.R.id.content),
+                        getString(R.string.mailbox_none_waiting, station),
+                        Snackbar.LENGTH_LONG
+                    ).show()
                 }
                 JS8EngineService.ACTION_QUEUE_TX -> {
                     val text = intent.getStringExtra(JS8EngineService.EXTRA_QUEUE_TX_TEXT) ?: return
                     val directed = intent.getStringExtra(JS8EngineService.EXTRA_QUEUE_TX_DIRECTED)
                     val priority = intent.getIntExtra(JS8EngineService.EXTRA_QUEUE_TX_PRIORITY, 0)
-                    transmitViewModel.queueMessage(text, directed, priority, clearComposed = false)
+                    val mailboxId = intent.getLongExtra(JS8EngineService.EXTRA_QUEUE_TX_MAILBOX_ID, -1L)
+                        .takeIf { it > 0 }
+                    val mailboxRecipient =
+                        intent.getStringExtra(JS8EngineService.EXTRA_QUEUE_TX_MAILBOX_RECIPIENT)
+                    transmitViewModel.queueMessage(
+                        text, directed, priority,
+                        mailboxId = mailboxId, mailboxRecipient = mailboxRecipient
+                    )
                     // Trigger queue processing
                     processNextTxIfIdle()
                 }
@@ -72,11 +107,27 @@ class MainActivity : AppCompatActivity() {
                     val state = intent.getStringExtra(JS8EngineService.EXTRA_TX_STATE)
                     when (state) {
                         JS8EngineService.TX_STATE_FINISHED, JS8EngineService.TX_STATE_FAILED -> {
-                            // Update ViewModel state first
+                            // Update ViewModel state first; a finished send that
+                            // belongs to a conversation gets its bubble updated.
                             if (state == JS8EngineService.TX_STATE_FINISHED) {
-                                transmitViewModel.transmissionComplete()
+                                val finished = transmitViewModel.transmissionComplete()
+                                finished?.dbId?.let { dbId ->
+                                    messagesViewModel.updateMessageStatus(
+                                        dbId,
+                                        com.js8call.example.data.MessageEntity.STATUS_SENT
+                                    )
+                                }
+                                // Mailbox mail counts as delivered only once
+                                // its transmission finished; a failed send
+                                // stays held for the next query.
+                                finished?.let { markMailboxDelivered(it) }
                             } else {
-                                transmitViewModel.transmissionFailed()
+                                transmitViewModel.transmissionFailed()?.dbId?.let { dbId ->
+                                    messagesViewModel.updateMessageStatus(
+                                        dbId,
+                                        com.js8call.example.data.MessageEntity.STATUS_FAILED
+                                    )
+                                }
                             }
                             // Process next item in queue after TX completes
                             processNextTxIfIdle()
@@ -88,6 +139,16 @@ class MainActivity : AppCompatActivity() {
                             transmitViewModel.startTransmitting()
                         }
                     }
+                }
+                JS8EngineService.ACTION_TX_PROGRESS -> {
+                    val frameIndex = intent.getIntExtra(JS8EngineService.EXTRA_TX_FRAME_INDEX, 0)
+                    val frameCount = intent.getIntExtra(JS8EngineService.EXTRA_TX_FRAME_COUNT, 0)
+                    transmitViewModel.setTxProgress(frameIndex, frameCount)
+                }
+                JS8EngineService.ACTION_TX_SENT -> {
+                    val text = intent.getStringExtra(JS8EngineService.EXTRA_TX_SENT_TEXT) ?: return
+                    val freq = intent.getFloatExtra(JS8EngineService.EXTRA_TX_SENT_FREQ, 0f)
+                    decodeViewModel.addOutgoing(text, freq)
                 }
                 ACTION_PROCESS_TX_QUEUE -> {
                     android.util.Log.d("MainActivity", "Received ACTION_PROCESS_TX_QUEUE")
@@ -147,6 +208,28 @@ class MainActivity : AppCompatActivity() {
                     val driftMs = intent.getLongExtra(JS8EngineService.EXTRA_TIME_DRIFT_MS, 0L)
                     monitorViewModel.updateTimeDrift(driftMs)
                 }
+                JS8EngineService.ACTION_TIMING_SUGGESTION -> {
+                    val kind = intent.getIntExtra(JS8EngineService.EXTRA_TIMING_KIND, 0)
+                    monitorViewModel.updateTimingSuggestion(
+                        if (kind == JS8EngineService.TIMING_GAVE_UP) {
+                            null
+                        } else {
+                            MonitorViewModel.TimingSuggestion(
+                                kind = kind,
+                                driftMs = intent.getLongExtra(JS8EngineService.EXTRA_TIME_DRIFT_MS, 0L),
+                                step = intent.getIntExtra(JS8EngineService.EXTRA_TIMING_STEP, 0),
+                                steps = intent.getIntExtra(JS8EngineService.EXTRA_TIMING_STEPS, 0),
+                                periodMs = intent.getIntExtra(
+                                    JS8EngineService.EXTRA_TIMING_PERIOD_MS, 15_000
+                                )
+                            )
+                        }
+                    )
+                }
+                JS8EngineService.ACTION_RIG_STATUS -> {
+                    val connected = intent.getBooleanExtra(JS8EngineService.EXTRA_RIG_CONNECTED, false)
+                    monitorViewModel.updateRigConnected(connected)
+                }
             }
         }
     }
@@ -174,16 +257,28 @@ class MainActivity : AppCompatActivity() {
         val navHostFragment = supportFragmentManager
             .findFragmentById(R.id.nav_host_fragment) as NavHostFragment
         val navController = navHostFragment.navController
+        mainNavController = navController
 
         bottomNav.setupWithNavController(navController)
         navController.addOnDestinationChangedListener { _, destination, _ ->
-            if (destination.id == R.id.navigation_conversation) {
+            renderTimingSurface()
+            if (destination.id == R.id.navigation_conversation ||
+                destination.id == R.id.navigation_everything
+            ) {
                 bottomNav.menu.findItem(R.id.navigation_messages).isChecked = true
             }
         }
+        // Both listeners share one handler. A tab is checked only when its own
+        // destination is showing, so a tap arrives as select or reselect
+        // depending on where the user is.
+        bottomNav.setOnItemSelectedListener { item -> onNavItemTapped(navController, item) }
+        bottomNav.setOnItemReselectedListener { item -> onNavItemTapped(navController, item) }
+
+        openThreadFromNotification(intent, navController)
 
         decodeViewModel = ViewModelProvider(this)[DecodeViewModel::class.java]
         monitorViewModel = ViewModelProvider(this)[MonitorViewModel::class.java]
+        observeTimingSuggestion()
         messagesViewModel = ViewModelProvider(this)[MessagesViewModel::class.java]
         transmitViewModel = ViewModelProvider(this)[TransmitViewModel::class.java]
         decodeViewModel.loadPersistedDecodesIfEnabled()
@@ -214,8 +309,12 @@ class MainActivity : AppCompatActivity() {
         val filter = IntentFilter().apply {
             addAction(JS8EngineService.ACTION_DECODE)
             addAction(JS8EngineService.ACTION_MESSAGE_RECEIVED)
+            addAction(JS8EngineService.ACTION_MESSAGE_ACKED)
+            addAction(JS8EngineService.ACTION_MAILBOX_EMPTY)
             addAction(JS8EngineService.ACTION_QUEUE_TX)
             addAction(JS8EngineService.ACTION_TX_STATE)
+            addAction(JS8EngineService.ACTION_TX_SENT)
+            addAction(JS8EngineService.ACTION_TX_PROGRESS)
             addAction(ACTION_PROCESS_TX_QUEUE)
         }
         LocalBroadcastManager.getInstance(this)
@@ -228,6 +327,8 @@ class MainActivity : AppCompatActivity() {
             addAction(JS8EngineService.ACTION_ERROR)
             addAction(JS8EngineService.ACTION_RADIO_FREQUENCY)
             addAction(JS8EngineService.ACTION_TIME_DRIFT)
+            addAction(JS8EngineService.ACTION_TIMING_SUGGESTION)
+            addAction(JS8EngineService.ACTION_RIG_STATUS)
         }
         LocalBroadcastManager.getInstance(this)
             .registerReceiver(monitorReceiver, monitorFilter)
@@ -248,8 +349,138 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
+     * Handle a tap on a bottom navigation or navigation rail item.
+     *
+     * Pops back to the destination when it is already on the back stack.
+     * NavigationUI navigates with popUpTo(start) and saveState instead, which
+     * leaves the current fragment on screen when the target is the start
+     * destination sitting under it: the controller moves but the view does not.
+     * Opening All activity from the Monitor header lands in exactly that case.
+     */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        applyDebugTimingSuggestion(intent)
+        val navHostFragment = supportFragmentManager
+            .findFragmentById(R.id.nav_host_fragment) as? NavHostFragment ?: return
+        openThreadFromNotification(intent, navHostFragment.navController)
+    }
+
+    /**
+     * A timing fix is worth knowing about from anywhere, but it is acted on
+     * from Monitor. So: a badge on the Monitor tab whenever one is pending, a
+     * snackbar only when the user is somewhere else, and its action just takes
+     * them to the card rather than applying a correction out of context.
+     */
+    private var timingSnackbar: Snackbar? = null
+    private var mainNavController: NavController? = null
+
+    private fun observeTimingSuggestion() {
+        monitorViewModel.timingSuggestion.observe(this) { renderTimingSurface() }
+    }
+
+    /**
+     * Called on a new suggestion and on every navigation, because moving off
+     * Monitor is what makes the snackbar the right surface and moving back is
+     * what retires it. Neither is a change to the suggestion itself.
+     */
+    private fun renderTimingSurface() {
+        // The destination listener fires while the activity is still wiring up
+        if (!::monitorViewModel.isInitialized) return
+        val suggestion = monitorViewModel.timingSuggestion.value
+        val pending = suggestion != null &&
+            suggestion.kind == JS8EngineService.TIMING_FOUND
+
+        if (pending) {
+            bottomNav.getOrCreateBadge(R.id.navigation_monitor)
+        } else {
+            bottomNav.removeBadge(R.id.navigation_monitor)
+        }
+
+        val onMonitor = mainNavController?.currentDestination?.id == R.id.navigation_monitor
+        if (!pending || onMonitor) {
+            timingSnackbar?.dismiss()
+            timingSnackbar = null
+            return
+        }
+        if (timingSnackbar?.isShown == true) return
+
+        val shift = String.format("%.1f s", kotlin.math.abs(suggestion!!.driftMs) / 1000.0)
+        timingSnackbar = Snackbar.make(
+            findViewById(android.R.id.content),
+            getString(R.string.monitor_timing_found, shift),
+            Snackbar.LENGTH_INDEFINITE
+        ).apply {
+            anchorView = bottomNav as? BottomNavigationView
+            setAction(R.string.monitor_timing_show) {
+                mainNavController?.navigate(R.id.navigation_monitor)
+            }
+            show()
+        }
+    }
+
+    /**
+     * Debug builds only: drive the timing banner straight from an intent, so
+     * the UI can be checked without waiting out a decode drought and hoping a
+     * shifted window lands a decode. Same LiveData the real path writes.
+     */
+    private fun applyDebugTimingSuggestion(intent: Intent) {
+        if (!BuildConfig.DEBUG) return
+        if (!intent.hasExtra("debug_timing_kind")) return
+        val kind = intent.getIntExtra("debug_timing_kind", JS8EngineService.TIMING_FOUND)
+        monitorViewModel.updateTimingSuggestion(
+            if (kind == JS8EngineService.TIMING_GAVE_UP) {
+                null
+            } else {
+                MonitorViewModel.TimingSuggestion(
+                    kind = kind,
+                    driftMs = intent.getLongExtra("debug_timing_drift", -5500L),
+                    step = intent.getIntExtra("debug_timing_step", 1),
+                    steps = intent.getIntExtra("debug_timing_steps", 3),
+                    periodMs = intent.getIntExtra("debug_timing_period", 15_000)
+                )
+            }
+        )
+    }
+
+    /**
+     * A message notification carries the thread it belongs to. These extras
+     * were written but never read before, so tapping only opened the app.
+     */
+    private fun openThreadFromNotification(intent: Intent?, navController: NavController) {
+        if (intent?.getBooleanExtra("open_messages", false) != true) return
+        val conversationId = intent.getStringExtra("callsign") ?: return
+        intent.removeExtra("open_messages")
+        navController.navigate(
+            R.id.navigation_conversation,
+            Bundle().apply { putString("callsign", conversationId) }
+        )
+    }
+
+    private fun onNavItemTapped(navController: NavController, item: MenuItem): Boolean {
+        if (navController.popBackStack(item.itemId, false)) return true
+        return NavigationUI.onNavDestinationSelected(item, navController)
+    }
+
+    /**
      * Process the next message in the TX queue if not currently transmitting.
      */
+    /**
+     * A finished send that delivered mailbox mail: mark the row. A recipient
+     * callsign means group mail, recorded per collector; without one the
+     * message itself is marked delivered.
+     */
+    private fun markMailboxDelivered(finished: TransmitMessage) {
+        val mailboxId = finished.mailboxId ?: return
+        lifecycleScope.launch {
+            val recipient = finished.mailboxRecipient
+            if (recipient != null) {
+                mailboxRepository.recordGroupDelivery(mailboxId, recipient)
+            } else {
+                mailboxRepository.markDelivered(mailboxId)
+            }
+        }
+    }
+
     private fun processNextTxIfIdle() {
         // Don't send if already transmitting
         val state = transmitViewModel.txState.value

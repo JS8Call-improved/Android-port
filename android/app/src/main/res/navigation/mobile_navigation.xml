@@ -10,18 +10,37 @@
         android:label="@string/nav_monitor" />
 
     <fragment
-        android:id="@+id/navigation_decodes"
-        android:name="com.js8call.example.ui.DecodeFragment"
-        android:label="@string/nav_decodes" />
-
-    <fragment
         android:id="@+id/navigation_messages"
         android:name="com.js8call.example.ui.MessagesFragment"
         android:label="@string/nav_messages">
         <action
             android:id="@+id/action_messages_to_conversation"
             app:destination="@id/navigation_conversation" />
+        <action
+            android:id="@+id/action_messages_to_everything"
+            app:destination="@id/navigation_everything" />
+        <action
+            android:id="@+id/action_messages_to_mailbox"
+            app:destination="@id/navigation_mailbox" />
+        <action
+            android:id="@+id/action_messages_to_other_groups"
+            app:destination="@id/navigation_other_groups" />
     </fragment>
+
+    <fragment
+        android:id="@+id/navigation_mailbox"
+        android:name="com.js8call.example.ui.MailboxFragment"
+        android:label="@string/mailbox_title" />
+
+    <fragment
+        android:id="@+id/navigation_other_groups"
+        android:name="com.js8call.example.ui.OtherGroupsFragment"
+        android:label="@string/other_groups_title" />
+
+    <fragment
+        android:id="@+id/navigation_everything"
+        android:name="com.js8call.example.ui.EverythingFragment"
+        android:label="@string/everything_title" />
 
     <fragment
         android:id="@+id/navigation_conversation"
@@ -30,12 +49,38 @@
         <argument
             android:name="callsign"
             app:argType="string" />
+        <action
+            android:id="@+id/action_conversation_to_relay_path"
+            app:destination="@id/navigation_relay_path" />
     </fragment>
 
     <fragment
-        android:id="@+id/navigation_transmit"
-        android:name="com.js8call.example.ui.TransmitFragment"
-        android:label="@string/nav_transmit" />
+        android:id="@+id/navigation_relay_path"
+        android:name="com.js8call.example.ui.RelayPathFragment"
+        android:label="@string/relay_path_title">
+        <argument
+            android:name="callsign"
+            app:argType="string" />
+    </fragment>
+
+    <fragment
+        android:id="@+id/navigation_contact_detail"
+        android:name="com.js8call.example.ui.ContactDetailFragment"
+        android:label="{callsign}">
+        <argument
+            android:name="callsign"
+            app:argType="string" />
+    </fragment>
+
+    <fragment
+        android:id="@+id/navigation_contacts"
+        android:name="com.js8call.example.ui.ContactsFragment"
+        android:label="@string/nav_contacts" />
+
+    <fragment
+        android:id="@+id/navigation_network_map"
+        android:name="com.js8call.example.ui.NetworkMapFragment"
+        android:label="@string/network_map_title" />
 
     <fragment
         android:id="@+id/navigation_settings"

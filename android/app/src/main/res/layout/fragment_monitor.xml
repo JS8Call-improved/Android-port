@@ -1,240 +1,83 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:orientation="vertical">
 
     <!-- Waterfall View -->
     <com.js8call.example.ui.WaterfallView
         android:id="@+id/waterfall_view"
-        android:layout_width="0dp"
+        android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:background="@color/waterfall_background"
-        app:layout_constraintBottom_toTopOf="@id/status_card"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintVertical_weight="1" />
+        android:layout_weight="1.1"
+        android:background="@color/waterfall_background" />
 
-    <!-- Status Card -->
+    <!-- Status strip, edge to edge under the waterfall -->
+    <include
+        layout="@layout/monitor_status_card"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content" />
+
+    <!-- Raised only while a timing fix is on offer. Elevated so it reads as
+         something to act on rather than another readout. -->
     <com.google.android.material.card.MaterialCardView
-        android:id="@+id/status_card"
-        android:layout_width="0dp"
+        android:id="@+id/timing_card"
+        style="@style/Widget.Material3.CardView.Elevated"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_margin="8dp"
-        app:cardElevation="4dp"
-        app:layout_constraintBottom_toTopOf="@id/control_buttons"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent">
+        android:visibility="gone"
+        app:cardCornerRadius="12dp"
+        app:cardElevation="3dp"
+        tools:visibility="visible">
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:padding="12dp">
+            android:gravity="center_vertical"
+            android:minHeight="56dp"
+            android:orientation="horizontal"
+            android:paddingStart="16dp"
+            android:paddingEnd="8dp"
+            android:paddingTop="8dp"
+            android:paddingBottom="8dp">
 
-            <!-- Status Text -->
             <TextView
-                android:id="@+id/status_text"
-                style="@style/StatusIndicator"
+                android:id="@+id/timing_card_text"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:paddingEnd="12dp"
+                android:textAppearance="?attr/textAppearanceBodyMedium"
+                android:textColor="?attr/colorOnSurface"
+                tools:text="Signals are not decoding. Timing looks 5.5 s off." />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/timing_dismiss"
+                style="@style/Widget.Material3.Button.TextButton"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="@string/monitor_status_stopped"
-                android:textSize="14sp"
-                tools:text="STOPPED" />
+                android:text="@string/monitor_timing_dismiss" />
 
-            <!-- Status Details Grid -->
-            <GridLayout
-                android:layout_width="match_parent"
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/timing_apply"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:columnCount="2"
-                android:rowCount="6">
-
-                <!-- SNR -->
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_columnWeight="1"
-                    android:text="@string/monitor_snr"
-                    android:textSize="12sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:id="@+id/snr_value"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_columnWeight="1"
-                    android:text="--"
-                    android:textSize="12sp"
-                    tools:text="+5 dB" />
-
-                <!-- Power -->
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_columnWeight="1"
-                    android:layout_marginTop="4dp"
-                    android:text="@string/monitor_power"
-                    android:textSize="12sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:id="@+id/power_value"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_columnWeight="1"
-                    android:layout_marginTop="4dp"
-                    android:text="--"
-                    android:textSize="12sp"
-                    tools:text="-45 dB" />
-
-                <!-- TX Offset -->
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_columnWeight="1"
-                    android:layout_marginTop="4dp"
-                    android:text="@string/monitor_tx_offset"
-                    android:textSize="12sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:id="@+id/tx_offset_value"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_columnWeight="1"
-                    android:layout_marginTop="4dp"
-                    android:text="1500 Hz"
-                    android:textSize="12sp" />
-
-                <!-- Audio Device -->
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_columnWeight="1"
-                    android:layout_marginTop="4dp"
-                    android:text="@string/monitor_audio_device"
-                    android:textSize="12sp"
-                    android:textStyle="bold" />
-
-                <Spinner
-                    android:id="@+id/audio_device_spinner"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_columnWeight="1"
-                    android:layout_marginTop="4dp"
-                    android:minHeight="32dp"
-                    android:spinnerMode="dropdown" />
-
-                <!-- Radio Frequency -->
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_columnWeight="1"
-                    android:layout_marginTop="4dp"
-                    android:text="@string/monitor_radio_frequency"
-                    android:textSize="12sp"
-                    android:textStyle="bold" />
-
-                <Spinner
-                    android:id="@+id/frequency_spinner"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_columnWeight="1"
-                    android:layout_marginTop="4dp"
-                    android:minHeight="32dp"
-                    android:spinnerMode="dropdown" />
-
-                <!-- Time Drift -->
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_columnWeight="1"
-                    android:layout_marginTop="4dp"
-                    android:layout_gravity="center_vertical"
-                    android:text="@string/monitor_time_drift"
-                    android:textSize="12sp"
-                    android:textStyle="bold" />
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_columnWeight="1"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal">
-
-                    <TextView
-                        android:id="@+id/time_drift_value"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="0 ms"
-                        android:textSize="12sp"
-                        tools:text="+1200 ms" />
-
-                    <Button
-                        android:id="@+id/time_sync_button"
-                        style="@style/Widget.Material3.Button.TextButton"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:minWidth="0dp"
-                        android:minHeight="32dp"
-                        android:paddingHorizontal="8dp"
-                        android:text="@string/monitor_time_sync"
-                        android:textSize="12sp" />
-
-                    <Button
-                        android:id="@+id/time_drift_reset_button"
-                        style="@style/Widget.Material3.Button.TextButton"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:minWidth="0dp"
-                        android:minHeight="32dp"
-                        android:paddingHorizontal="8dp"
-                        android:text="@string/monitor_time_drift_reset"
-                        android:textSize="12sp" />
-                </LinearLayout>
-
-            </GridLayout>
-
+                android:layout_marginStart="4dp"
+                android:text="@string/monitor_timing_apply" />
         </LinearLayout>
 
     </com.google.android.material.card.MaterialCardView>
 
-    <!-- Control Buttons -->
-    <LinearLayout
-        android:id="@+id/control_buttons"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_margin="16dp"
-        android:gravity="center"
-        android:orientation="vertical"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent">
+    <!-- Embedded decode list -->
+    <androidx.fragment.app.FragmentContainerView
+        android:id="@+id/decode_pane"
+        android:name="com.js8call.example.ui.DecodeFragment"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/start_stop_button"
-            style="@style/Widget.Material3.Button.ElevatedButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:minHeight="56dp"
-            android:text="@string/monitor_start"
-            android:textSize="16sp"
-            app:icon="@android:drawable/ic_media_play"
-            app:iconGravity="textStart" />
-
-        <TextView
-            android:id="@+id/monitor_version"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:text="@string/monitor_version"
-            android:textColor="?attr/colorOnSurfaceVariant"
-            android:textSize="12sp" />
-
-    </LinearLayout>
-
-</androidx.constraintlayout.widget.ConstraintLayout>
+</LinearLayout>

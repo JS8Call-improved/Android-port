@@ -16,7 +16,9 @@ data class DecodedMessage(
     val mode: Int,
     // Suggested total drift (ms); used by "sync clock to this signal".
     val driftMs: Int = 0,
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    // True for messages this station transmitted, shown in the decode list.
+    val outgoing: Boolean = false
 ) {
     /**
      * Check if this frame is marked as the first frame of a multipart message.

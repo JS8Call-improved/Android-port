@@ -32,6 +32,19 @@
             android:textColor="@color/bubble_text_outgoing"
             tools:text="Hey! I'm doing great, thanks for asking." />
 
+        <!-- Which stations carried this one, when it did not go direct -->
+        <TextView
+            android:id="@+id/relay_text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:alpha="0.7"
+            android:textAppearance="?attr/textAppearanceLabelSmall"
+            android:textColor="@color/bubble_text_outgoing"
+            android:visibility="gone"
+            tools:text="via KA0XYZ › N0DEF"
+            tools:visibility="visible" />
+
         <!-- Metadata row (timestamp + status) -->
         <LinearLayout
             android:layout_width="wrap_content"
@@ -50,13 +63,26 @@
                 android:alpha="0.7"
                 tools:text="2:46 PM" />
 
+            <!-- Sending state: Queued / Sending countdown / Failed -->
+            <TextView
+                android:id="@+id/status_text"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:textAppearance="?attr/textAppearanceLabelSmall"
+                android:textColor="@color/bubble_text_outgoing"
+                android:alpha="0.7"
+                android:visibility="gone"
+                tools:text="Sending 12s"
+                tools:visibility="visible" />
+
             <!-- Status indicator -->
             <ImageView
                 android:id="@+id/status_icon"
                 android:layout_width="14dp"
                 android:layout_height="14dp"
                 android:layout_marginStart="4dp"
-                android:src="@android:drawable/ic_menu_send"
+                android:src="@drawable/ic_send"
                 app:tint="@color/bubble_text_outgoing"
                 android:alpha="0.7"
                 tools:ignore="ContentDescription" />

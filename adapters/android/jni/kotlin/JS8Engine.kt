@@ -232,6 +232,20 @@ class JS8Engine private constructor(
         return withNativeHandleOr(-1) { nativeTxMillisecondsUntilAudio(it) }
     }
 
+    /**
+     * 1-based index of the frame now being sent, or 0 when idle or tuning.
+     */
+    fun txFrameIndex(): Int {
+        return withNativeHandleOr(0) { nativeTxFrameIndex(it) }
+    }
+
+    /**
+     * Total frames in the current message, or 0 when idle or tuning.
+     */
+    fun txFrameCount(): Int {
+        return withNativeHandleOr(0) { nativeTxFrameCount(it) }
+    }
+
     /** Controls whether scheduled modulation may advance and reach the output. */
     fun setTransmitReady(ready: Boolean) {
         withNativeHandle { nativeSetTxReady(it, ready) }
@@ -337,6 +351,8 @@ class JS8Engine private constructor(
     private external fun nativeIsTransmitting(handle: Long): Boolean
     private external fun nativeIsTransmittingAudio(handle: Long): Boolean
     private external fun nativeTxMillisecondsUntilAudio(handle: Long): Int
+    private external fun nativeTxFrameIndex(handle: Long): Int
+    private external fun nativeTxFrameCount(handle: Long): Int
     private external fun nativeSetTxReady(handle: Long, ready: Boolean)
     private external fun nativeSetTimeDriftMs(handle: Long, driftMs: Long)
     private external fun nativeGetTimeDriftMs(handle: Long): Long
@@ -396,5 +412,12 @@ class JS8Engine private constructor(
          * Called with TX audio PCM samples when enabled.
          */
         fun onTxAudio(samples: ShortArray, sampleRateHz: Int) {}
+
+        /**
+         * Raised when decoding has gone dead and the engine is trying shifted
+         * windows to find the clock offset. [kind] is 0 searching, 1 found,
+         * 2 gave up. [driftMs] is the total drift to apply on a find.
+         */
+        fun onTimingSuggestion(kind: Int, driftMs: Int, step: Int, steps: Int, periodMs: Int) {}
     }
 }

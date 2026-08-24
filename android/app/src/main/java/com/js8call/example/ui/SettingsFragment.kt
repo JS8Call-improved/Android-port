@@ -12,8 +12,11 @@ import android.os.Looper
 import android.text.InputType
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.lifecycleScope
 import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
+import androidx.preference.Preference
 import androidx.preference.PreferenceFragmentCompat
 import androidx.preference.SwitchPreferenceCompat
 import com.google.android.material.snackbar.Snackbar
@@ -22,6 +25,7 @@ import com.js8call.core.HamlibRigCatalog
 import com.js8call.core.UsbSerialPortCatalog
 import com.js8call.example.R
 import java.util.Locale
+import kotlinx.coroutines.launch
 
 /**
  * Fragment for app settings.
@@ -32,6 +36,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
     private var pendingLocationListener: LocationListener? = null
     private var pendingLocationTimeout: Runnable? = null
     private var gridPreference: GridSquarePreference? = null
+    private var audioDevicePreference: Preference? = null
     private var pendingStoragePermissionEnable = false
     private var logPreference: SwitchPreferenceCompat? = null
 
@@ -65,6 +70,12 @@ class SettingsFragment : PreferenceFragmentCompat() {
 
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
         setPreferencesFromResource(R.xml.preferences, rootKey)
+
+        findPreference<Preference>("app_version")?.summary = try {
+            requireContext().packageManager.getPackageInfo(requireContext().packageName, 0).versionName
+        } catch (e: PackageManager.NameNotFoundException) {
+            "unknown"
+        }
 
         val prefs = preferenceManager.sharedPreferences
         if (prefs != null && !prefs.contains("my_status")) {
@@ -199,8 +210,23 @@ class SettingsFragment : PreferenceFragmentCompat() {
             }
         }
 
+        audioDevicePreference = findPreference("audio_device")
+        audioDevicePreference?.setOnPreferenceClickListener {
+            // Both screens share one picker, so a change made here also moves a
+            // live capture and shows up on the Monitor strip.
+            val engineRunning = ViewModelProvider(requireActivity())[MonitorViewModel::class.java]
+                .isRunning.value == true
+            AudioDevices.showPicker(requireContext(), engineRunning) { updateAudioDeviceSummary() }
+            true
+        }
+
         gridPreference = findPreference("grid")
         gridPreference?.onUpdateClickListener = { onGridUpdateRequested() }
+
+        findPreference<Preference>("clear_link_data")?.setOnPreferenceClickListener {
+            confirmClearLinkData()
+            true
+        }
 
         logPreference = findPreference("log_messages_to_file")
         logPreference?.setOnPreferenceChangeListener { _, newValue ->
@@ -220,9 +246,37 @@ class SettingsFragment : PreferenceFragmentCompat() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        // Inputs come and go with what is plugged in, so re-read them on the
+        // way in rather than only when the screen is built.
+        updateAudioDeviceSummary()
+    }
+
     override fun onStop() {
         cancelLocationRequest()
         super.onStop()
+    }
+
+    private fun confirmClearLinkData() {
+        com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
+            .setTitle(R.string.settings_clear_link_data)
+            .setMessage(R.string.settings_clear_link_data_confirm)
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                viewLifecycleOwner.lifecycleScope.launch {
+                    com.js8call.example.data.LinkRepository.getInstance(requireContext()).clear()
+                    view?.let {
+                        Snackbar.make(it, R.string.settings_clear_link_data_done, Snackbar.LENGTH_SHORT).show()
+                    }
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun updateAudioDeviceSummary() {
+        audioDevicePreference?.summary = AudioDevices.selectedName(requireContext())
+            ?: getString(R.string.settings_audio_device_none)
     }
 
     private fun onGridUpdateRequested() {
@@ -345,57 +399,14 @@ class SettingsFragment : PreferenceFragmentCompat() {
     }
 
     private fun applyGridFromLocation(location: Location) {
-        val grid = maidenheadFromLocation(location.latitude, location.longitude)
+        val grid = com.js8call.example.util.Maidenhead
+            .fromLatLon(location.latitude, location.longitude)
         gridPreference?.setGridValue(grid)
     }
 
     private fun showGridError(messageResId: Int) {
         val view = view ?: return
         Snackbar.make(view, messageResId, Snackbar.LENGTH_LONG).show()
-    }
-
-    private fun maidenheadFromLocation(latitude: Double, longitude: Double): String {
-        var lon = -longitude
-        var lat = latitude.coerceIn(-90.0, 90.0)
-        if (lon < -180.0) lon += 360.0
-        if (lon > 180.0) lon -= 360.0
-        if (lon == 180.0) lon = 179.999999
-        if (lat == 90.0) lat = 89.999999
-
-        val lonMinutes = (180.0 - lon) * 60.0
-        val latMinutes = (lat + 90.0) * 60.0
-
-        val lonField = (lonMinutes / 1200.0).toInt().coerceIn(0, 17)
-        val latField = (latMinutes / 600.0).toInt().coerceIn(0, 17)
-
-        val lonFieldRemainder = lonMinutes - lonField * 1200.0
-        val latFieldRemainder = latMinutes - latField * 600.0
-
-        val lonSquare = (lonFieldRemainder / 120.0).toInt().coerceIn(0, 9)
-        val latSquare = (latFieldRemainder / 60.0).toInt().coerceIn(0, 9)
-
-        val lonSquareRemainder = lonFieldRemainder - lonSquare * 120.0
-        val latSquareRemainder = latFieldRemainder - latSquare * 60.0
-
-        val lonSub = (lonSquareRemainder / 5.0).toInt().coerceIn(0, 23)
-        val latSub = (latSquareRemainder / 2.5).toInt().coerceIn(0, 23)
-
-        val lonSubRemainder = lonSquareRemainder - lonSub * 5.0
-        val latSubRemainder = latSquareRemainder - latSub * 2.5
-
-        val lonExt = (lonSubRemainder / 0.5).toInt().coerceIn(0, 9)
-        val latExt = (latSubRemainder / 0.25).toInt().coerceIn(0, 9)
-
-        return buildString(8) {
-            append(('A'.code + lonField).toChar())
-            append(('A'.code + latField).toChar())
-            append(('0'.code + lonSquare).toChar())
-            append(('0'.code + latSquare).toChar())
-            append(('A'.code + lonSub).toChar())
-            append(('A'.code + latSub).toChar())
-            append(('0'.code + lonExt).toChar())
-            append(('0'.code + latExt).toChar())
-        }.uppercase(Locale.US)
     }
 
     private fun normalizeSerialSelection(

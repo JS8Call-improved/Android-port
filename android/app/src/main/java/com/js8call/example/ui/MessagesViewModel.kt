@@ -39,6 +39,20 @@ class MessagesViewModel(application: Application) : AndroidViewModel(application
     }
 
     /**
+     * The relay path stored for a thread, in `A>B` notation, or null for a
+     * thread that transmits direct.
+     */
+    fun getRelayPath(callsign: String): LiveData<String?> {
+        return repository.getRelayPath(callsign)
+    }
+
+    fun setRelayPath(callsign: String, path: String?) {
+        viewModelScope.launch {
+            repository.setRelayPath(callsign, path)
+        }
+    }
+
+    /**
      * Mark all messages in a conversation as read.
      */
     fun markConversationAsRead(callsign: String) {
@@ -62,23 +76,35 @@ class MessagesViewModel(application: Application) : AndroidViewModel(application
         text: String,
         snr: Int? = null,
         frequency: Float? = null,
-        relayPath: String? = null
+        relayPath: String? = null,
+        markRead: Boolean = false
     ) {
         viewModelScope.launch {
-            repository.insertIncomingMessage(conversationId, from, text, snr, frequency, relayPath)
+            repository.insertIncomingMessage(
+                conversationId, from, text, snr, frequency, relayPath, markRead
+            )
         }
     }
 
     /**
      * Insert an outgoing message (when user sends).
      */
-    fun insertOutgoingMessage(to: String, text: String): LiveData<Long> {
+    fun insertOutgoingMessage(to: String, text: String, relayPath: String? = null): LiveData<Long> {
         val result = MutableLiveData<Long>()
         viewModelScope.launch {
-            val id = repository.insertOutgoingMessage(to, text, MessageEntity.STATUS_PENDING)
+            val id = repository.insertOutgoingMessage(
+                to, text, MessageEntity.STATUS_PENDING, relayPath
+            )
             result.postValue(id)
         }
         return result
+    }
+
+    /** An inbound ACK: receipt for the newest sent message in the thread. */
+    fun markLatestSentAcked(conversationId: String) {
+        viewModelScope.launch {
+            repository.markLatestSentAcked(conversationId)
+        }
     }
 
     /**

@@ -1,27 +1,29 @@
 package com.js8call.example.ui
 
-import android.content.BroadcastReceiver
-import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.view.inputmethod.EditorInfo
 import android.widget.LinearLayout
+import android.widget.TextView
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModelProvider
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
+import androidx.navigation.fragment.findNavController
+import androidx.preference.PreferenceManager
 import androidx.recyclerview.widget.RecyclerView
-import com.google.android.material.floatingactionbutton.FloatingActionButton
-import com.google.android.material.textfield.TextInputEditText
-import com.google.android.material.textfield.TextInputLayout
+import com.google.android.material.appbar.MaterialToolbar
+import com.google.android.material.snackbar.Snackbar
+import com.js8call.example.MainActivity
 import com.js8call.example.R
-import com.js8call.example.service.JS8EngineService
+import com.js8call.example.model.TransmitState
+import com.js8call.example.util.AvatarColor
+import com.js8call.example.util.DisplayName
+import com.js8call.example.util.RelayPath
 
 /**
- * Fragment showing a single conversation with chat bubbles.
+ * A direct-message thread with one station.
  */
 class ConversationFragment : Fragment() {
 
@@ -31,29 +33,13 @@ class ConversationFragment : Fragment() {
 
     private lateinit var recyclerView: RecyclerView
     private lateinit var emptyState: LinearLayout
-    private lateinit var messageInputLayout: TextInputLayout
-    private lateinit var messageInput: TextInputEditText
-    private lateinit var sendButton: FloatingActionButton
+    private lateinit var relayStrip: View
+    private lateinit var relayLabel: TextView
 
     private var callsign: String = ""
 
-    // Track the last sent message ID for status updates
-    private var lastSentMessageId: Long? = null
-
-    private val txStateReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            when (intent?.action) {
-                JS8EngineService.ACTION_TX_STATE -> {
-                    val state = intent.getStringExtra(JS8EngineService.EXTRA_TX_STATE)
-                    if (state == JS8EngineService.TX_STATE_FINISHED) {
-                        lastSentMessageId?.let { id ->
-                            viewModel.updateMessageStatus(id, com.js8call.example.data.MessageEntity.STATUS_SENT)
-                        }
-                    }
-                }
-            }
-        }
-    }
+    /** Empty means transmit direct. Kept in sync by the stored-path observer. */
+    private var relayHops: List<String> = emptyList()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -71,61 +57,104 @@ class ConversationFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        // Set title to callsign
-        activity?.title = callsign
-
-        // Initialize ViewModels
         viewModel = ViewModelProvider(requireActivity())[MessagesViewModel::class.java]
         transmitViewModel = ViewModelProvider(requireActivity())[TransmitViewModel::class.java]
 
-        // Find views
+        val toolbar = view.findViewById<MaterialToolbar>(R.id.thread_toolbar)
+        toolbar.setNavigationOnClickListener { findNavController().navigateUp() }
+        SpeedChip.bind(view.findViewById(R.id.speed_chip))
+        bindThreadHeader(view)
+
+        // Mailbox actions make sense toward a station, not a group. A group
+        // thread the operator has not joined gets a Join action instead.
+        if (!callsign.startsWith("@")) {
+            toolbar.inflateMenu(R.menu.conversation_menu)
+            toolbar.setOnMenuItemClickListener { item ->
+                when (item.itemId) {
+                    R.id.action_relay_path -> {
+                        openRelayPathEditor()
+                        true
+                    }
+                    R.id.action_check_messages -> {
+                        // Any mail waiting for us at this station?
+                        sendMessage("QUERY MSGS")
+                        true
+                    }
+                    R.id.action_send_via_relay -> {
+                        showSendViaRelayDialog()
+                        true
+                    }
+                    else -> false
+                }
+            }
+        } else if (!isSubscribedGroup()) {
+            toolbar.inflateMenu(R.menu.group_menu)
+            toolbar.setOnMenuItemClickListener { item ->
+                when (item.itemId) {
+                    R.id.action_join_group -> {
+                        joinGroup()
+                        toolbar.menu.removeItem(R.id.action_join_group)
+                        true
+                    }
+                    else -> false
+                }
+            }
+        }
+
+        // The protocol will not relay to a group, so a group thread gets no
+        // path strip at all rather than one that cannot be used.
+        relayStrip = view.findViewById(R.id.relay_path_strip)
+        relayLabel = view.findViewById(R.id.relay_path_label)
+        val relayDivider = view.findViewById<View>(R.id.relay_path_divider)
+        if (callsign.startsWith("@")) {
+            relayStrip.visibility = View.GONE
+            relayDivider.visibility = View.GONE
+        } else {
+            relayStrip.setOnClickListener { openRelayPathEditor() }
+            viewModel.getRelayPath(callsign).observe(viewLifecycleOwner) { stored ->
+                relayHops = RelayPath.parse(stored)
+                relayLabel.text = describePath(relayHops)
+            }
+        }
+
         recyclerView = view.findViewById(R.id.messages_recycler_view)
         emptyState = view.findViewById(R.id.empty_state)
-        messageInputLayout = view.findViewById(R.id.message_input_layout)
-        messageInput = view.findViewById(R.id.message_input)
-        sendButton = view.findViewById(R.id.send_button)
 
-        // Set up RecyclerView
-        adapter = MessageBubbleAdapter().apply {
-            onMessageLongClick = { message ->
-                // Could show options to copy/delete
-                true
-            }
-        }
+        adapter = MessageBubbleAdapter()
+        adapter.onSenderClick = { sender -> openContactCard(sender) }
         recyclerView.adapter = adapter
+        // No cross-fade on rebinds; the sending label ticks every second
+        (recyclerView.itemAnimator as? androidx.recyclerview.widget.SimpleItemAnimator)
+            ?.supportsChangeAnimations = false
 
-        // Register adapter data observer to scroll to bottom on new messages
-        adapter.registerAdapterDataObserver(object : RecyclerView.AdapterDataObserver() {
-            override fun onItemRangeInserted(positionStart: Int, itemCount: Int) {
-                recyclerView.scrollToPosition(adapter.itemCount - 1)
-            }
-        })
-
-        // Set up send button
-        sendButton.setOnClickListener {
-            sendMessage()
-        }
-
-        // Set up keyboard send action
-        messageInput.setOnEditorActionListener { _, actionId, _ ->
-            if (actionId == EditorInfo.IME_ACTION_SEND) {
-                sendMessage()
-                true
+        ComposeBarController(
+            root = view,
+            // Per-station queries are meaningless aimed at a group
+            commandMenuRes = if (callsign.startsWith("@")) {
+                R.menu.group_command_menu
             } else {
-                false
-            }
-        }
+                R.menu.directed_command_menu
+            },
+            onSend = { text -> sendMessage(text) },
+            // Directed queries ride the normal send path, so they get
+            // bubble states and TX tracking like any other message.
+            onCommand = { text -> sendMessage(text) }
+        )
 
         // Observe messages for this conversation
         viewModel.getMessagesForConversation(callsign).observe(viewLifecycleOwner) { messages ->
+            val wasAtBottom = !recyclerView.canScrollVertically(1)
+            val firstLoad = adapter.itemCount == 0
             adapter.submitList(messages) {
-                // Scroll to bottom after list update
-                if (messages.isNotEmpty()) {
-                    recyclerView.scrollToPosition(messages.size - 1)
+                if (messages.isNotEmpty() && (wasAtBottom || firstLoad)) {
+                    if (firstLoad) {
+                        recyclerView.scrollToPosition(messages.size - 1)
+                    } else {
+                        recyclerView.smoothScrollToPosition(messages.size - 1)
+                    }
                 }
             }
 
-            // Show/hide empty state
             if (messages.isEmpty()) {
                 emptyState.visibility = View.VISIBLE
                 recyclerView.visibility = View.GONE
@@ -135,50 +164,214 @@ class ConversationFragment : Fragment() {
             }
         }
 
+        // The sending bubble: the queue head while transmitting, with the
+        // frame countdown and progress from the TransmitViewModel.
+        transmitViewModel.txState.observe(viewLifecycleOwner) { updateSendingBubble() }
+        transmitViewModel.queue.observe(viewLifecycleOwner) { updateSendingBubble() }
+        transmitViewModel.txCountdownSeconds.observe(viewLifecycleOwner) { updateSendingBubble() }
+        transmitViewModel.txFrameProgress.observe(viewLifecycleOwner) { updateSendingBubble() }
+
         // Mark conversation as read when viewing
         viewModel.markConversationAsRead(callsign)
     }
 
     override fun onResume() {
         super.onResume()
-        // Register for TX state updates
-        val filter = IntentFilter().apply {
-            addAction(JS8EngineService.ACTION_TX_STATE)
-        }
-        LocalBroadcastManager.getInstance(requireContext())
-            .registerReceiver(txStateReceiver, filter)
-
         // Mark as read again in case new messages arrived
         viewModel.markConversationAsRead(callsign)
     }
 
-    override fun onPause() {
-        super.onPause()
-        LocalBroadcastManager.getInstance(requireContext())
-            .unregisterReceiver(txStateReceiver)
+    private fun updateSendingBubble() {
+        val countdown = transmitViewModel.txCountdownSeconds.value
+        val progress = transmitViewModel.txFrameProgress.value
+        val sending = transmitViewModel.txState.value == TransmitState.TRANSMITTING ||
+            progress != null
+        val activeDbId = if (sending) transmitViewModel.getNextMessage()?.dbId else null
+        val label = when {
+            !sending || countdown == null -> null
+            progress != null && progress.second > 1 ->
+                getString(R.string.msg_status_sending_frames, progress.first, progress.second, countdown)
+            else -> getString(R.string.msg_status_sending, countdown)
+        }
+
+        val previousId = adapter.sendingMessageId
+        if (previousId == activeDbId && label == adapter.sendingLabel) return
+        adapter.sendingMessageId = activeDbId
+        adapter.sendingLabel = label
+
+        val list = adapter.currentList
+        for (id in listOfNotNull(previousId, activeDbId).distinct()) {
+            val index = list.indexOfFirst { it.id == id }
+            if (index >= 0) adapter.notifyItemChanged(index, MessageBubbleAdapter.PAYLOAD_STATUS)
+        }
     }
 
-    private fun sendMessage() {
-        val text = messageInput.text?.toString()?.trim() ?: return
-        if (text.isEmpty()) return
-
-        // Clear input
-        messageInput.text?.clear()
-
-        // Insert outgoing message to database
-        viewModel.insertOutgoingMessage(callsign, text).observe(viewLifecycleOwner) { messageId ->
-            lastSentMessageId = messageId
-
-            // Queue the message for transmission via the TX queue
-            // Format: MSG text, directed to callsign
-            // The engine will prepend the callsign when selectedCall is set
-            val fullMessage = "MSG $text"
-            transmitViewModel.queueMessage(fullMessage, callsign, priority = 0, clearComposed = false)
-            
-            // Trigger queue processing
-            LocalBroadcastManager.getInstance(requireContext()).sendBroadcast(
-                Intent(com.js8call.example.MainActivity.ACTION_PROCESS_TX_QUEUE)
-            )
+    /**
+     * The one way out of this thread. The compose bar, the command menu and
+     * "Check for messages" all land here, so routing this covers every
+     * transmission the thread makes.
+     */
+    private fun sendMessage(text: String) {
+        if (!hasCallsignConfigured()) {
+            Snackbar.make(requireView(), R.string.error_callsign_required, Snackbar.LENGTH_LONG).show()
+            return
         }
+
+        val hops = relayHops
+        val storedPath = RelayPath.format(hops)
+
+        viewModel.insertOutgoingMessage(callsign, text, relayPath = storedPath)
+            .observe(viewLifecycleOwner) { messageId ->
+                if (hops.isEmpty()) {
+                    transmitViewModel.queueMessage(text, directed = callsign, dbId = messageId)
+                } else {
+                    // A relay carries the destination in its payload, so the
+                    // nearest hop becomes the directed target and the native
+                    // packer reads it off the front of the text.
+                    transmitViewModel.queueMessage(
+                        RelayPath.compose(hops, callsign, text),
+                        directed = null,
+                        dbId = messageId
+                    )
+                }
+                LocalBroadcastManager.getInstance(requireContext())
+                    .sendBroadcast(Intent(MainActivity.ACTION_PROCESS_TX_QUEUE))
+            }
+    }
+
+    /**
+     * The toolbar names who the thread is with and opens their contact card.
+     * A group has no contact record, so it stays a plain heading.
+     */
+    private fun bindThreadHeader(view: View) {
+        val header = view.findViewById<View>(R.id.thread_header)
+        val avatarFrame = view.findViewById<View>(R.id.avatar_frame)
+        val avatarText = view.findViewById<TextView>(R.id.avatar_text)
+        val nameText = view.findViewById<TextView>(R.id.thread_name)
+        val callsignText = view.findViewById<TextView>(R.id.thread_callsign)
+        val isGroup = callsign.startsWith("@")
+
+        avatarFrame.backgroundTintList = android.content.res.ColorStateList.valueOf(
+            androidx.core.content.ContextCompat.getColor(
+                requireContext(), AvatarColor.forCallsign(callsign)
+            )
+        )
+        avatarText.text = if (isGroup) "@" else DisplayName.initial(callsign, null)
+        nameText.text = callsign
+
+        if (isGroup) {
+            header.isClickable = false
+            header.background = null
+            return
+        }
+
+        header.setOnClickListener { openContactCard(callsign) }
+
+        val contactsViewModel = ViewModelProvider(requireActivity())[ContactsViewModel::class.java]
+        contactsViewModel.getContact(callsign).observe(viewLifecycleOwner) { contact ->
+            val name = contact?.name
+            nameText.text = DisplayName.of(callsign, name)
+            avatarText.text = DisplayName.initial(callsign, name)
+            val secondary = DisplayName.secondary(callsign, name)
+            callsignText.text = secondary.orEmpty()
+            callsignText.visibility = if (secondary == null) View.GONE else View.VISIBLE
+        }
+    }
+
+    private fun openContactCard(station: String) {
+        findNavController().navigate(
+            R.id.navigation_contact_detail,
+            Bundle().apply { putString("callsign", station) }
+        )
+    }
+
+    private fun openRelayPathEditor() {
+        findNavController().navigate(
+            R.id.action_conversation_to_relay_path,
+            Bundle().apply { putString("callsign", callsign) }
+        )
+    }
+
+    /** "Direct", or the hop count followed by the stations in transmit order. */
+    private fun describePath(hops: List<String>): String {
+        if (hops.isEmpty()) return getString(R.string.relay_direct)
+        val count = resources.getQuantityString(R.plurals.relay_hop_count, hops.size, hops.size)
+        return "$count · " + hops.joinToString(" › ")
+    }
+
+    private fun hasCallsignConfigured(): Boolean {
+        val prefs = PreferenceManager.getDefaultSharedPreferences(requireContext())
+        return prefs.getString("callsign", "")?.isNotBlank() == true
+    }
+
+    private fun isSubscribedGroup(): Boolean {
+        val prefs = PreferenceManager.getDefaultSharedPreferences(requireContext())
+        val groups = (prefs.getString("my_groups", "") ?: "")
+            .split(",").map { it.trim().uppercase() }.filter { it.isNotEmpty() }
+        return callsign.uppercase() in groups
+    }
+
+    private fun joinGroup() {
+        val prefs = PreferenceManager.getDefaultSharedPreferences(requireContext())
+        val groups = (prefs.getString("my_groups", "") ?: "")
+            .split(",").map { it.trim().uppercase() }.filter { it.isNotEmpty() }
+        if (callsign.uppercase() !in groups) {
+            prefs.edit()
+                .putString("my_groups", (groups + callsign.uppercase()).joinToString(","))
+                .apply()
+        }
+        Snackbar.make(requireView(), getString(R.string.group_joined, callsign), Snackbar.LENGTH_SHORT)
+            .show()
+    }
+
+    /**
+     * Deposit a message for this station at a third station's mailbox:
+     * MY: RELAY MSG TO:DEST text. The thread row stays under this station,
+     * because the conversation is with the person, not the hop.
+     */
+    private fun showSendViaRelayDialog() {
+        val dialogView = layoutInflater.inflate(R.layout.dialog_send_via_relay, null)
+        val relayInput = dialogView.findViewById<
+            com.google.android.material.textfield.MaterialAutoCompleteTextView>(R.id.relay_input)
+        val messageInput = dialogView.findViewById<
+            com.google.android.material.textfield.TextInputEditText>(R.id.relay_message_input)
+
+        val decodeViewModel = ViewModelProvider(requireActivity())[DecodeViewModel::class.java]
+        val heard = decodeViewModel.heardCallsigns().filterNot { it.equals(callsign, true) }
+        relayInput.setAdapter(
+            android.widget.ArrayAdapter(
+                requireContext(), android.R.layout.simple_list_item_1, heard
+            )
+        )
+        relayInput.threshold = 1
+
+        com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
+            .setTitle(R.string.conversation_send_via_relay)
+            .setView(dialogView)
+            .setPositiveButton(R.string.relay_send) { _, _ ->
+                val relay = relayInput.text?.toString()?.trim()?.uppercase().orEmpty()
+                val text = messageInput.text?.toString()?.trim()?.uppercase().orEmpty()
+                if (relay.isEmpty() || text.isEmpty()) return@setPositiveButton
+                sendViaRelay(relay, text)
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun sendViaRelay(relay: String, text: String) {
+        if (!hasCallsignConfigured()) {
+            Snackbar.make(requireView(), R.string.error_callsign_required, Snackbar.LENGTH_LONG).show()
+            return
+        }
+        viewModel.insertOutgoingMessage(callsign, text, relayPath = relay)
+            .observe(viewLifecycleOwner) { messageId ->
+                // The engine prefixes "MY: RELAY" and appends the checksum
+                // the buffered MSG TO: command requires.
+                transmitViewModel.queueMessage(
+                    "MSG TO:$callsign $text", directed = relay, dbId = messageId
+                )
+                LocalBroadcastManager.getInstance(requireContext())
+                    .sendBroadcast(Intent(MainActivity.ACTION_PROCESS_TX_QUEUE))
+            }
     }
 }

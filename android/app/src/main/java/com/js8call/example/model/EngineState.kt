@@ -71,7 +71,13 @@ data class TransmitMessage(
     val text: String,
     val directed: String? = null,
     val priority: Int = 0,
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    /** Row id in the message database, when this send belongs to a conversation. */
+    val dbId: Long? = null,
+    /** Mailbox row this send delivers, marked once the transmission finishes. */
+    val mailboxId: Long? = null,
+    /** Set for a group delivery: the collecting callsign to record. */
+    val mailboxRecipient: String? = null
 )
 
 /**

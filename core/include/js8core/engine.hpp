@@ -59,6 +59,19 @@ struct DecodeFinished {
   std::size_t decoded = 0;
 };
 
+// Raised when signals are present but nothing decodes, which is what a clock
+// error far outside the decoder's own search range looks like.
+struct TimingSuggestion {
+  enum class Kind { Searching, Found, GaveUp } kind = Kind::Searching;
+  // Total drift (ms) that would centre the signal, for Kind::Found.
+  int drift_ms = 0;
+  // Trial number and how many cover a whole period, for progress display.
+  int step = 0;
+  int steps = 0;
+  // Frame period (ms) of the submode being hunted, so the UI can count down.
+  int period_ms = 0;
+};
+
 struct Spectrum {
   std::vector<float> bins;
   float bin_hz = 0.0f;
@@ -66,7 +79,8 @@ struct Spectrum {
   float peak_db = 0.0f;
 };
 
-using Variant = std::variant<DecodeStarted, SyncStart, SyncState, Decoded, DecodeFinished, Spectrum>;
+using Variant = std::variant<DecodeStarted, SyncStart, SyncState, Decoded, DecodeFinished, Spectrum,
+                             TimingSuggestion>;
 
 }  // namespace events
 
@@ -130,6 +144,10 @@ public:
   virtual bool is_transmitting() const = 0;
   virtual bool is_transmitting_audio() const = 0;
   virtual int tx_milliseconds_until_audio() const = 0;
+  // 1-based index of the frame now being sent, 0 when idle or tuning.
+  virtual int tx_frame_index() const = 0;
+  // Total frames in the current message, 0 when idle or tuning.
+  virtual int tx_frame_count() const = 0;
   virtual void set_tx_ready(bool ready) = 0;
   virtual void set_tx_boost_enabled(bool enabled) = 0;
   virtual void set_submodes(int submodes) = 0;

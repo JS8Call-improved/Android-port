@@ -366,6 +366,24 @@ Java_com_js8call_core_JS8Engine_nativeTxMillisecondsUntilAudio(
   return static_cast<jint>(js8_engine_tx_milliseconds_until_audio(engine));
 }
 
+JNIEXPORT jint JNICALL
+Java_com_js8call_core_JS8Engine_nativeTxFrameIndex(
+    JNIEnv* /* env */,
+    jobject /* thiz */,
+    jlong handle) {
+  JS8Engine_Native* engine = reinterpret_cast<JS8Engine_Native*>(handle);
+  return static_cast<jint>(js8_engine_tx_frame_index(engine));
+}
+
+JNIEXPORT jint JNICALL
+Java_com_js8call_core_JS8Engine_nativeTxFrameCount(
+    JNIEnv* /* env */,
+    jobject /* thiz */,
+    jlong handle) {
+  JS8Engine_Native* engine = reinterpret_cast<JS8Engine_Native*>(handle);
+  return static_cast<jint>(js8_engine_tx_frame_count(engine));
+}
+
 JNIEXPORT void JNICALL
 Java_com_js8call_core_JS8Engine_nativeSetTxReady(
     JNIEnv* /* env */,

@@ -46,6 +46,18 @@
         <!-- Navigation bar -->
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowLightNavigationBar">true</item>
+
+        <!-- Settings screen -->
+        <item name="preferenceTheme">@style/ThemeOverlay.JS8Call.Preference</item>
+    </style>
+
+    <!-- androidx.preference still inflates the M2 SwitchCompat; swap in the M3 switch -->
+    <style name="ThemeOverlay.JS8Call.Preference" parent="PreferenceThemeOverlay">
+        <item name="switchPreferenceCompatStyle">@style/Preference.JS8Call.SwitchPreferenceCompat</item>
+    </style>
+
+    <style name="Preference.JS8Call.SwitchPreferenceCompat" parent="Preference.SwitchPreferenceCompat.Material">
+        <item name="widgetLayout">@layout/preference_widget_material_switch</item>
     </style>
 
     <!-- Application theme -->

@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- One hop in the path: drag handle, position, callsign, remove. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:gravity="center_vertical"
+    android:minHeight="56dp"
+    android:orientation="horizontal"
+    android:paddingStart="8dp"
+    android:paddingEnd="4dp">
+
+    <ImageView
+        android:id="@+id/drag_handle"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:contentDescription="@string/relay_path_reorder"
+        android:padding="8dp"
+        android:src="@drawable/ic_drag_handle"
+        app:tint="?attr/colorOnSurfaceVariant" />
+
+    <TextView
+        android:id="@+id/position_text"
+        android:layout_width="28dp"
+        android:layout_height="wrap_content"
+        android:textAppearance="?attr/textAppearanceBodyMedium"
+        android:textColor="?attr/colorOnSurfaceVariant"
+        tools:text="1." />
+
+    <TextView
+        android:id="@+id/callsign_text"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:textAppearance="?attr/textAppearanceBodyLarge"
+        tools:text="KA0XYZ" />
+
+    <TextView
+        android:id="@+id/role_text"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginEnd="8dp"
+        android:textAppearance="?attr/textAppearanceLabelSmall"
+        android:textColor="?attr/colorOnSurfaceVariant"
+        android:visibility="gone"
+        tools:text="Destination"
+        tools:visibility="visible" />
+
+    <ImageButton
+        android:id="@+id/remove_button"
+        style="?attr/borderlessButtonStyle"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:contentDescription="@string/relay_path_remove_hop"
+        android:padding="8dp"
+        android:src="@drawable/ic_close" />
+
+</LinearLayout>

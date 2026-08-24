@@ -29,6 +29,21 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     private val _radioFrequency = MutableLiveData<Long>()
     val radioFrequency: LiveData<Long> = _radioFrequency
 
+    private val _rigConnected = MutableLiveData<Boolean>(false)
+    val rigConnected: LiveData<Boolean> = _rigConnected
+
+    /** Null when the engine is not hunting for a clock offset. */
+    data class TimingSuggestion(
+        val kind: Int,
+        val driftMs: Long,
+        val step: Int,
+        val steps: Int,
+        val periodMs: Int = 15_000
+    )
+
+    private val _timingSuggestion = MutableLiveData<TimingSuggestion?>(null)
+    val timingSuggestion: LiveData<TimingSuggestion?> = _timingSuggestion
+
     private val waterfallRenderer = WaterfallRenderer()
 
     init {
@@ -64,6 +79,8 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         _isRunning.value = (state == EngineState.RUNNING)
         if (state == EngineState.STOPPED || state == EngineState.ERROR) {
             waterfallRenderer.clear()
+            // The rig link cannot outlive the engine that opened it
+            updateRigConnected(false)
         }
     }
 
@@ -97,6 +114,14 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     }
 
     /**
+     * Update whether rig control has a live link to the radio.
+     */
+    fun updateRigConnected(connected: Boolean) {
+        if (_rigConnected.value == connected) return
+        _rigConnected.value = connected
+    }
+
+    /**
      * Update audio device name.
      */
     fun updateAudioDevice(deviceName: String) {
@@ -108,6 +133,10 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
      */
     fun updateTimeDrift(driftMs: Long) {
         _status.value = _status.value?.copy(timeDriftMs = driftMs)
+    }
+
+    fun updateTimingSuggestion(suggestion: TimingSuggestion?) {
+        _timingSuggestion.value = suggestion
     }
 
     /**

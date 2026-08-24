@@ -7,37 +7,67 @@
     <string name="nav_decodes">Decodes</string>
     <string name="nav_messages">Messages</string>
     <string name="nav_transmit">Transmit</string>
+    <string name="nav_contacts">Contacts</string>
     <string name="nav_settings">Settings</string>
 
     <!-- Monitor screen -->
-    <string name="monitor_start">Start</string>
-    <string name="monitor_stop">Stop</string>
-    <string name="monitor_version">Version 1.0-RC1</string>
-    <string name="monitor_status_stopped">Stopped</string>
     <string name="monitor_status_starting">Starting…</string>
-    <string name="monitor_status_running">Monitoring</string>
-    <string name="monitor_status_error">Error: %s</string>
-    <string name="monitor_frequency">Frequency</string>
-    <string name="monitor_bandwidth">Bandwidth</string>
-    <string name="monitor_snr">SNR</string>
-    <string name="monitor_power">Power</string>
-    <string name="monitor_tx_offset">TX Offset</string>
-    <string name="monitor_time_drift">Time Drift</string>
-    <string name="monitor_time_sync">Sync</string>
-    <string name="monitor_time_drift_reset">Reset</string>
     <string name="monitor_time_sync_armed">Time sync armed — will apply on next decode</string>
-    <string name="monitor_audio_device">Audio Device</string>
     <string name="monitor_radio_frequency">Radio Frequency</string>
+
+    <!-- Monitor status strip -->
+    <string name="monitor_state_off">Off</string>
+    <string name="monitor_state_receiving">Receiving</string>
+    <string name="monitor_state_transmitting">Transmitting</string>
+    <string name="monitor_state_error">Error</string>
+    <string name="monitor_toggle">Monitoring</string>
+    <string name="monitor_more">More options</string>
+    <string name="monitor_telemetry">TX %1$d Hz · %2$s</string>
+    <string name="monitor_telemetry_power">%1$.1f dB · %2$s</string>
+    <string name="monitor_rig_connected">Rig connected</string>
+    <string name="monitor_rig_connecting">Rig connecting</string>
+    <string name="monitor_rig_disconnected">Rig not connected</string>
+    <string name="monitor_menu_audio_device">Audio device</string>
+    <string name="monitor_menu_time_sync">Sync clock to next decode</string>
+    <string name="monitor_menu_time_drift_adjust">Adjust time drift…</string>
+    <string name="monitor_menu_time_drift_reset">Reset time drift</string>
+    <string name="monitor_time_drift_title">Time drift</string>
+    <string name="monitor_time_drift_hint">Offset</string>
+    <string name="monitor_time_drift_suffix">ms</string>
+    <string name="monitor_time_drift_minus_second">−1s</string>
+    <string name="monitor_time_drift_minus_fine">−100</string>
+    <string name="monitor_time_drift_plus_fine">+100</string>
+    <string name="monitor_time_drift_plus_second">+1s</string>
+    <string name="monitor_time_drift_help">Shifts decode windows and transmit timing without changing the tablet clock. Negative when the clock runs fast.</string>
+    <string name="monitor_time_drift_set">Set</string>
+    <string name="monitor_time_drift_reset_action">Reset</string>
+    <string name="monitor_time_drift_applied">Time drift %+d ms</string>
+    <string name="monitor_time_drift_range">Enter %1$+d to %2$+d ms</string>
+    <string name="monitor_timing_checking">%1$s · checking timing %2$ds</string>
+    <string name="monitor_timing_found">Signals are not decoding. Timing looks %1$s off.</string>
+    <string name="monitor_timing_dismiss">Dismiss</string>
+    <string name="monitor_timing_apply">Fix it</string>
+    <string name="monitor_timing_show">View</string>
+    <string name="monitor_timing_applied">Timing corrected by %1$s</string>
+    <string name="monitor_audio_device_switching">Switching to %s…</string>
+    <string name="monitor_audio_device_selected">Audio device: %s</string>
 
     <!-- Decodes screen -->
     <string name="decodes_title">Decoded Messages</string>
     <string name="decodes_empty">No messages decoded yet</string>
     <string name="decodes_clear">Clear</string>
+    <string name="decodes_cq">CQ</string>
+    <string name="decodes_send_cq">Send CQ</string>
+    <string name="decodes_send_heartbeat">Send heartbeat</string>
+    <string name="decodes_open_all_activity">Open All activity</string>
+    <string name="decodes_queued">Queued %1$s</string>
+    <string name="decodes_start_first">Start monitoring first</string>
     <string name="decodes_copy">Copy</string>
     <string name="decodes_reply">Reply</string>
     <string name="decodes_sync_time">Sync clock to this signal (%+d ms)</string>
     <string name="decodes_sync_time_applied">Time drift set to %+d ms</string>
     <string name="decodes_filter">Filter</string>
+    <string name="decodes_outgoing_tag">TX</string>
     <string name="decode_time">Time</string>
     <string name="decode_snr">SNR</string>
     <string name="decode_freq">Freq</string>
@@ -72,6 +102,8 @@
     <!-- Settings -->
     <string name="settings_title">Settings</string>
     <string name="settings_category_audio">Audio</string>
+    <string name="settings_audio_device">Audio device</string>
+    <string name="settings_audio_device_none">No audio inputs found</string>
     <string name="settings_category_radio">Radio</string>
     <string name="settings_category_network">Network</string>
     <string name="settings_category_general">General</string>
@@ -147,9 +179,84 @@
     <string name="settings_autoreply_summary">Automatically respond to heartbeats with SNR</string>
     <string name="settings_relay">Enable Relay</string>
     <string name="settings_relay_summary">Automatically relay messages using CALL&gt;</string>
+    <!-- Held messages screen -->
+    <string name="mailbox_title">Held messages</string>
+    <string name="mailbox_empty">No held messages</string>
+    <string name="mailbox_empty_hint">Messages other stations ask you to hold appear here until their recipients collect them</string>
+    <string name="mailbox_from_age">from %1$s · %2$s</string>
+    <string name="mailbox_state_held">Held</string>
+    <string name="mailbox_state_delivered">Delivered</string>
+    <string name="mailbox_detail_from">From %1$s</string>
+    <string name="mailbox_detail_via">Via %1$s</string>
+    <string name="mailbox_delete">Delete</string>
+    <string name="mailbox_delete_confirm">Delete this message for %1$s? Its recipient has not necessarily seen it.</string>
+    <string name="mailbox_delete_delivered">Delete delivered</string>
+    <string name="mailbox_delete_delivered_confirm">Remove every message already collected by its recipient?</string>
+    <string name="mailbox_deleted">Deleted</string>
+    <string name="mailbox_none_waiting">No messages waiting at %1$s</string>
+    <string name="conversation_check_messages">Check for messages</string>
+    <string name="conversation_send_via_relay">Leave message at a station…</string>
+    <string name="conversation_relay_path">Relay path…</string>
+    <string name="relay_station_hint">Hold the message at</string>
+    <string name="relay_message_hint">Message</string>
+    <string name="relay_send">Send</string>
+
+    <string name="relay_path_title">Relay path</string>
+    <string name="relay_path_subtitle">to %1$s</string>
+    <string name="relay_path_save">Save</string>
+    <string name="relay_path_add_hint">Callsign</string>
+    <string name="relay_path_add_hop">Add station</string>
+    <string name="relay_path_remove_hop">Remove station</string>
+    <string name="relay_path_reorder">Reorder</string>
+    <string name="relay_path_heard">Heard recently</string>
+    <string name="relay_path_no_stations">No stations heard yet. Type a callsign above.</string>
+    <string name="relay_path_destination">Destination</string>
+    <string name="relay_position">%1$d.</string>
+    <string name="relay_path_hint">Every station on the path has to be on the air. Each hop repeats the whole message, so the send takes that much longer.</string>
+    <string name="relay_path_hint_direct">Messages go straight to %1$s. Add a station to route around a path that will not carry.</string>
+    <string name="relay_path_full">A path carries at most %1$d stations.</string>
+    <string name="relay_path_duplicate">%1$s is already on the path.</string>
+    <string name="relay_path_not_destination">%1$s is who you are sending to, not a hop.</string>
+    <string name="relay_path_invalid_callsign">%1$s does not look like a callsign.</string>
+    <string name="relay_path_saved">Relay path saved</string>
+    <string name="relay_path_cleared">Sending direct</string>
+    <string name="relay_direct">Direct</string>
+    <string name="relay_via">via %1$s</string>
+    <plurals name="relay_hop_count">
+        <item quantity="one">%1$d relay</item>
+        <item quantity="other">%1$d relays</item>
+    </plurals>
+    <string name="other_groups_title">Other groups</string>
+    <string name="other_groups_hint">Groups heard on the band. Long-press to join.</string>
+    <string name="group_no_traffic">No messages yet</string>
+    <string name="join_group">Join group</string>
+    <string name="join_group_confirm">Join %1$s? The thread moves to your Messages list and new traffic notifies you.</string>
+    <string name="group_joined">Joined %1$s</string>
+    <string name="cmd_query_msgs">Query messages (QUERY MSGS?)</string>
+    <plurals name="mailbox_destination_summary">
+        <item quantity="one">%1$d message, oldest %2$s</item>
+        <item quantity="other">%1$d messages, oldest %2$s</item>
+    </plurals>
+    <plurals name="mailbox_collected_by">
+        <item quantity="one">Collected by %1$d station</item>
+        <item quantity="other">Collected by %1$d stations</item>
+    </plurals>
+
+    <string name="settings_mailbox">Enable Mailbox</string>
+    <string name="settings_mailbox_summary">Hold messages other stations deposit with MSG TO: and serve them on request. Check your local rules on third-party traffic before enabling.</string>
+
+    <string name="settings_category_network_map">Network map</string>
+    <string name="settings_link_retention">Keep link data for</string>
+    <string name="settings_link_retention_summary">Who-hears-whom observations mined from decoded traffic, behind the network map and relay suggestions</string>
+    <string name="settings_clear_link_data">Clear link data</string>
+    <string name="settings_clear_link_data_summary">Delete all recorded link observations</string>
+    <string name="settings_clear_link_data_confirm">Delete all link observations? The network map starts over from what is heard next.</string>
+    <string name="settings_clear_link_data_done">Link data cleared</string>
 
     <string name="settings_category_heartbeat">Heartbeat</string>
     <string name="settings_category_timing">Timing</string>
+    <string name="settings_category_about">About</string>
+    <string name="settings_version">Version</string>
     <string name="settings_time_sync_auto">Auto time sync</string>
     <string name="settings_time_sync_auto_summary">Continuously adjust the app\'s clock drift from received signals. Useful off-grid where the device clock cannot sync.</string>
     <string name="settings_heartbeat_interval">Heartbeat Interval</string>
@@ -209,7 +316,24 @@
     <!-- Messages screen -->
     <string name="messages_title">Messages</string>
     <string name="messages_empty">No conversations yet</string>
-    <string name="messages_empty_hint">Direct messages (MSG) will appear here</string>
+    <string name="messages_empty_hint">Start one with the + button</string>
+    <string name="everything_title">All activity</string>
+    <string name="everything_subtitle">All activity on the band</string>
+    <string name="messages_new_hint">Callsign</string>
+    <string name="conversation_empty">No messages yet</string>
+    <string name="compose_commands">Commands</string>
+    <string name="compose_send">Send</string>
+    <string name="cmd_snr">SNR? · Signal report</string>
+    <string name="cmd_grid">GRID? · Grid square</string>
+    <string name="cmd_info">INFO? · Station info</string>
+    <string name="cmd_status">STATUS? · Station status</string>
+    <string name="cmd_hearing">HEARING? · Stations heard</string>
+    <string name="cmd_agn">AGN? · Repeat last message</string>
+    <string name="msg_status_queued">Queued</string>
+    <string name="msg_status_sending">Sending %1$ds</string>
+    <string name="msg_status_sending_frames">Sending %1$d/%2$d · %3$ds</string>
+    <string name="decodes_tx_countdown">TX %1$ds</string>
+    <string name="decodes_tx_countdown_frames">TX %1$d/%2$d · %3$ds</string>
     <string name="messages_compose_hint">Type message...</string>
     <string name="messages_send">Send</string>
     <string name="messages_new">New Message</string>
@@ -223,6 +347,49 @@
     <string name="messages_failed">Failed to send</string>
     <string name="messages_today">Today</string>
     <string name="messages_yesterday">Yesterday</string>
+
+    <!-- Contacts screen -->
+    <string name="contacts_empty">No stations heard</string>
+    <string name="contacts_empty_hint">Stations appear here as they are decoded</string>
+    <string name="contact_snr">SNR %1$d dB</string>
+    <string name="contact_offset">%1$d Hz</string>
+    <string name="contact_age_now">now</string>
+    <string name="contact_hears_us">Hears you</string>
+    <string name="contact_star">Favorite</string>
+    <string name="contact_action_message">Message</string>
+    <string name="contact_action_comment">Edit comment</string>
+    <string name="contact_action_delete">Delete</string>
+    <string name="contact_search_hint">Search contacts</string>
+    <string name="contacts_no_matches">No station matches “%1$s”</string>
+
+    <string name="contact_name_hint">Name</string>
+    <string name="contact_notes_hint">Notes</string>
+    <string name="contact_detail_heard">Heard</string>
+    <string name="contact_detail_last_heard">Last heard</string>
+    <string name="contact_detail_snr_label">Signal</string>
+    <string name="contact_detail_offset_label">Offset</string>
+    <string name="contact_detail_grid_label">Grid</string>
+    <string name="contact_detail_distance_label">Distance</string>
+    <string name="settings_distance_units">Distance units</string>
+
+    <string name="network_map_title">Network map</string>
+    <string name="network_map_empty">No links observed in this window yet.\nThe map fills in as stations are heard talking to each other.</string>
+    <string name="network_map_legend">Thicker line = stronger signal · arrow points at the station that heard</string>
+    <string name="network_map_age_1h">1 hour</string>
+    <string name="network_map_age_24h">24 hours</string>
+    <string name="network_map_age_7d">7 days</string>
+    <string name="contact_detail_info_label">Station info</string>
+    <string name="contact_detail_never_heard">Not heard on the air yet</string>
+    <string name="contact_detail_unfavorite">Remove favorite</string>
+    <string name="contact_deleted">Deleted %1$s</string>
+    <plurals name="contact_detail_mail">
+        <item quantity="one">%1$d message waiting for them</item>
+        <item quantity="other">%1$d messages waiting for them</item>
+    </plurals>
+    <string name="contact_comment_hint">Comment</string>
+    <string name="contact_comment_save">Save</string>
+    <string name="contact_delete_title">Delete %s?</string>
+    <string name="contact_delete_message">The star and comment are removed. The station returns on its next decode.</string>
 
     <!-- Message notifications -->
     <string name="notification_message_channel_name">Messages</string>

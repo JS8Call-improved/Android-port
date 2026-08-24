@@ -1,104 +1,96 @@
 <?xml version="1.0" encoding="utf-8"?>
-<com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- M3 two-line list item: avatar, callsign + preview, trailing time/badge. -->
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:layout_marginHorizontal="8dp"
-    android:layout_marginVertical="4dp"
-    android:foreground="?attr/selectableItemBackground"
-    app:cardElevation="1dp"
-    app:cardCornerRadius="12dp">
+    android:background="?attr/selectableItemBackground"
+    android:minHeight="72dp"
+    android:paddingHorizontal="16dp"
+    android:paddingVertical="12dp">
 
-    <androidx.constraintlayout.widget.ConstraintLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:padding="16dp">
+    <!-- Callsign avatar placeholder -->
+    <FrameLayout
+        android:id="@+id/avatar_frame"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:background="@drawable/avatar_circle_background"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
 
-        <!-- Callsign avatar placeholder -->
-        <FrameLayout
-            android:id="@+id/avatar_frame"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:background="@drawable/avatar_circle_background"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toTopOf="parent">
-
-            <TextView
-                android:id="@+id/avatar_text"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:gravity="center"
-                android:textColor="@color/md_theme_light_onPrimary"
-                android:textSize="18sp"
-                android:textStyle="bold"
-                tools:text="K" />
-
-        </FrameLayout>
-
-        <!-- Callsign -->
         <TextView
-            android:id="@+id/callsign_text"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="12dp"
-            android:layout_marginEnd="8dp"
-            android:ellipsize="end"
-            android:maxLines="1"
-            android:textAppearance="?attr/textAppearanceTitleMedium"
-            android:textStyle="bold"
-            app:layout_constraintEnd_toStartOf="@id/timestamp_text"
-            app:layout_constraintStart_toEndOf="@id/avatar_frame"
-            app:layout_constraintTop_toTopOf="@id/avatar_frame"
-            tools:text="KN4CRD" />
-
-        <!-- Timestamp -->
-        <TextView
-            android:id="@+id/timestamp_text"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textAppearance="?attr/textAppearanceLabelSmall"
-            android:textColor="?attr/colorOnSurfaceVariant"
-            app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintTop_toTopOf="@id/callsign_text"
-            tools:text="2:45 PM" />
-
-        <!-- Last message preview -->
-        <TextView
-            android:id="@+id/preview_text"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="12dp"
-            android:layout_marginTop="2dp"
-            android:layout_marginEnd="8dp"
-            android:ellipsize="end"
-            android:maxLines="2"
-            android:textAppearance="?attr/textAppearanceBodyMedium"
-            android:textColor="?attr/colorOnSurfaceVariant"
-            app:layout_constraintBottom_toBottomOf="@id/avatar_frame"
-            app:layout_constraintEnd_toStartOf="@id/unread_badge"
-            app:layout_constraintStart_toEndOf="@id/avatar_frame"
-            app:layout_constraintTop_toBottomOf="@id/callsign_text"
-            tools:text="Hello, how are you doing today?" />
-
-        <!-- Unread badge -->
-        <TextView
-            android:id="@+id/unread_badge"
-            android:layout_width="wrap_content"
-            android:layout_height="24dp"
-            android:minWidth="24dp"
-            android:background="@drawable/unread_badge_background"
+            android:id="@+id/avatar_text"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
             android:gravity="center"
-            android:paddingHorizontal="6dp"
-            android:textColor="@color/unread_badge_text"
-            android:textSize="12sp"
+            android:textColor="@color/md_theme_light_onPrimary"
+            android:textSize="18sp"
             android:textStyle="bold"
-            android:visibility="gone"
-            app:layout_constraintBottom_toBottomOf="@id/avatar_frame"
-            app:layout_constraintEnd_toEndOf="parent"
-            tools:text="3"
-            tools:visibility="visible" />
+            tools:text="K" />
 
-    </androidx.constraintlayout.widget.ConstraintLayout>
+    </FrameLayout>
 
-</com.google.android.material.card.MaterialCardView>
+    <!-- Callsign -->
+    <TextView
+        android:id="@+id/callsign_text"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="8dp"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:textAppearance="?attr/textAppearanceTitleMedium"
+        app:layout_constraintEnd_toStartOf="@id/timestamp_text"
+        app:layout_constraintStart_toEndOf="@id/avatar_frame"
+        app:layout_constraintTop_toTopOf="@id/avatar_frame"
+        tools:text="KN4CRD" />
+
+    <!-- Timestamp -->
+    <TextView
+        android:id="@+id/timestamp_text"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textAppearance="?attr/textAppearanceLabelSmall"
+        android:textColor="?attr/colorOnSurfaceVariant"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="@id/callsign_text"
+        tools:text="2:45 PM" />
+
+    <!-- Last message preview -->
+    <TextView
+        android:id="@+id/preview_text"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="16dp"
+        android:layout_marginTop="2dp"
+        android:layout_marginEnd="8dp"
+        android:ellipsize="end"
+        android:maxLines="2"
+        android:textAppearance="?attr/textAppearanceBodyMedium"
+        android:textColor="?attr/colorOnSurfaceVariant"
+        app:layout_constraintEnd_toStartOf="@id/unread_badge"
+        app:layout_constraintStart_toEndOf="@id/avatar_frame"
+        app:layout_constraintTop_toBottomOf="@id/callsign_text"
+        tools:text="Hello, how are you doing today?" />
+
+    <!-- Unread badge -->
+    <TextView
+        android:id="@+id/unread_badge"
+        android:layout_width="wrap_content"
+        android:layout_height="24dp"
+        android:minWidth="24dp"
+        android:background="@drawable/unread_badge_background"
+        android:gravity="center"
+        android:paddingHorizontal="6dp"
+        android:textColor="@color/unread_badge_text"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="@id/avatar_frame"
+        app:layout_constraintEnd_toEndOf="parent"
+        tools:text="3"
+        tools:visibility="visible" />
+
+</androidx.constraintlayout.widget.ConstraintLayout>

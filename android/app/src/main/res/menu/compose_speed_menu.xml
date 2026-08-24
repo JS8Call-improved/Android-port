@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <group
+        android:id="@+id/group_speed"
+        android:checkableBehavior="single">
+        <item
+            android:id="@+id/speed_slow"
+            android:title="@string/tx_speed_slow" />
+        <item
+            android:id="@+id/speed_normal"
+            android:title="@string/tx_speed_normal" />
+        <item
+            android:id="@+id/speed_fast"
+            android:title="@string/tx_speed_fast" />
+        <item
+            android:id="@+id/speed_turbo"
+            android:title="@string/tx_speed_turbo" />
+    </group>
+</menu>
