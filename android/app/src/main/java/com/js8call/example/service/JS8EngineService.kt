@@ -274,6 +274,7 @@ class JS8EngineService : Service() {
                         trusdxConnected = false
                         broadcastError("TruSDX serial link lost")
                     }
+
                 }
             )
         }

@@ -52,7 +52,9 @@ void Modulator::start(std::array<int, protocol::kJs8NumSymbols> const& tones,
     } else if (period_offset < start_delay_ms) {
       wait_ms = start_delay_ms - period_offset;
     } else {
-      ic_ = static_cast<std::uint64_t>((period_offset - start_delay_ms) * base_rate_ / 1000);
+      // JS8 frames are valid only from their slot boundary. Starting partway
+      // through a frame sends a partial waveform that receivers cannot decode.
+      wait_ms = period_ms - period_offset + start_delay_ms;
     }
     silent_frames_.store(wait_ms * base_rate_ / 1000);
   }

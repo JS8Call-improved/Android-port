@@ -195,9 +195,7 @@ class PumpAudioOutput final : public js8core::AudioOutput {
   }
 
   static constexpr int kDefaultRateHz = 11525;
-  // TruSDX serial audio is written in 256-byte blocks; matching the pump
-  // block avoids an extra callback and serial write every third block.
-  static constexpr std::size_t kDefaultFramesPerBuffer = 256;
+  static constexpr std::size_t kDefaultFramesPerBuffer = 192;
 
   js8core::AudioStreamParams params_{};
   js8core::AudioOutputFill fill_;

@@ -22,10 +22,13 @@ class TruSdxSerialSession(
     @Volatile private var connected = false
     private val running = AtomicBoolean(false)
     private val writeLock = Any()
-    private val txWriter = TruSdxTxWriter(::writeTxAudioFrame)
     @Volatile private var txActive = false
     @Volatile private var speakerEnabled = false
     @Volatile private var rxStreaming = false
+    private var txRateWindowStartNs = 0L
+    private var txRateWindowSamples = 0L
+    private var txRateWindowWrites = 0L
+    private var txRateWindowMaxWriteNs = 0L
     private val serialFrameBuffer = ByteArrayOutputStream(READ_BUFFER_SIZE * 2)
     private val rxAudioBuffer = ByteArrayOutputStream(RX_AUDIO_FLUSH_BYTES * 2)
     private var parserTotalBytes = 0L
@@ -61,13 +64,11 @@ class TruSdxSerialSession(
             return false
         }
         connected = true
-        txWriter.start()
         return true
     }
 
     fun stop() {
         stopReadLoop()
-        txWriter.close()
         connected = false
         try {
             serialCatExchange(";RX;", expectReply = false)
@@ -123,19 +124,19 @@ class TruSdxSerialSession(
         synchronized(writeLock) {
             try {
                 if (enabled) {
-                    directSerial.setRts(true)
                     // Single PTT command with leading semicolon to terminate any
                     // pending CAT exchange, matching the FT8CN truSDX protocol.
                     writeRawAscii(";TX0;")
                     // Allow the radio time to switch to TX / audio-input mode.
                     SystemClock.sleep(100)
                     txActive = true
-                    txWriter.enable()
+                    txRateWindowStartNs = System.nanoTime()
+                    txRateWindowSamples = 0L
+                    txRateWindowWrites = 0L
+                    txRateWindowMaxWriteNs = 0L
                 } else {
-                    txWriter.disableAndClear()
                     txActive = false
                     SystemClock.sleep(20)
-                    directSerial.setRts(false)
                     directSerial.purge()
                     repeat(10) {
                         writeRawAscii(";RX;")
@@ -144,7 +145,6 @@ class TruSdxSerialSession(
                     }
                     writeRawAscii(";RX;")
                     writeStreamingStateLocked()
-                    directSerial.setRts(false)
                 }
                 return true
             } catch (_: Throwable) {
@@ -203,31 +203,49 @@ class TruSdxSerialSession(
             payload[out++] = mapped.toByte()
         }
 
-        if (!txWriter.enqueue(payload)) {
-            Log.w(TAG, "TX audio queue full: queued=${txWriter.queuedFrames()} drops=${txWriter.droppedFrames}")
+        val writeStartedNs = System.nanoTime()
+        val written = synchronized(writeLock) {
+            if (!connected || !txActive) return@synchronized -1
+            var totalWritten = 0
+            while (totalWritten < payload.size) {
+                val chunkSize = minOf(TRUSDX_TX_CHUNK_BYTES, payload.size - totalWritten)
+                val chunk = payload.copyOfRange(totalWritten, totalWritten + chunkSize)
+                val chunkWritten = directSerial.write(chunk, chunk.size, IO_TIMEOUT_MS)
+                if (chunkWritten != chunk.size) {
+                    return@synchronized totalWritten + maxOf(chunkWritten, 0)
+                }
+                totalWritten += chunkWritten
+            }
+            totalWritten
+        }
+        if (written != payload.size) {
+            Log.w(TAG, "TX audio write failed: bytes=$written expected=${payload.size}")
             return false
         }
+        recordTxWrite(payload.size, System.nanoTime() - writeStartedNs)
         return true
     }
 
-    private fun writeTxAudioFrame(payload: ByteArray): Boolean = synchronized(writeLock) {
-        if (!connected || !txActive) return@synchronized true
-        var totalWritten = 0
-        while (totalWritten < payload.size) {
-            val chunkSize = minOf(TRUSDX_TX_CHUNK_BYTES, payload.size - totalWritten)
-            val chunk = if (totalWritten == 0 && chunkSize == payload.size) {
-                payload
-            } else {
-                payload.copyOfRange(totalWritten, totalWritten + chunkSize)
-            }
-            val written = directSerial.write(chunk, chunk.size, IO_TIMEOUT_MS)
-            if (written != chunk.size) {
-                Log.w(TAG, "TX audio write failed: bytes=${totalWritten + maxOf(written, 0)} expected=${payload.size}")
-                return@synchronized false
-            }
-            totalWritten += written
-        }
-        true
+    private fun recordTxWrite(samples: Int, writeDurationNs: Long) {
+        if (!txActive) return
+        val now = System.nanoTime()
+        if (txRateWindowStartNs == 0L) txRateWindowStartNs = now
+        txRateWindowSamples += samples.toLong()
+        txRateWindowWrites += 1L
+        txRateWindowMaxWriteNs = maxOf(txRateWindowMaxWriteNs, writeDurationNs)
+        val elapsedNs = now - txRateWindowStartNs
+        if (elapsedNs < TX_RATE_LOG_INTERVAL_NS) return
+
+        val rate = txRateWindowSamples * 1_000_000_000.0 / elapsedNs
+        Log.i(
+            TAG,
+            "TX stream: rate=${"%.0f".format(Locale.US, rate)} samples/s " +
+                "writes=$txRateWindowWrites maxWriteMs=${"%.1f".format(Locale.US, txRateWindowMaxWriteNs / 1_000_000.0)}"
+        )
+        txRateWindowStartNs = now
+        txRateWindowSamples = 0L
+        txRateWindowWrites = 0L
+        txRateWindowMaxWriteNs = 0L
     }
 
     private fun serialCatExchange(command: String, expectReply: Boolean): String {
@@ -358,6 +376,7 @@ class TruSdxSerialSession(
     companion object {
         private const val TAG = "TruSdxSerialSession"
         private const val IO_TIMEOUT_MS = 500
+        private const val TX_RATE_LOG_INTERVAL_NS = 2_000_000_000L
         private const val READ_BUFFER_SIZE = 500
         private const val MAX_SERIAL_FRAME_BYTES = 2048
         private const val PARSER_LOG_INTERVAL_NS = 2_000_000_000L
