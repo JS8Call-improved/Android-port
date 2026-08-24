@@ -803,18 +803,22 @@ public:
         }
       }
 
-      if (callbacks_.on_log && (++tx_log_counter_ % 1000 == 0)) {
+      if (callbacks_.on_log && (++tx_log_counter_ % 250 == 0)) {
         double sum_squares = 0.0;
+        float peak = 0.0f;
+        std::size_t soft_limited = 0;
         for (std::size_t i = 0; i < frames; ++i) {
           double v = static_cast<double>(tx_float_buffer_[i]);
           sum_squares += v * v;
+          peak = std::max(peak, std::abs(tx_float_buffer_[i]));
+          if (std::abs(tx_float_buffer_[i]) > 1.0f) ++soft_limited;
         }
         double rms = frames > 0 ? std::sqrt(sum_squares / static_cast<double>(frames)) : 0.0;
         char log_msg[256];
         snprintf(log_msg, sizeof(log_msg),
-                 "TX audio: frames=%zu, rms=%.4f, active=%d, tuning=%d, queue=%zu",
-                 frames, rms, tx_active_ ? 1 : 0, tx_settings_.tuning ? 1 : 0,
-                 tx_queue_.size());
+                 "TX audio: rate=%d, channels=%d, frames=%zu, gain=%.3f, rms=%.4f, peak=%.4f, soft_limited=%zu, active=%d, tuning=%d, queue=%zu",
+                 output_rate, buffer.format.channels, frames, gain, rms, peak, soft_limited,
+                 tx_active_ ? 1 : 0, tx_settings_.tuning ? 1 : 0, tx_queue_.size());
         callbacks_.on_log(LogLevel::Info, log_msg);
       }
 

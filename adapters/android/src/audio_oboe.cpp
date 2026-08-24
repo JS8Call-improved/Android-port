@@ -264,6 +264,11 @@ bool OboeAudioOutput::start(AudioStreamParams const& params,
   } else if (actual_format == oboe::AudioFormat::I16) {
     params_.format.sample_type = SampleType::Int16;
   }
+  __android_log_print(ANDROID_LOG_INFO, "JS8AudioOutput",
+                      "Output stream: device=%d, rate=%d Hz, channels=%d, format=%s, burst=%d",
+                      device_id_, params_.format.sample_rate, params_.format.channels,
+                      params_.format.sample_type == SampleType::Float32 ? "float" : "int16",
+                      stream_->getFramesPerBurst());
 
   return true;
 }

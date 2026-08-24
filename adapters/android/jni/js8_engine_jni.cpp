@@ -25,7 +25,7 @@
 
 // Forward declarations of JNI methods (defined in js8_jni_methods.cpp)
 extern "C" {
-JNIEXPORT jlong JNICALL Java_com_js8call_core_JS8Engine_00024Companion_nativeCreate(JNIEnv*, jobject, jobject, jint, jint, jboolean);
+JNIEXPORT jlong JNICALL Java_com_js8call_core_JS8Engine_00024Companion_nativeCreate(JNIEnv*, jobject, jobject, jint, jint, jboolean, jboolean);
 JNIEXPORT jboolean JNICALL Java_com_js8call_core_JS8Engine_nativeStart(JNIEnv*, jobject, jlong);
 JNIEXPORT void JNICALL Java_com_js8call_core_JS8Engine_nativeStop(JNIEnv*, jobject, jlong);
 JNIEXPORT void JNICALL Java_com_js8call_core_JS8Engine_nativeDestroy(JNIEnv*, jobject, jlong);
@@ -489,7 +489,8 @@ extern "C" {
 
 JS8Engine_Native* js8_engine_create(JNIEnv* env, jobject callback_handler,
                                      int sample_rate_hz, int submodes,
-                                     int enable_tx_audio_tap) {
+                                     int enable_tx_audio_tap,
+                                     int use_qmx_usb_audio) {
   if (!env || !callback_handler) return nullptr;
 
   auto native = new JS8Engine_Native();
@@ -545,8 +546,9 @@ JS8Engine_Native* js8_engine_create(JNIEnv* env, jobject callback_handler,
   // uses a meaningful portion of the U8 range (~128 of 256 levels at 0.5).
   // Too low (0.2) wastes resolution and sounds harsh; too high (1.0) overdrives
   // the radio's TX chain producing a noisy carrier with no modulation.
-  // Oboe/speaker path: keep headroom to avoid splatter/ALC on the analog chain.
-  config.tx_output_gain = (enable_tx_audio_tap != 0) ? 0.5f : 0.2f;
+  // QMX's USB Digi input is designed for full-scale digital drive.
+  config.tx_output_gain = (enable_tx_audio_tap != 0) ? 0.5f :
+                           (use_qmx_usb_audio != 0) ? 1.0f : 0.2f;
 
   js8core::EngineCallbacks callbacks;
   callbacks.on_event = [native](js8core::events::Variant const& event) {
@@ -920,7 +922,7 @@ int js8_register_natives(JavaVM* vm, JNIEnv* env) {
 
   // Map Kotlin Companion method to static method
   JNINativeMethod methods[] = {
-    {"nativeCreate", "(Lcom/js8call/core/JS8Engine$CallbackHandler;IIZ)J",
+    {"nativeCreate", "(Lcom/js8call/core/JS8Engine$CallbackHandler;IIZZ)J",
      (void*)Java_com_js8call_core_JS8Engine_00024Companion_nativeCreate},
     {"nativeStart", "(J)Z", (void*)Java_com_js8call_core_JS8Engine_nativeStart},
     {"nativeStop", "(J)V", (void*)Java_com_js8call_core_JS8Engine_nativeStop},

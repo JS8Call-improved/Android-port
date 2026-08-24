@@ -26,6 +26,7 @@ import com.js8call.core.BluetoothSerialPortCatalog
 import com.js8call.core.HamlibRigControl
 import com.js8call.core.JS8AudioHelper
 import com.js8call.core.JS8Engine
+import com.js8call.core.QmxDirectSerial
 import com.js8call.core.TruSdxDirectSerial
 import com.js8call.core.UsbSerialBridge
 import com.js8call.core.UsbSerialPortCatalog
@@ -63,15 +64,19 @@ class JS8EngineService : Service() {
     private var hamlibRigConnected: Boolean = false
     private var rtsPttConnected: Boolean = false
     private var trusdxConnected: Boolean = false
+    private var qmxConnected: Boolean = false
     private var rtsPttTransport: SerialTransport? = null
     private var usbSerialBridge: UsbSerialBridge? = null
     private var bluetoothSerialBridge: BluetoothSerialBridge? = null
     private var trusdxDirectSerial: TruSdxDirectSerial? = null
     private var trusdxSerialSession: TruSdxSerialSession? = null
+    private var qmxDirectSerial: QmxDirectSerial? = null
+    private var qmxCatSession: QmxCatSession? = null
     @Volatile private var trusdxInitInProgress: Boolean = false
     @Volatile private var engineStartGeneration: Int = 0
     @Volatile private var engineStartInProgress: Boolean = false
     @Volatile private var trusdxStartupWorkerActive: Boolean = false
+    @Volatile private var qmxStartupWorkerActive: Boolean = false
     @Volatile private var trusdxParserResyncs: Long = 0
     @Volatile private var trusdxRxFrames: Long = 0
     @Volatile private var trusdxRxSamples: Long = 0
@@ -247,6 +252,7 @@ class JS8EngineService : Service() {
         usbSerialBridge = UsbSerialBridge(applicationContext)
         bluetoothSerialBridge = BluetoothSerialBridge(applicationContext)
         trusdxDirectSerial = TruSdxDirectSerial(applicationContext)
+        qmxDirectSerial = QmxDirectSerial(applicationContext)
         hamlibRigControl = HamlibRigControl()
         trusdxSerialSession = trusdxDirectSerial?.let { direct ->
             TruSdxSerialSession(
@@ -277,6 +283,24 @@ class JS8EngineService : Service() {
 
                 }
             )
+        }
+        qmxCatSession = qmxDirectSerial?.let { direct ->
+            QmxCatSession(direct, object : QmxCatSession.Listener {
+                override fun onFrequency(frequencyHz: Long) {
+                    currentDialHz = frequencyHz
+                    mainHandler.post { broadcastRadioFrequency(frequencyHz) }
+                }
+
+                override fun onMessage(message: String) {
+                    Log.d(TAG, "QMX CAT <= $message")
+                }
+
+                override fun onIoError(message: String) {
+                    Log.w(TAG, "QMX CAT I/O error: $message")
+                    qmxConnected = false
+                    mainHandler.post { broadcastError("QMX CAT link lost") }
+                }
+            })
         }
         txHandlerThread.start()
         txHandler = Handler(txHandlerThread.looper)
@@ -449,7 +473,7 @@ class JS8EngineService : Service() {
                 return
             }
 
-            if (rigControlMode == "trusdx_serial") {
+            if (rigControlMode == "trusdx_serial" || rigControlMode == "qmx_serial") {
                 return
             }
             nextGeneration
@@ -540,8 +564,18 @@ class JS8EngineService : Service() {
                 sampleRateHz = 12000,
                 submodes = configuredRxSubmodes(),
                 callbackHandler = callbackHandler,
-                enableTxAudioTap = rigControlMode == "trusdx_serial"
+                enableTxAudioTap = rigControlMode == "trusdx_serial",
+                useQmxUsbAudio = rigControlMode == "qmx_serial"
             )
+
+            if (rigControlMode == "qmx_serial") {
+                selectedOutputDeviceId = findOutputDeviceId(selectedAudioDeviceId)
+                engine?.setOutputDevice(selectedOutputDeviceId)
+                Log.i(
+                    TAG,
+                    "QMX USB audio route: input=$selectedAudioDeviceId output=$selectedOutputDeviceId (${getOutputDeviceName(selectedOutputDeviceId)})"
+                )
+            }
 
             // Start engine
             if (engine?.start() == true) {
@@ -607,6 +641,16 @@ class JS8EngineService : Service() {
                 }
             }.start()
         }
+        if (rigControlMode == "qmx_serial" && qmxCatSession?.isConnected() == true) {
+            qmxStartupWorkerActive = true
+            Thread {
+                try {
+                    qmxCatSession?.stop()
+                } finally {
+                    qmxStartupWorkerActive = false
+                }
+            }.start()
+        }
         engineStartInProgress = false
         trusdxInitInProgress = false
         trusdxConnected = false
@@ -625,6 +669,7 @@ class JS8EngineService : Service() {
             rigControlMode = "none"
             rtsPttConnected = false
             trusdxConnected = false
+            qmxConnected = false
             rtsPttTransport = null
             return
         }
@@ -632,12 +677,14 @@ class JS8EngineService : Service() {
         rigControlMode = rigType ?: "none"
         rtsPttConnected = false
         trusdxConnected = false
+        qmxConnected = false
         rtsPttTransport = null
         when (rigType) {
             "network" -> initializeNetworkRigControl()
             "hamlib_usb" -> initializeHamlibUsbControl()
             "rts_ptt" -> initializeRtsPttControl()
             "trusdx_serial" -> initializeTruSdxControl(generation)
+            "qmx_serial" -> initializeQmxControl(generation)
             else -> Log.w(TAG, "Unknown rig type: $rigType")
         }
     }
@@ -791,11 +838,77 @@ class JS8EngineService : Service() {
         }.start()
     }
 
+    private fun initializeQmxControl(generation: Int) {
+        Log.i(TAG, "Initializing QMX CAT control")
+        qmxConnected = false
+        val prefs = PreferenceManager.getDefaultSharedPreferences(this)
+        val selectedPort = prefs.getString("rig_hamlib_usb_port", "auto")?.trim().orEmpty()
+        val selection = resolveSerialSelection(selectedPort, prefs)
+        if (selection?.transport != SerialTransport.USB) {
+            failEngineStart(generation, "QMX mode supports USB CAT only.")
+            return
+        }
+
+        var deviceId = selection.usbDeviceId
+        var portIndex = selection.portIndex
+        if (deviceId == null) {
+            val firstPort = try { UsbSerialPortCatalog.listPorts(this).firstOrNull() } catch (_: Throwable) { null }
+            deviceId = firstPort?.deviceId
+            portIndex = firstPort?.portIndex ?: 0
+        }
+        val usbDevice = deviceId?.let { UsbPermissionHelper.findUsbDeviceById(this, it) }
+        if (usbDevice == null) {
+            failEngineStart(generation, "No USB serial device found for QMX CAT control.")
+            return
+        }
+
+        val open = {
+            qmxStartupWorkerActive = true
+            Thread {
+                try {
+                    val baudRate = prefs.getString("qmx_cat_baud", "115200")?.toIntOrNull() ?: 115200
+                    val session = qmxCatSession
+                    val opened = session?.start(usbDevice.deviceId, portIndex, baudRate) == true
+                    val initialized = opened && session?.initialize() == true
+                    mainHandler.post {
+                        if (!isCurrentEngineStart(generation)) {
+                            if (opened) session?.stop()
+                        } else if (initialized) {
+                            qmxConnected = true
+                            rigCtlErrorShown = false
+                            if (currentDialHz > 0L) session?.setFrequency(currentDialHz)
+                            startEngine(generation)
+                        } else {
+                            session?.stop()
+                            failEngineStart(generation, "Failed to initialize QMX CAT control.")
+                        }
+                        qmxStartupWorkerActive = false
+                    }
+                } catch (error: Throwable) {
+                    qmxStartupWorkerActive = false
+                    mainHandler.post {
+                        failEngineStart(generation, "Failed to initialize QMX CAT control: ${error.message}")
+                    }
+                }
+            }.start()
+        }
+        if (UsbPermissionHelper.hasPermission(this, usbDevice)) {
+            open()
+        } else {
+            UsbPermissionHelper.requestPermission(this, usbDevice) { granted ->
+                if (!isCurrentEngineStart(generation)) return@requestPermission
+                if (granted) open() else failEngineStart(generation, "USB permission denied for QMX CAT control.")
+            }
+        }
+    }
+
     private fun applyTxBoostSetting() {
         val prefs = PreferenceManager.getDefaultSharedPreferences(this)
-        val txBoostEnabled = prefs.getBoolean("tx_boost_enabled", false)
+        // The generic boost uses soft limiting, which corrupts QMX's narrow FSK tones.
+        // QMX receives the engine's full-scale USB waveform without it.
+        val txBoostEnabled = rigControlMode != "qmx_serial" && prefs.getBoolean("tx_boost_enabled", false)
         engine?.setTxBoostEnabled(txBoostEnabled)
-        Log.i(TAG, "TX boost: ${if (txBoostEnabled) "enabled (+10 dB)" else "disabled"}")
+        Log.i(TAG, "TX boost: ${if (txBoostEnabled) "enabled (+10 dB)" else "disabled"}${if (rigControlMode == "qmx_serial") " for QMX clean USB audio" else ""}")
     }
 
     private fun configuredRxSubmodes(): Int {
@@ -1401,6 +1514,7 @@ class JS8EngineService : Service() {
             hamlibRigConnected = false
             rtsPttConnected = false
             trusdxConnected = false
+            qmxConnected = false
             trusdxWatchdogToken++
             trusdxTxIntentActive = false
             stopTruSdxRxWorker()
@@ -1411,6 +1525,7 @@ class JS8EngineService : Service() {
             rigControlMode = "none"
             hamlibRigControl?.close()
             trusdxSerialSession?.stop()
+            qmxCatSession?.stop()
             if (isTruSdxDiagnosticsEnabled() &&
                 (trusdxRxFrames > 0 || trusdxTxFrames > 0 || trusdxParserResyncs > 0 || trusdxTxDrops > 0 || trusdxRxUnderruns > 0 || trusdxRxFrameDrops > 0)
             ) {
@@ -2451,6 +2566,10 @@ class JS8EngineService : Service() {
             Log.d(TAG, "Setting transmit mode for TruSDX: USB")
             return sendRigModeCommand(RIG_MODE_USB, 0)
         }
+        if (rigControlMode == "qmx_serial") {
+            Log.d(TAG, "Setting transmit mode for QMX: Digi")
+            return qmxCatSession?.setDigiMode() == true
+        }
         val txMode = prefs.getString(PREF_TRANSMIT_MODE, "none") ?: "none"
         
         Log.d(TAG, "Setting transmit mode: $txMode")
@@ -2467,6 +2586,7 @@ class JS8EngineService : Service() {
         return when (rigControlMode) {
             "hamlib_usb" -> hamlibRigControl?.setMode(mode, passband) == true
             "trusdx_serial" -> trusdxSerialSession?.setUsbMode() == true
+            "qmx_serial" -> qmxCatSession?.setDigiMode() == true
             "rts_ptt" -> false
             // Network rig control mode setting not requested yet
             else -> false
@@ -3730,6 +3850,7 @@ class JS8EngineService : Service() {
             "hamlib_usb" -> hamlibRigConnected
             "rts_ptt" -> rtsPttConnected
             "trusdx_serial" -> trusdxConnected
+            "qmx_serial" -> qmxConnected
             else -> false
         }
     }
@@ -3746,6 +3867,7 @@ class JS8EngineService : Service() {
             "hamlib_usb" -> hamlibRigControl?.setPtt(enabled) == true
             "rts_ptt" -> setRtsPtt(enabled)
             "trusdx_serial" -> trusdxSerialSession?.setPtt(enabled) == true
+            "qmx_serial" -> qmxCatSession?.setPtt(enabled) == true
             else -> false
         }
     }
@@ -3776,6 +3898,7 @@ class JS8EngineService : Service() {
                 "hamlib_usb" -> hamlibRigControl?.setFrequency(frequencyHz) == true
                 "rts_ptt" -> false
                 "trusdx_serial" -> trusdxSerialSession?.setFrequency(frequencyHz) == true
+                "qmx_serial" -> qmxCatSession?.setFrequency(frequencyHz) == true
                 else -> false
             }
 
@@ -3787,6 +3910,7 @@ class JS8EngineService : Service() {
                         "hamlib_usb" -> hamlibRigControl?.getLastError().orEmpty()
                         "rts_ptt" -> "RTS PTT does not support frequency control"
                         "trusdx_serial" -> "TruSDX serial CAT command failed"
+                        "qmx_serial" -> "QMX CAT command failed"
                         else -> ""
                     }
                     if (detail.isNotBlank()) {

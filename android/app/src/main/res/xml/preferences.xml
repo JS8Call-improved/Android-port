@@ -177,6 +177,30 @@
 
         </PreferenceCategory>
 
+        <PreferenceCategory
+            app:title="@string/settings_qmx_category"
+            app:dependency="rig_control_enabled"
+            app:iconSpaceReserved="false">
+
+            <ListPreference
+                app:key="qmx_band_profile"
+                app:title="@string/settings_qmx_band_profile"
+                app:summary="@string/settings_qmx_band_profile_summary"
+                app:entries="@array/qmx_band_profile_entries"
+                app:entryValues="@array/qmx_band_profile_values"
+                app:defaultValue="low"
+                app:useSimpleSummaryProvider="true"
+                app:iconSpaceReserved="false" />
+
+            <EditTextPreference
+                app:key="qmx_cat_baud"
+                app:title="@string/settings_qmx_cat_baud"
+                app:summary="@string/settings_qmx_cat_baud_summary"
+                app:defaultValue="115200"
+                app:useSimpleSummaryProvider="true"
+                app:iconSpaceReserved="false" />
+        </PreferenceCategory>
+
     </PreferenceCategory>
 
     <!-- Network Category -->

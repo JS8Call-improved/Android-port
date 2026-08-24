@@ -82,10 +82,12 @@ Java_com_js8call_core_JS8Engine_00024Companion_nativeCreate(
     jobject callback_handler,
     jint sample_rate_hz,
     jint submodes,
-    jboolean enable_tx_audio_tap) {
+    jboolean enable_tx_audio_tap,
+    jboolean use_qmx_usb_audio) {
   JS8Engine_Native* engine = js8_engine_create(
       env, callback_handler, sample_rate_hz, submodes,
-      enable_tx_audio_tap == JNI_TRUE ? 1 : 0);
+      enable_tx_audio_tap == JNI_TRUE ? 1 : 0,
+      use_qmx_usb_audio == JNI_TRUE ? 1 : 0);
   return reinterpret_cast<jlong>(engine);
 }
 

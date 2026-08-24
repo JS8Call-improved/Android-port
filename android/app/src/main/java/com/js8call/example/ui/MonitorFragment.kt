@@ -498,14 +498,22 @@ class MonitorFragment : Fragment() {
         val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext())
         val customFrequencyMhz = prefs.getString("custom_frequency_mhz", "")?.trim().orEmpty()
 
-        val frequencyEntries = baseEntries.toMutableList()
-        val frequencyValues = baseValues.toMutableList()
+        val rigType = prefs.getString("rig_type", "none")
+        val qmxBands = when (prefs.getString("qmx_band_profile", "low")) {
+            "high" -> setOf("20m", "17m", "15m", "12m", "11m", "10m")
+            "mixed" -> setOf("60m", "40m", "30m", "20m", "17m", "15m")
+            else -> setOf("80m", "60m", "40m", "30m", "20m")
+        }
+        val presetPairs = baseEntries.indices.map { baseEntries[it] to baseValues[it] }
+            .filter { rigType != "qmx_serial" || qmxBands.any { band -> it.first.startsWith(band) } }
+        val frequencyEntries = presetPairs.map { it.first }.toMutableList()
+        val frequencyValues = presetPairs.map { it.second }.toMutableList()
 
         val customFrequencyHz = customFrequencyMhz.toDoubleOrNull()?.let { mhz ->
             if (mhz > 0) (mhz * 1_000_000.0).toLong() else null
         }
 
-        if (customFrequencyHz != null) {
+        if (customFrequencyHz != null && (rigType != "qmx_serial" || isQmxFrequencySupported(customFrequencyHz, qmxBands))) {
             frequencyEntries.add("Custom - ${customFrequencyMhz}MHz")
             frequencyValues.add(customFrequencyHz.toString())
         }
@@ -519,7 +527,7 @@ class MonitorFragment : Fragment() {
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         frequencySpinner.adapter = adapter
 
-        val defaultFrequency = baseValues.getOrNull(3) ?: "14078000"
+        val defaultFrequency = frequencyValues.firstOrNull() ?: "14078000"
         val savedFrequency = prefs.getString("last_frequency", defaultFrequency) ?: defaultFrequency
         val savedIndex = frequencyValues.indexOf(savedFrequency).takeIf { it >= 0 }
             ?: frequencyValues.indexOf(defaultFrequency).takeIf { it >= 0 }
@@ -546,7 +554,7 @@ class MonitorFragment : Fragment() {
                 val rigControlEnabled = prefs.getBoolean("rig_control_enabled", false)
                 val rigType = prefs.getString("rig_type", "none")
 
-                if (rigControlEnabled && (rigType == "network" || rigType == "hamlib_usb" || rigType == "trusdx_serial")) {
+                if (rigControlEnabled && (rigType == "network" || rigType == "hamlib_usb" || rigType == "trusdx_serial" || rigType == "qmx_serial")) {
                     // Send frequency change to service
                     val intent = Intent(requireContext(), JS8EngineService::class.java).apply {
                         action = JS8EngineService.ACTION_SET_FREQUENCY
@@ -566,6 +574,23 @@ class MonitorFragment : Fragment() {
                 // Do nothing
             }
         }
+    }
+
+    private fun isQmxFrequencySupported(frequencyHz: Long, bands: Set<String>): Boolean {
+        val band = when (frequencyHz) {
+            in 3_500_000L..4_000_000L -> "80m"
+            in 5_000_000L..5_500_000L -> "60m"
+            in 7_000_000L..7_300_000L -> "40m"
+            in 10_000_000L..10_150_000L -> "30m"
+            in 14_000_000L..14_350_000L -> "20m"
+            in 18_068_000L..18_168_000L -> "17m"
+            in 21_000_000L..21_450_000L -> "15m"
+            in 24_890_000L..24_990_000L -> "12m"
+            in 26_965_000L..27_405_000L -> "11m"
+            in 28_000_000L..29_700_000L -> "10m"
+            else -> return false
+        }
+        return band in bands
     }
 
     /**

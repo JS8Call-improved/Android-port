@@ -31,9 +31,10 @@ class JS8Engine private constructor(
             sampleRateHz: Int = 12000,
             submodes: Int = 0x1F, // default to A/B/C/E/I like desktop
             callbackHandler: CallbackHandler,
-            enableTxAudioTap: Boolean = false
+            enableTxAudioTap: Boolean = false,
+            useQmxUsbAudio: Boolean = false
         ): JS8Engine {
-            val handle = nativeCreate(callbackHandler, sampleRateHz, submodes, enableTxAudioTap)
+            val handle = nativeCreate(callbackHandler, sampleRateHz, submodes, enableTxAudioTap, useQmxUsbAudio)
             if (handle == 0L) {
                 throw RuntimeException("Failed to create native JS8 engine")
             }
@@ -45,7 +46,8 @@ class JS8Engine private constructor(
             callbackHandler: CallbackHandler,
             sampleRateHz: Int,
             submodes: Int,
-            enableTxAudioTap: Boolean
+            enableTxAudioTap: Boolean,
+            useQmxUsbAudio: Boolean
         ): Long
     }
 
