@@ -40,7 +40,6 @@ import com.js8call.example.util.TxMessageClassifier
 import java.util.Calendar
 import java.util.Locale
 import java.util.TimeZone
-import java.util.concurrent.CountDownLatch
 import java.util.concurrent.LinkedBlockingDeque
 import java.util.concurrent.TimeUnit
 
@@ -249,59 +248,7 @@ class JS8EngineService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        usbSerialBridge = UsbSerialBridge(applicationContext)
-        bluetoothSerialBridge = BluetoothSerialBridge(applicationContext)
-        trusdxDirectSerial = TruSdxDirectSerial(applicationContext)
-        qmxDirectSerial = QmxDirectSerial(applicationContext)
-        hamlibRigControl = HamlibRigControl()
-        trusdxSerialSession = trusdxDirectSerial?.let { direct ->
-            TruSdxSerialSession(
-                direct,
-                object : TruSdxSerialSession.Listener {
-                    override fun onCatMessage(message: String) {
-                        if (isTruSdxDiagnosticsEnabled()) {
-                            Log.v(TAG, "TruSDX CAT <= $message")
-                        }
-                    }
-
-                    override fun onAudioFrame(samplesU8: ByteArray) {
-                        handleTruSdxAudioFrame(samplesU8)
-                    }
-
-                    override fun onParserResync(reason: String) {
-                        trusdxParserResyncs += 1
-                        if (isTruSdxDiagnosticsEnabled()) {
-                            Log.w(TAG, "TruSDX parser resync ($reason), count=$trusdxParserResyncs")
-                        }
-                    }
-
-                    override fun onIoError(message: String) {
-                        Log.w(TAG, "TruSDX I/O error: $message")
-                        trusdxConnected = false
-                        broadcastError("TruSDX serial link lost")
-                    }
-
-                }
-            )
-        }
-        qmxCatSession = qmxDirectSerial?.let { direct ->
-            QmxCatSession(direct, object : QmxCatSession.Listener {
-                override fun onFrequency(frequencyHz: Long) {
-                    currentDialHz = frequencyHz
-                    mainHandler.post { broadcastRadioFrequency(frequencyHz) }
-                }
-
-                override fun onMessage(message: String) {
-                    Log.d(TAG, "QMX CAT <= $message")
-                }
-
-                override fun onIoError(message: String) {
-                    Log.w(TAG, "QMX CAT I/O error: $message")
-                    qmxConnected = false
-                    mainHandler.post { broadcastError("QMX CAT link lost") }
-                }
-            })
-        }
+        createRigTransports()
         txHandlerThread.start()
         txHandler = Handler(txHandlerThread.looper)
         txMonitorHandler = Handler(Looper.getMainLooper())
@@ -447,6 +394,66 @@ class JS8EngineService : Service() {
 
             val notificationManager = getSystemService(NotificationManager::class.java)
             notificationManager.createNotificationChannel(channel)
+        }
+    }
+
+    /**
+     * Build the rig transports. Called again on stop, once the old ones have
+     * been handed to the teardown, so a restart never reaches a closing link.
+     */
+    private fun createRigTransports() {
+        usbSerialBridge = UsbSerialBridge(applicationContext)
+        bluetoothSerialBridge = BluetoothSerialBridge(applicationContext)
+        trusdxDirectSerial = TruSdxDirectSerial(applicationContext)
+        qmxDirectSerial = QmxDirectSerial(applicationContext)
+        hamlibRigControl = HamlibRigControl()
+        trusdxSerialSession = trusdxDirectSerial?.let { direct ->
+            TruSdxSerialSession(
+                direct,
+                object : TruSdxSerialSession.Listener {
+                    override fun onCatMessage(message: String) {
+                        if (isTruSdxDiagnosticsEnabled()) {
+                            Log.v(TAG, "TruSDX CAT <= $message")
+                        }
+                    }
+
+                    override fun onAudioFrame(samplesU8: ByteArray) {
+                        handleTruSdxAudioFrame(samplesU8)
+                    }
+
+                    override fun onParserResync(reason: String) {
+                        trusdxParserResyncs += 1
+                        if (isTruSdxDiagnosticsEnabled()) {
+                            Log.w(TAG, "TruSDX parser resync ($reason), count=$trusdxParserResyncs")
+                        }
+                    }
+
+                    override fun onIoError(message: String) {
+                        Log.w(TAG, "TruSDX I/O error: $message")
+                        trusdxConnected = false
+                        broadcastError("TruSDX serial link lost")
+                    }
+
+                }
+            )
+        }
+        qmxCatSession = qmxDirectSerial?.let { direct ->
+            QmxCatSession(direct, object : QmxCatSession.Listener {
+                override fun onFrequency(frequencyHz: Long) {
+                    currentDialHz = frequencyHz
+                    mainHandler.post { broadcastRadioFrequency(frequencyHz) }
+                }
+
+                override fun onMessage(message: String) {
+                    Log.d(TAG, "QMX CAT <= $message")
+                }
+
+                override fun onIoError(message: String) {
+                    Log.w(TAG, "QMX CAT I/O error: $message")
+                    qmxConnected = false
+                    mainHandler.post { broadcastError("QMX CAT link lost") }
+                }
+            })
         }
     }
 
@@ -1500,14 +1507,26 @@ class JS8EngineService : Service() {
                 rigPttCommandPending = false
                 rigPttCompletion = null
             }
-            if (isRigControlConnected()) {
-                if (!releaseRigPttForShutdown()) {
-                    Log.e(TAG, "Unable to confirm PTT release during shutdown")
-                }
-            }
+            // Rig teardown belongs on the TX handler, not here. With the radio
+            // gone a CAT command blocks for hamlib's full timeout, and every
+            // HamlibRigControl method shares one monitor, so close() waits
+            // behind it. That was nine seconds on the main thread.
+            val shutdownMode = rigControlMode
+            val shutdownTransport = rtsPttTransport
+            val shutdownHamlib = hamlibRigControl
+            val shutdownUsb = usbSerialBridge
+            val shutdownBluetooth = bluetoothSerialBridge
+            val shutdownTruSdx = trusdxSerialSession
+            val shutdownQmx = qmxCatSession
+            val shutdownNetwork = rigCtlClient
+            val shouldReleasePtt = isRigControlConnected()
 
-            // Disconnect rig control on background thread
-            val networkClientToDisconnect = rigCtlClient
+            // Unregistering clears one native global whichever bridge asks, so
+            // it stays here: deferred, it could wipe a restart's registration.
+            shutdownUsb?.unregisterNative()
+            shutdownBluetooth?.unregisterNative()
+
+            createRigTransports()
             rigCtlClient = null
             rigCtlConnected = false
             rigCtlErrorShown = false
@@ -1523,9 +1542,6 @@ class JS8EngineService : Service() {
             trusdxRxKeepaliveCount = 0L
             rtsPttTransport = null
             rigControlMode = "none"
-            hamlibRigControl?.close()
-            trusdxSerialSession?.stop()
-            qmxCatSession?.stop()
             if (isTruSdxDiagnosticsEnabled() &&
                 (trusdxRxFrames > 0 || trusdxTxFrames > 0 || trusdxParserResyncs > 0 || trusdxTxDrops > 0 || trusdxRxUnderruns > 0 || trusdxRxFrameDrops > 0)
             ) {
@@ -1534,15 +1550,36 @@ class JS8EngineService : Service() {
                     "TruSDX diagnostics: rxFrames=$trusdxRxFrames rxSamples=$trusdxRxSamples rxFrameDrops=$trusdxRxFrameDrops rxSubmitDrops=$trusdxRxSubmitDrops rxUnderruns=$trusdxRxUnderruns txFrames=$trusdxTxFrames txSamples=$trusdxTxSamples txSilent=$trusdxTxSilentFrames txDrops=$trusdxTxDrops parserResyncs=$trusdxParserResyncs"
                 )
             }
-            usbSerialBridge?.unregisterNative()
-            usbSerialBridge?.close()
-            bluetoothSerialBridge?.close()
-            bluetoothSerialBridge?.unregisterNative()
 
-            if (networkClientToDisconnect != null) {
-                Thread {
-                    networkClientToDisconnect.disconnect()
-                }.start()
+            txHandler.post {
+                if (shouldReleasePtt) {
+                    // Captured references, not setRigPtt: the fields already
+                    // hold the transports the next start will use.
+                    val released = when (shutdownMode) {
+                        "network" -> shutdownNetwork?.setPtt(false) == true
+                        "hamlib_usb" -> shutdownHamlib?.setPtt(false) == true
+                        "rts_ptt" -> when (shutdownTransport) {
+                            SerialTransport.USB -> shutdownUsb?.setRts(false) == true
+                            SerialTransport.BLUETOOTH -> shutdownBluetooth?.setRts(false) == true
+                            else -> false
+                        }
+                        "trusdx_serial" -> shutdownTruSdx?.setPtt(false) == true
+                        "qmx_serial" -> shutdownQmx?.setPtt(false) == true
+                        else -> false
+                    }
+                    if (released) {
+                        synchronized(pttStateLock) { rigPttAsserted = false }
+                    } else {
+                        Log.e(TAG, "Unable to confirm PTT release during shutdown")
+                    }
+                }
+                shutdownHamlib?.close()
+                shutdownTruSdx?.stop()
+                shutdownQmx?.stop()
+                shutdownUsb?.close()
+                shutdownBluetooth?.close()
+                shutdownNetwork?.disconnect()
+                Log.i(TAG, "Rig control torn down")
             }
 
             pskReporterClient?.stop(flush = true)
@@ -2846,35 +2883,6 @@ class JS8EngineService : Service() {
         engine?.setTransmitReady(false)
         broadcastError(message)
         broadcastTxState(TX_STATE_FAILED)
-    }
-
-    private fun releaseRigPttForShutdown(): Boolean {
-        if (Looper.myLooper() == txHandler.looper) {
-            val released = setRigPtt(false)
-            if (released) rigPttAsserted = false
-            return released
-        }
-
-        val completed = CountDownLatch(1)
-        var released = false
-        txHandler.post {
-            try {
-                released = setRigPtt(false)
-                if (released) {
-                    synchronized(pttStateLock) {
-                        rigPttAsserted = false
-                    }
-                }
-            } finally {
-                completed.countDown()
-            }
-        }
-        completed.await()
-        if (!released) {
-            released = setRigPtt(false)
-            if (released) rigPttAsserted = false
-        }
-        return released
     }
 
     /**
