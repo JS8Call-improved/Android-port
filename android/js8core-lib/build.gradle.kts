@@ -112,6 +112,11 @@ android {
                 "../../adapters/android/jni/java"
             )
         }
+        getByName("androidTest") {
+            // The desktop project's reference recordings, packaged into the
+            // test APK rather than copied into the tree.
+            assets.srcDirs("../../media/tests")
+        }
     }
 }
 

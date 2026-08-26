@@ -40,6 +40,30 @@ JAVA_HOME=/opt/homebrew/opt/openjdk ANDROID_HOME=~/Library/Android/sdk ./gradlew
 
 Output: `android/app/build/outputs/apk/debug/`
 
+## Run the tests
+
+Unit tests run on the host. From the repo android folder:
+
+```bash
+JAVA_HOME=/opt/homebrew/opt/openjdk ANDROID_HOME=~/Library/Android/sdk ./gradlew :app:testDebugUnitTest
+```
+
+Report: `android/app/build/reports/tests/testDebugUnitTest/`
+
+The engine tests are instrumented and need a device or emulator attached:
+
+```bash
+JAVA_HOME=/opt/homebrew/opt/openjdk ANDROID_HOME=~/Library/Android/sdk ./gradlew :js8core-lib:connectedDebugAndroidTest
+```
+
+Report: `android/js8core-lib/build/reports/androidTests/connected/`
+
+To run one class:
+
+```bash
+JAVA_HOME=/opt/homebrew/opt/openjdk ANDROID_HOME=~/Library/Android/sdk ./gradlew :js8core-lib:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.js8call.core.JS8EngineLoopbackTest
+```
+
 ## Build Release APK (signed)
 
 Create a keystore once:
