@@ -536,7 +536,7 @@ class JS8EngineService : Service() {
                         updateHeardCallsign(text)
                         broadcastDecode(utc, snr, dt, freq, text, type, quality, mode, driftMs)
                         handleRelayFrame(text, snr, mode, freq, type)
-                        maybeHandleIncomingMessage(text, snr, freq, type)
+                        maybeHandleIncomingMessage(text, snr, freq, type, mode)
                         maybeHandleAutoReply(text, snr, mode)
                         maybeReportToPskReporter(utc, snr, freq, text)
                     }
@@ -2369,7 +2369,7 @@ class JS8EngineService : Service() {
 
         // Drifted timeline, so slots match the engine's cycle boundaries.
         val now = System.currentTimeMillis() + (engine?.timeDriftMs() ?: 0L)
-        val frameDuration = getFrameDurationMs()
+        val frameDuration = framePeriodMs(getPreferredTxSubmode())
 
         // Base delay
         var delay = if (first) {
@@ -2414,8 +2414,8 @@ class JS8EngineService : Service() {
         heartbeatHandler.postDelayed(heartbeatRunnable, waitMs)
     }
 
-    private fun getFrameDurationMs(): Long {
-        return when (getPreferredTxSubmode()) {
+    private fun framePeriodMs(submode: Int): Long {
+        return when (submode) {
             SUBMODE_SLOW -> 30000L
             SUBMODE_NORMAL -> 15000L
             SUBMODE_FAST -> 10000L
@@ -2918,7 +2918,7 @@ class JS8EngineService : Service() {
      *   FROM: TO MSG            (multi-frame: command frame)
      *   payload...              (multi-frame: data frames follow)
      */
-    private fun maybeHandleIncomingMessage(text: String, snr: Int, freq: Float, type: Int) {
+    private fun maybeHandleIncomingMessage(text: String, snr: Int, freq: Float, type: Int, submode: Int) {
         val callsign = getConfiguredCallsign()
         Log.d(TAG, "maybeHandleIncomingMessage: text='$text' type=$type callsign=$callsign")
         if (callsign == null) {
@@ -2973,6 +2973,8 @@ class JS8EngineService : Service() {
                 snr = snr,
                 frequency = freq,
                 lastUpdated = now,
+                // Rides out three lost frames in a row before giving up.
+                timeoutMs = 4 * framePeriodMs(submode),
                 parts = if (initialPayload.isNotBlank()) mutableListOf(initialPayload) else mutableListOf()
             )
             synchronized(msgLock) {
@@ -3020,17 +3022,17 @@ class JS8EngineService : Service() {
         val snr: Int,
         val frequency: Float,
         var lastUpdated: Long,
+        val timeoutMs: Long,
         val parts: MutableList<String> = mutableListOf()
     )
     
     private val msgBuffers = mutableMapOf<Int, MsgBuffer>()
     private val msgLock = Any()
-    private val MSG_BUFFER_TIMEOUT_MS = 60_000L
     
     private fun cleanupMsgBuffers(now: Long) {
         synchronized(msgLock) {
             msgBuffers.entries.removeIf { (_, buffer) ->
-                now - buffer.lastUpdated > MSG_BUFFER_TIMEOUT_MS
+                now - buffer.lastUpdated > buffer.timeoutMs
             }
         }
     }

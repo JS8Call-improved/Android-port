@@ -230,6 +230,7 @@ static bool is_callsign_like(std::string const& token) {
   return has_digit;
 }
 
+// First frame of a line only; a continuation's payload is plain text.
 static std::string maybe_insert_callsign_prefix(std::string const& text) {
   std::size_t first_sep = std::string::npos;
   for (std::size_t i = 0; i < text.size(); ++i) {
@@ -276,6 +277,7 @@ static std::string render_decoded_text(JS8Engine_Native* native, js8core::events
   }
 
   bool is_data_flag = (decoded.type & 0b100) == 0b100;
+  bool is_first_frame = (decoded.type & 0b1) == 0b1;
   // Try data payloads first (mirrors desktop unpack order).
   __android_log_print(ANDROID_LOG_DEBUG, "JS8FrameDebug",
                       "Trying data unpacker: frame='%s', decoded.type=0x%02x",
@@ -284,7 +286,7 @@ static std::string render_decoded_text(JS8Engine_Native* native, js8core::events
     auto data = unpack_fast_data_message(frame);
     __android_log_print(ANDROID_LOG_DEBUG, "JS8FrameDebug",
                         "unpack_fast_data returned: '%s'", data.c_str());
-    if (!data.empty()) return maybe_insert_callsign_prefix(data);
+    if (!data.empty()) return is_first_frame ? maybe_insert_callsign_prefix(data) : data;
     // Fast-data frames should not be treated as heartbeat/compound/directed.
     __android_log_print(ANDROID_LOG_WARN, "JS8FrameDebug",
                         "Fast data unpack failed, returning raw frame: '%s'", frame.c_str());
@@ -293,7 +295,7 @@ static std::string render_decoded_text(JS8Engine_Native* native, js8core::events
     auto data = unpack_data_message(frame);
     __android_log_print(ANDROID_LOG_DEBUG, "JS8FrameDebug",
                         "unpack_data returned: '%s'", data.c_str());
-    if (!data.empty()) return maybe_insert_callsign_prefix(data);
+    if (!data.empty()) return is_first_frame ? maybe_insert_callsign_prefix(data) : data;
   }
 
   // Heartbeat (most common for status beacons)
