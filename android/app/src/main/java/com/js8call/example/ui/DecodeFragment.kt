@@ -14,7 +14,7 @@ import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.floatingactionbutton.FloatingActionButton
-import com.google.android.material.bottomnavigation.BottomNavigationView
+import com.google.android.material.navigation.NavigationBarView
 import com.google.android.material.snackbar.Snackbar
 import com.js8call.example.R
 
@@ -150,7 +150,7 @@ class DecodeFragment : Fragment() {
             return
         }
         transmitViewModel.setDirectedTo(callsign)
-        val bottomNav = activity?.findViewById<BottomNavigationView>(R.id.bottom_navigation)
+        val bottomNav = activity?.findViewById<NavigationBarView>(R.id.bottom_navigation)
         if (bottomNav != null) {
             bottomNav.selectedItemId = R.id.navigation_transmit
         } else {
