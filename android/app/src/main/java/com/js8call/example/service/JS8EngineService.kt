@@ -36,6 +36,7 @@ import com.js8call.example.R
 import com.js8call.example.BuildConfig
 import com.js8call.example.network.PskReporterClient
 import com.js8call.example.util.CallsignValidator
+import com.js8call.example.util.Js8Commands
 import com.js8call.example.util.TxMessageClassifier
 import java.util.Calendar
 import java.util.Locale
@@ -2909,7 +2910,7 @@ class JS8EngineService : Service() {
         // Try parsing as a directed command (MSG header frame)
         val directed = parseDirectedCommand(text)
         
-        if (directed != null && (directed.command.uppercase() == "MSG" || directed.command.uppercase().startsWith("MSG"))) {
+        if (directed != null && (directed.command.uppercase() == Js8Commands.CMD_MSG || directed.command.uppercase() == Js8Commands.CMD_MSG_TO)) {
             // This is a MSG command frame
             val isForMe = isSelfCallsign(callsign, directed.to)
             val isForMyGroup = isSubscribedGroup(directed.to)
@@ -2919,23 +2920,9 @@ class JS8EngineService : Service() {
                 return
             }
             
-            // Extract any inline payload from concatenated format (MSGpayload)
-            val inlinePayload = if (directed.command.uppercase().startsWith("MSG") && directed.command.length > 3) {
-                directed.command.substring(3)
-            } else {
-                ""
-            }
+            val initialPayload = directed.payload
             
-            // Combine inline payload with any additional payload tokens
-            val initialPayload = if (inlinePayload.isNotBlank() && directed.payload.isNotBlank()) {
-                "$inlinePayload ${directed.payload}"
-            } else if (inlinePayload.isNotBlank()) {
-                inlinePayload
-            } else {
-                directed.payload
-            }
-            
-            Log.d(TAG, "maybeHandleIncomingMessage: MSG command from=${directed.from} to=${directed.to} inlinePayload='$inlinePayload' initialPayload='$initialPayload' isLastFrame=${isLastFrame(type)}")
+            Log.d(TAG, "maybeHandleIncomingMessage: MSG command from=${directed.from} to=${directed.to} initialPayload='$initialPayload' isLastFrame=${isLastFrame(type)}")
             
             // If this is the last frame and we have payload, deliver immediately
             if (isLastFrame(type) && initialPayload.isNotBlank()) {
@@ -3239,25 +3226,30 @@ class JS8EngineService : Service() {
         }
 
         var to = toToken
-        var command: String
-        var payloadStart = index + 1
+        val command: String
+        val payload: String
 
         if (toToken.endsWith(">")) {
             to = toToken.trimEnd('>')
             command = ">"
+            payload = tokens.drop(index + 1).joinToString(" ")
         } else {
             if (index + 1 >= tokens.size) return null
-            command = tokens[index + 1]
-            payloadStart = index + 2
+            val remainder = tokens.drop(index + 1).joinToString(" ")
+            val match = Js8Commands.matchAt(remainder)
+            if (match != null) {
+                command = match.command
+                payload = match.payload
+            } else {
+                // Unknown text keeps the single-token shape, so freetext frames
+                // reach callers unchanged.
+                command = tokens[index + 1]
+                payload = tokens.drop(index + 2).joinToString(" ")
+            }
         }
 
         if (to.isBlank() || command.isBlank()) return null
         if (from.isBlank() && command != ">") return null
-        val payload = if (payloadStart < tokens.size) {
-            tokens.subList(payloadStart, tokens.size).joinToString(" ")
-        } else {
-            ""
-        }
         return DirectedCommand(from, to, command, payload)
     }
 
