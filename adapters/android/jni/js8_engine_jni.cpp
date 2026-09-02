@@ -66,6 +66,13 @@ struct JS8Engine_Native {
   jobject callback_handler = nullptr;
   std::mutex callback_mutex;
 
+  struct CompoundCall {
+    std::string callsign;
+    float frequency = 0.0f;
+    std::chrono::steady_clock::time_point received_at;
+  };
+  std::vector<CompoundCall> compound_calls;
+
   bool tx_boost_enabled = false;
   std::mutex tx_boost_mutex;
 
@@ -260,7 +267,7 @@ static std::string maybe_insert_callsign_prefix(std::string const& text) {
   return rebuilt;
 }
 
-static std::string render_decoded_text(js8core::events::Decoded const& decoded) {
+static std::string render_decoded_text(JS8Engine_Native* native, js8core::events::Decoded const& decoded) {
   using namespace js8core::protocol::varicode;
 
   auto const& frame = decoded.data;
@@ -344,6 +351,29 @@ static std::string render_decoded_text(js8core::events::Decoded const& decoded) 
           out += part;
         }
       }
+      if (type == 1 && !parts.front().empty()) {
+        auto now = std::chrono::steady_clock::now();
+        native->compound_calls.erase(
+            std::remove_if(native->compound_calls.begin(), native->compound_calls.end(),
+                           [&](auto const& call) { return now - call.received_at > std::chrono::seconds(60); }),
+            native->compound_calls.end());
+        native->compound_calls.push_back({parts.front(), decoded.frequency, now});
+      }
+      if (type == 2 && !parts.front().empty() && !out.empty()) {
+        auto closest = native->compound_calls.end();
+        auto closest_distance = std::numeric_limits<float>::max();
+        for (auto it = native->compound_calls.begin(); it != native->compound_calls.end(); ++it) {
+          auto distance = std::fabs(decoded.frequency - it->frequency);
+          if (distance <= 10.0f && distance < closest_distance) {
+            closest = it;
+            closest_distance = distance;
+          }
+        }
+        if (closest != native->compound_calls.end()) {
+          out = closest->callsign + ": " + out;
+          native->compound_calls.erase(closest);
+        }
+      }
       if (!out.empty()) {
         __android_log_print(ANDROID_LOG_WARN, "JS8FrameDebug",
                             "Returning compound result: '%s' (should this be data?)", out.c_str());
@@ -399,7 +429,7 @@ static void event_callback(JS8Engine_Native* native, js8core::events::Variant co
 
   // Handle different event types
   if (auto* decoded = std::get_if<js8core::events::Decoded>(&event)) {
-    auto rendered = render_decoded_text(*decoded);
+    auto rendered = render_decoded_text(native, *decoded);
 
     auto emit_decoded = [&](js8core::events::Decoded const& d, std::string const& text_str) {
       jmethodID method = env->GetMethodID(handler_class, "onDecoded", "(IIFFLjava/lang/String;IFII)V");

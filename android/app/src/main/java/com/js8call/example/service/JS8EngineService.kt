@@ -3447,9 +3447,7 @@ class JS8EngineService : Service() {
     }
 
     private fun isSelfCallsign(myCall: String, from: String): Boolean {
-        val mine = myCall.trim().uppercase()
-        val theirs = from.trim().uppercase()
-        return mine == theirs
+        return CallsignValidator.matches(myCall, from)
     }
 
     private fun isGroupTarget(target: String): Boolean {

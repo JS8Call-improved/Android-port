@@ -11,4 +11,19 @@ object CallsignValidator {
 
         return token.split('/').any { baseCallsign.matches(it) }
     }
+
+    fun matches(value: String, other: String): Boolean {
+        val first = value.trim().uppercase(Locale.US)
+        val second = other.trim().uppercase(Locale.US)
+        return first.isNotEmpty() && second.isNotEmpty() &&
+            (first == second || baseCallsign(first) == baseCallsign(second))
+    }
+
+    private fun baseCallsign(value: String): String {
+        val slash = value.indexOf('/')
+        if (slash < 0) return value
+        val prefix = value.substring(0, slash)
+        val suffix = value.substring(slash + 1)
+        return if (prefix.length >= suffix.length) prefix else suffix
+    }
 }

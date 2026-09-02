@@ -20,4 +20,12 @@ class CallsignValidatorTest {
         assertFalse(CallsignValidator.isAmateurCallsign("@ALLCALL"))
         assertFalse(CallsignValidator.isAmateurCallsign("K1ABC!"))
     }
+
+    @Test
+    fun matchesBaseAndSlashCallsignForms() {
+        assertTrue(CallsignValidator.matches("K1ABC/P", "K1ABC"))
+        assertTrue(CallsignValidator.matches("EA8/K1ABC", "K1ABC"))
+        assertTrue(CallsignValidator.matches("k1abc", "K1ABC/P"))
+        assertFalse(CallsignValidator.matches("K1ABC", "W1ABC/P"))
+    }
 }

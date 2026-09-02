@@ -93,9 +93,30 @@ int main() {
   }
 
   {
+    check(!js8core::protocol::varicode::is_compound_callsign("K1ABC/P"),
+          "portable /P callsign is not compound");
+    check(js8core::protocol::varicode::is_compound_callsign("EA8/K1ABC"),
+          "prefix compound callsign remains compound");
+
+    auto frames = js8core::protocol::varicode::build_message_frames(
+        "K1ABC/P", "EM73", "W1AW", "W1AW MSG TEST", false, false, 0, nullptr);
+    bool saw_directed = false;
+    bool saw_compound_directed = false;
+    for (auto const& frame : frames) {
+      std::uint8_t directed_type = 0;
+      saw_directed = saw_directed || !js8core::protocol::varicode::unpack_directed_message(frame.first, &directed_type).empty();
+      std::uint8_t compound_type = 0;
+      saw_compound_directed = saw_compound_directed ||
+          (!js8core::protocol::varicode::unpack_compound_message(frame.first, &compound_type, nullptr, nullptr).empty() && compound_type == 2);
+    }
+    check(saw_directed, "portable sender uses a standard directed frame");
+    check(!saw_compound_directed, "portable sender does not use a compound-directed frame");
+  }
+
+  {
     // Regression: compound sender should use a compound-directed frame (no <....> over the air).
     auto frames = js8core::protocol::varicode::build_message_frames(
-        "2W0OXE/5", "IO81", "MO1QF", "TEST", false, false, 0, nullptr);
+        "2W0OXE/5", "IO81", "MO1QF", "MO1QF MSG TEST", false, false, 0, nullptr);
     check(frames.size() >= 2, "compound sender directed free-text produces multiple frames");
 
     bool saw_ra90 = false;
@@ -135,7 +156,7 @@ int main() {
   {
     // Regression: compound recipient should use a compound-directed frame.
     auto frames = js8core::protocol::varicode::build_message_frames(
-        "2W0OXE", "IO81", "MO1QF/5", "TEST", false, false, 0, nullptr);
+        "2W0OXE", "IO81", "MO1QF/5", "MO1QF/5 MSG TEST", false, false, 0, nullptr);
     check(frames.size() >= 2, "compound recipient directed free-text produces multiple frames");
 
     bool saw_directed = false;
@@ -162,7 +183,7 @@ int main() {
   {
     // Regression: compound sender and recipient should use a compound-directed frame.
     auto frames = js8core::protocol::varicode::build_message_frames(
-        "2W0OXE/5", "IO81", "MO1QF/5", "TEST", false, false, 0, nullptr);
+        "2W0OXE/5", "IO81", "MO1QF/5", "MO1QF/5 MSG TEST", false, false, 0, nullptr);
     check(frames.size() >= 2, "compound sender and recipient produce multiple frames");
 
     bool saw_directed = false;

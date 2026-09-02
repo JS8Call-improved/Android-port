@@ -782,12 +782,17 @@ bool is_valid_callsign(std::string const& callsign, bool* p_is_compound) {
   }
   static const std::regex re(R"(([@]?|\b)([A-Z0-9\/@][A-Z0-9\/]{0,2}[\/]?[A-Z0-9\/]{0,3}[\/]?[A-Z0-9\/]{0,3})\b)");
   bool match = std::regex_match(callsign, re);
-  if (p_is_compound) *p_is_compound = callsign.find('/') != std::string::npos;
+  if (p_is_compound) {
+    auto slash = callsign.rfind('/');
+    // /P is represented by the portable bit in a normal directed frame.
+    *p_is_compound = slash != std::string::npos && callsign.substr(slash) != "/P";
+  }
   return match;
 }
 
 bool is_compound_callsign(std::string const& callsign) {
-  return callsign.find('/') != std::string::npos;
+  bool is_compound = false;
+  return is_valid_callsign(callsign, &is_compound) && is_compound;
 }
 
 bool is_group_allowed(std::string const& group) {
