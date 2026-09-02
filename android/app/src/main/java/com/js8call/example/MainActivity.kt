@@ -51,15 +51,6 @@ class MainActivity : AppCompatActivity() {
                     decodeViewModel.addDecode(utc, snr, dt, freq, text, type, quality, mode, driftMs)
                     monitorViewModel.updateSnr(snr)
                 }
-                JS8EngineService.ACTION_MESSAGE_RECEIVED -> {
-                    val from = intent.getStringExtra(JS8EngineService.EXTRA_MESSAGE_FROM) ?: return
-                    val msgText = intent.getStringExtra(JS8EngineService.EXTRA_MESSAGE_TEXT) ?: return
-                    val snr = intent.getIntExtra(JS8EngineService.EXTRA_MESSAGE_SNR, 0)
-                    val freq = intent.getFloatExtra(JS8EngineService.EXTRA_MESSAGE_FREQ, 0f)
-                    val relayPath = intent.getStringExtra(JS8EngineService.EXTRA_MESSAGE_RELAY_PATH)
-                    val conversationId = intent.getStringExtra(JS8EngineService.EXTRA_MESSAGE_CONVERSATION_ID) ?: from
-                    messagesViewModel.insertIncomingMessage(conversationId, from, msgText, snr, freq, relayPath)
-                }
                 JS8EngineService.ACTION_QUEUE_TX -> {
                     val text = intent.getStringExtra(JS8EngineService.EXTRA_QUEUE_TX_TEXT) ?: return
                     val directed = intent.getStringExtra(JS8EngineService.EXTRA_QUEUE_TX_DIRECTED)
@@ -213,7 +204,6 @@ class MainActivity : AppCompatActivity() {
         applyKeepScreenOn(prefs.getBoolean(PREF_KEEP_SCREEN_ON, false))
         val filter = IntentFilter().apply {
             addAction(JS8EngineService.ACTION_DECODE)
-            addAction(JS8EngineService.ACTION_MESSAGE_RECEIVED)
             addAction(JS8EngineService.ACTION_QUEUE_TX)
             addAction(JS8EngineService.ACTION_TX_STATE)
             addAction(ACTION_PROCESS_TX_QUEUE)

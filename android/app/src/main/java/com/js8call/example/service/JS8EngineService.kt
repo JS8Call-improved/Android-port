@@ -34,10 +34,15 @@ import com.js8call.example.MainActivity
 import com.js8call.example.MessageLogWriter
 import com.js8call.example.R
 import com.js8call.example.BuildConfig
+import com.js8call.example.data.MessageRepository
 import com.js8call.example.network.PskReporterClient
 import com.js8call.example.util.CallsignValidator
 import com.js8call.example.util.Js8Commands
 import com.js8call.example.util.TxMessageClassifier
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import java.util.Calendar
 import java.util.Locale
 import java.util.TimeZone
@@ -45,6 +50,19 @@ import java.util.concurrent.LinkedBlockingDeque
 import java.util.concurrent.TimeUnit
 
 internal fun assembleMsgPayload(parts: List<String>): String = parts.joinToString(separator = "")
+
+internal fun findClosestMsgBufferKey(
+    keys: Iterable<Int>,
+    frequency: Float,
+    toleranceHz: Int = 10
+): Int? {
+    val rounded = Math.round(frequency)
+    return keys
+        .map { key -> key to Math.abs(key - rounded) }
+        .filter { (_, distance) -> distance <= toleranceHz }
+        .minByOrNull { (_, distance) -> distance }
+        ?.first
+}
 
 /**
  * Foreground service for running the JS8 engine in the background.
@@ -54,6 +72,8 @@ internal fun assembleMsgPayload(parts: List<String>): String = parts.joinToStrin
  */
 class JS8EngineService : Service() {
 
+    private val messageScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val messageRepository by lazy { MessageRepository.getInstance(applicationContext) }
     private var engine: JS8Engine? = null
     private var audioHelper: JS8AudioHelper? = null
     private var rigCtlClient: RigCtlClient? = null
@@ -2644,7 +2664,7 @@ class JS8EngineService : Service() {
         LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
     }
 
-    private fun broadcastMessageReceived(
+    private fun persistIncomingMessage(
         from: String,
         text: String,
         snr: Int,
@@ -2652,18 +2672,27 @@ class JS8EngineService : Service() {
         relayPath: String?,
         conversationId: String = from
     ) {
-        val intent = Intent(ACTION_MESSAGE_RECEIVED).apply {
-            putExtra(EXTRA_MESSAGE_FROM, from)
-            putExtra(EXTRA_MESSAGE_TEXT, text)
-            putExtra(EXTRA_MESSAGE_SNR, snr)
-            putExtra(EXTRA_MESSAGE_FREQ, freq)
-            putExtra(EXTRA_MESSAGE_CONVERSATION_ID, conversationId)
-            relayPath?.let { putExtra(EXTRA_MESSAGE_RELAY_PATH, it) }
+        messageScope.launch {
+            try {
+                messageRepository.insertIncomingMessage(conversationId, from, text, snr, freq, relayPath)
+            } catch (t: Throwable) {
+                Log.e(TAG, "Failed to persist incoming MSG from $from", t)
+                return@launch
+            }
+
+            mainHandler.post {
+                val intent = Intent(ACTION_MESSAGE_RECEIVED).apply {
+                    putExtra(EXTRA_MESSAGE_FROM, from)
+                    putExtra(EXTRA_MESSAGE_TEXT, text)
+                    putExtra(EXTRA_MESSAGE_SNR, snr)
+                    putExtra(EXTRA_MESSAGE_FREQ, freq)
+                    putExtra(EXTRA_MESSAGE_CONVERSATION_ID, conversationId)
+                    relayPath?.let { putExtra(EXTRA_MESSAGE_RELAY_PATH, it) }
+                }
+                LocalBroadcastManager.getInstance(this@JS8EngineService).sendBroadcast(intent)
+                showMessageNotification(from, text)
+            }
         }
-        LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
-        
-        // Also show a notification
-        showMessageNotification(from, text)
     }
     
     /**
@@ -2939,7 +2968,7 @@ class JS8EngineService : Service() {
                     .replace(Regex("\\s+[A-Z0-9]{3}$"), "")
                     .trim()
                 Log.i(TAG, "MSG received (single frame): from=${directed.from} to=${directed.to} text='$cleanPayload' conversationId=$conversationId")
-                broadcastMessageReceived(directed.from, cleanPayload, snr, freq, null, conversationId)
+                persistIncomingMessage(directed.from, cleanPayload, snr, freq, null, conversationId)
                 
                 // Queue auto-ACK now that full message is received (if autoreply enabled)
                 if (isAutoreplyEnabled()) {
@@ -3020,15 +3049,9 @@ class JS8EngineService : Service() {
     }
     
     private fun findMatchingMsgBufferKey(freq: Float): Int? {
-        val rounded = Math.round(freq)
         synchronized(msgLock) {
-            for (key in msgBuffers.keys) {
-                if (Math.abs(key - rounded) <= 5) {
-                    return key
-                }
-            }
+            return findClosestMsgBufferKey(msgBuffers.keys, freq)
         }
-        return null
     }
     
     private fun processMsgBuffer(buffer: MsgBuffer, myCallsign: String) {
@@ -3050,7 +3073,7 @@ class JS8EngineService : Service() {
         val conversationId = if (isForMyGroup) buffer.to else buffer.from
         
         Log.i(TAG, "MSG received (multi-frame): from=${buffer.from} to=${buffer.to} text='$cleanText' conversationId=$conversationId")
-        broadcastMessageReceived(buffer.from, cleanText, buffer.snr, buffer.frequency, null, conversationId)
+        persistIncomingMessage(buffer.from, cleanText, buffer.snr, buffer.frequency, null, conversationId)
         
         // Queue auto-ACK now that full message is received (if autoreply enabled)
         if (isAutoreplyEnabled()) {
