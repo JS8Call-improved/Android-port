@@ -527,7 +527,13 @@ class MonitorFragment : Fragment() {
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         frequencySpinner.adapter = adapter
 
-        val defaultFrequency = frequencyValues.firstOrNull() ?: "14078000"
+        // Preserve the established 20 m default for normal radios. QMX may not
+        // support 20 m in every hardware profile, so use its first valid preset.
+        val defaultFrequency = if (rigType == "qmx_serial") {
+            frequencyValues.firstOrNull() ?: "14078000"
+        } else {
+            baseValues.getOrNull(3) ?: "14078000"
+        }
         val savedFrequency = prefs.getString("last_frequency", defaultFrequency) ?: defaultFrequency
         val savedIndex = frequencyValues.indexOf(savedFrequency).takeIf { it >= 0 }
             ?: frequencyValues.indexOf(defaultFrequency).takeIf { it >= 0 }
