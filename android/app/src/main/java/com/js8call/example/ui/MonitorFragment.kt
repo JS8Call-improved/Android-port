@@ -1,12 +1,8 @@
 package com.js8call.example.ui
 
 import android.Manifest
-import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.media.AudioDeviceInfo
-import android.media.AudioManager
-import android.os.Build
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -47,11 +43,9 @@ class MonitorFragment : Fragment() {
     private lateinit var monitorVersionText: TextView
 
     // Audio device management
-    private var audioDeviceAdapter: ArrayAdapter<AudioDeviceItem>? = null
-    private var availableDevices = mutableListOf<AudioDeviceItem>()
-    private var isUpdatingSpinner = false
+    private var audioDeviceAdapter: ArrayAdapter<AudioDevices.Device>? = null
+    private var availableDevices = mutableListOf<AudioDevices.Device>()
     private var userInitiatedAudioSelection = false
-    private var lastSelectedAudioDeviceId = -1
 
     // Frequency management
     // Spinner position last applied programmatically; onItemSelected skips it
@@ -233,9 +227,7 @@ class MonitorFragment : Fragment() {
     }
 
     private fun startMonitoring() {
-        val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext())
-        val rigType = prefs.getString("rig_type", "none")
-        val skipMicPermission = rigType == "trusdx_serial"
+        val skipMicPermission = AudioDevices.usesSerialAudio(requireContext())
 
         // Check permission
         if (!skipMicPermission && !hasAudioPermission()) {
@@ -249,24 +241,10 @@ class MonitorFragment : Fragment() {
         // Start service with selected audio device
         val intent = Intent(requireContext(), JS8EngineService::class.java).apply {
             action = JS8EngineService.ACTION_START
-            // Pass selected device ID if any
-            if (availableDevices.isNotEmpty()) {
-                val selectedPos = audioDeviceSpinner.selectedItemPosition
-                if (selectedPos >= 0 && selectedPos < availableDevices.size) {
-                    var selectedDevice = availableDevices[selectedPos]
-                    if (rigType == "trusdx_serial" &&
-                        selectedDevice.id != JS8EngineService.TRUSDX_AUDIO_SERIAL_ID &&
-                        selectedDevice.id != JS8EngineService.TRUSDX_AUDIO_SPEAKER_ID
-                    ) {
-                        selectedDevice = availableDevices.firstOrNull {
-                            it.id == JS8EngineService.TRUSDX_AUDIO_SERIAL_ID
-                        } ?: selectedDevice
-                    }
-                    putExtra(JS8EngineService.EXTRA_AUDIO_DEVICE_ID, selectedDevice.id)
-                    android.util.Log.d("MonitorFragment",
-                        "Starting with device: ${selectedDevice.name} (ID: ${selectedDevice.id})")
-                }
-            }
+            val device = AudioDevices.selected(requireContext())
+            putExtra(JS8EngineService.EXTRA_AUDIO_DEVICE_ID, device.id)
+            android.util.Log.d("MonitorFragment",
+                "Starting with device: ${device.name} (ID: ${device.id})")
         }
         ContextCompat.startForegroundService(requireContext(), intent)
     }
@@ -346,19 +324,14 @@ class MonitorFragment : Fragment() {
                 val userInitiated = userInitiatedAudioSelection
                 userInitiatedAudioSelection = false
                 if (!userInitiated) return
-                if (isUpdatingSpinner) return
                 if (position < 0 || position >= availableDevices.size) return
 
                 val selectedDevice = availableDevices[position]
                 android.util.Log.d("MonitorFragment", "Audio device selected: ${selectedDevice.name} (ID: ${selectedDevice.id})")
 
-                // Only switch if engine is running
-                if (viewModel.isRunning.value == true) {
-                    if (selectedDevice.id == lastSelectedAudioDeviceId) return
-                    lastSelectedAudioDeviceId = selectedDevice.id
-                    val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext())
-                    prefs.edit().putInt(PREF_LAST_AUDIO_DEVICE_ID, selectedDevice.id).apply()
-                    switchAudioDevice(selectedDevice.id)
+                // Stored even while stopped, so the next start uses the pick.
+                if (AudioDevices.select(requireContext(), selectedDevice, viewModel.isRunning.value == true)) {
+                    Snackbar.make(requireView(), "Switching audio device...", Snackbar.LENGTH_SHORT).show()
                 }
             }
 
@@ -366,91 +339,14 @@ class MonitorFragment : Fragment() {
                 // Do nothing
             }
         }
-
-        // Populate with available devices
-        refreshAudioDevices()
     }
 
     private fun refreshAudioDevices() {
-        val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext())
-        val rigType = prefs.getString("rig_type", "none")
-        if (rigType == "trusdx_serial") {
-            availableDevices.clear()
-            availableDevices.add(AudioDeviceItem(JS8EngineService.TRUSDX_AUDIO_SERIAL_ID, "TruSDX Serial"))
-            availableDevices.add(AudioDeviceItem(JS8EngineService.TRUSDX_AUDIO_SPEAKER_ID, "TruSDX Speaker"))
-            audioDeviceAdapter?.notifyDataSetChanged()
-
-            val savedDeviceId = prefs.getInt(PREF_LAST_AUDIO_DEVICE_ID, JS8EngineService.TRUSDX_AUDIO_SERIAL_ID)
-            val selectedIndex = availableDevices.indexOfFirst { it.id == savedDeviceId }
-                .takeIf { it >= 0 } ?: 0
-            isUpdatingSpinner = true
-            audioDeviceSpinner.setSelection(selectedIndex)
-            isUpdatingSpinner = false
-            lastSelectedAudioDeviceId = availableDevices[selectedIndex].id
-            return
-        }
-
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
-            // Fallback for older versions
-            availableDevices.clear()
-            availableDevices.add(AudioDeviceItem(-1, "Default Microphone"))
-            audioDeviceAdapter?.notifyDataSetChanged()
-            return
-        }
-
-        val audioManager = requireContext().getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        val devices = audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS)
-
         availableDevices.clear()
-
-        for (device in devices) {
-            if (!device.isSource) continue
-            val deviceName = when (device.type) {
-                AudioDeviceInfo.TYPE_BUILTIN_MIC -> "Internal Microphone"
-                AudioDeviceInfo.TYPE_WIRED_HEADSET -> "Wired Headset"
-                AudioDeviceInfo.TYPE_USB_DEVICE -> {
-                    device.productName?.toString() ?: "USB Audio Device"
-                }
-                AudioDeviceInfo.TYPE_USB_ACCESSORY -> "USB Audio Accessory"
-                AudioDeviceInfo.TYPE_USB_HEADSET -> "USB Headset"
-                AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> "Bluetooth Headset"
-                AudioDeviceInfo.TYPE_BLUETOOTH_A2DP -> "Bluetooth Audio"
-                AudioDeviceInfo.TYPE_LINE_ANALOG -> "Line Input"
-                AudioDeviceInfo.TYPE_LINE_DIGITAL -> "Digital Line Input"
-                else -> continue  // Skip unknown types
-            }
-
-            availableDevices.add(AudioDeviceItem(device.id, deviceName))
-            android.util.Log.d("MonitorFragment", "Found audio device: $deviceName (ID: ${device.id})")
-        }
-
-        // Add default option if no devices found
-        if (availableDevices.isEmpty()) {
-            availableDevices.add(AudioDeviceItem(-1, "Default Microphone"))
-        }
-
+        availableDevices.addAll(AudioDevices.list(requireContext()))
         audioDeviceAdapter?.notifyDataSetChanged()
-
-        if (availableDevices.isNotEmpty()) {
-            val savedDeviceId = prefs.getInt(PREF_LAST_AUDIO_DEVICE_ID, -1)
-            val selectedIndex = availableDevices.indexOfFirst { it.id == savedDeviceId }
-                .takeIf { it >= 0 } ?: 0
-            isUpdatingSpinner = true
-            audioDeviceSpinner.setSelection(selectedIndex)
-            isUpdatingSpinner = false
-            lastSelectedAudioDeviceId = availableDevices[selectedIndex].id
-        }
-    }
-
-    private fun switchAudioDevice(deviceId: Int) {
-        // Send intent to service to switch audio device
-        val intent = Intent(requireContext(), JS8EngineService::class.java).apply {
-            action = JS8EngineService.ACTION_SWITCH_AUDIO_DEVICE
-            putExtra(JS8EngineService.EXTRA_AUDIO_DEVICE_ID, deviceId)
-        }
-        requireContext().startService(intent)
-
-        Snackbar.make(requireView(), "Switching audio device...", Snackbar.LENGTH_SHORT).show()
+        val selected = AudioDevices.selected(requireContext(), availableDevices)
+        audioDeviceSpinner.setSelection(availableDevices.indexOf(selected))
     }
 
     private fun updateFrequencyFromRadio(frequencyHz: Long) {
@@ -599,18 +495,7 @@ class MonitorFragment : Fragment() {
         return band in bands
     }
 
-    /**
-     * Data class for audio device items in spinner.
-     */
-    private data class AudioDeviceItem(
-        val id: Int,
-        val name: String
-    ) {
-        override fun toString(): String = name
-    }
-
     companion object {
         private const val REQUEST_AUDIO_PERMISSION = 1
-        private const val PREF_LAST_AUDIO_DEVICE_ID = "last_audio_device_id"
     }
 }
