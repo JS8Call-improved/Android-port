@@ -470,6 +470,12 @@ class JS8EngineService : Service() {
                 broadcastEngineState(STATE_STOPPED)
                 return
             }
+            if (qmxStartupWorkerActive) {
+                Log.w(TAG, "Ignoring engine start while QMX cleanup is still active")
+                broadcastError("QMX CAT initialization is still stopping. Please try again.")
+                broadcastEngineState(STATE_STOPPED)
+                return
+            }
 
             engineStartInProgress = true
             val nextGeneration = ++engineStartGeneration
