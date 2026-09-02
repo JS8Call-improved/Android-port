@@ -593,7 +593,7 @@ JS8Engine_Native* js8_engine_create(JNIEnv* env, jobject callback_handler,
                          "DecodeFinished: count=%zu", e.decoded);
     } else if (std::holds_alternative<js8core::events::Decoded>(event)) {
       auto const& e = std::get<js8core::events::Decoded>(event);
-      auto rendered = render_decoded_text(e);
+      auto rendered = render_decoded_text(native, e);
       __android_log_print(ANDROID_LOG_INFO, "JS8Engine_Native",
                          "DECODED: SNR=%d dB, freq=%.1f Hz, text='%s', raw='%s', type=%d, mode=%d",
                          e.snr, e.frequency, rendered.c_str(), e.data.c_str(), e.type, e.mode);
