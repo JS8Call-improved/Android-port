@@ -77,6 +77,8 @@ object AudioDevices {
      */
     fun selected(context: Context): Device = selected(context, list(context))
 
+    fun selectedName(context: Context): String = selected(context).name
+
     /** The same resolution against a list the caller already holds. */
     fun selected(context: Context, devices: List<Device>): Device {
         val savedId = PreferenceManager.getDefaultSharedPreferences(context)

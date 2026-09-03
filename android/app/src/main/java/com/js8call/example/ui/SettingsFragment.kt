@@ -6,12 +6,16 @@ import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.text.InputType
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.ViewModelProvider
 import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
 import androidx.preference.Preference
@@ -34,6 +38,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
     private var pendingLocationListener: LocationListener? = null
     private var pendingLocationTimeout: Runnable? = null
     private var gridPreference: GridSquarePreference? = null
+    private var audioDevicePreference: Preference? = null
     private var pendingStoragePermissionEnable = false
     private var logPreference: SwitchPreferenceCompat? = null
 
@@ -198,6 +203,20 @@ class SettingsFragment : PreferenceFragmentCompat() {
             }
         }
 
+        audioDevicePreference = findPreference("audio_device")
+        audioDevicePreference?.setOnPreferenceClickListener {
+            val engineRunning = ViewModelProvider(requireActivity())[MonitorViewModel::class.java]
+                .isRunning.value == true
+            AudioDevices.showPicker(requireContext(), engineRunning) { updateAudioDeviceSummary() }
+            true
+        }
+        // Some rigs(e.g. TruSDX) replace the device list
+        // The new val is stored after this returns so read it next pass
+        findPreference<ListPreference>("rig_type")?.setOnPreferenceChangeListener { _, _ ->
+            view?.post { updateAudioDeviceSummary() }
+            true
+        }
+
         gridPreference = findPreference("grid")
         gridPreference?.onUpdateClickListener = { onGridUpdateRequested() }
 
@@ -219,7 +238,25 @@ class SettingsFragment : PreferenceFragmentCompat() {
         }
     }
 
+    private val audioDeviceCallback = object : AudioDeviceCallback() {
+        override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>) = updateAudioDeviceSummary()
+        override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>) = updateAudioDeviceSummary()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        audioManager().registerAudioDeviceCallback(audioDeviceCallback, null)
+    }
+
+    private fun audioManager(): AudioManager =
+        requireContext().getSystemService(Context.AUDIO_SERVICE) as AudioManager
+
+    private fun updateAudioDeviceSummary() {
+        audioDevicePreference?.summary = AudioDevices.selectedName(requireContext())
+    }
+
     override fun onStop() {
+        audioManager().unregisterAudioDeviceCallback(audioDeviceCallback)
         cancelLocationRequest()
         super.onStop()
     }
