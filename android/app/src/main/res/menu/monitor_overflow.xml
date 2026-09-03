@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <item
+        android:id="@+id/action_audio_device"
+        android:title="@string/monitor_menu_audio_device" />
+
+    <item
+        android:id="@+id/action_time_sync"
+        android:title="@string/monitor_menu_time_sync" />
+
+    <item
+        android:id="@+id/action_time_drift_reset"
+        android:title="@string/monitor_menu_time_drift_reset" />
+
+</menu>
