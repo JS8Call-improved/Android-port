@@ -268,7 +268,7 @@ static std::string maybe_insert_callsign_prefix(std::string const& text) {
   return rebuilt;
 }
 
-static std::string render_decoded_text(JS8Engine_Native* native, js8core::events::Decoded const& decoded) {
+static std::string render_decoded_text(JS8Engine_Native* native, js8core::events::Decoded& decoded) {
   using namespace js8core::protocol::varicode;
 
   auto const& frame = decoded.data;
@@ -295,7 +295,12 @@ static std::string render_decoded_text(JS8Engine_Native* native, js8core::events
     auto data = unpack_data_message(frame);
     __android_log_print(ANDROID_LOG_DEBUG, "JS8FrameDebug",
                         "unpack_data returned: '%s'", data.c_str());
-    if (!data.empty()) return is_first_frame ? maybe_insert_callsign_prefix(data) : data;
+    if (!data.empty()) {
+      // Normal and Slow carry the data flag in the payload, not in the
+      // frame type; set it so Kotlin sees one convention for all modes.
+      decoded.type |= 0b100;
+      return is_first_frame ? maybe_insert_callsign_prefix(data) : data;
+    }
   }
 
   // Heartbeat (most common for status beacons)
@@ -431,7 +436,8 @@ static void event_callback(JS8Engine_Native* native, js8core::events::Variant co
 
   // Handle different event types
   if (auto* decoded = std::get_if<js8core::events::Decoded>(&event)) {
-    auto rendered = render_decoded_text(native, *decoded);
+    auto enriched = *decoded;
+    auto rendered = render_decoded_text(native, enriched);
 
     auto emit_decoded = [&](js8core::events::Decoded const& d, std::string const& text_str) {
       jmethodID method = env->GetMethodID(handler_class, "onDecoded", "(IIFFLjava/lang/String;IFII)V");
@@ -443,7 +449,7 @@ static void event_callback(JS8Engine_Native* native, js8core::events::Variant co
         env->DeleteLocalRef(text);
       }
     };
-    emit_decoded(*decoded, rendered);
+    emit_decoded(enriched, rendered);
   } else if (auto* spectrum = std::get_if<js8core::events::Spectrum>(&event)) {
     // Call onSpectrum(float[] bins, float binHz, float powerDb, float peakDb)
     jmethodID method = env->GetMethodID(handler_class, "onSpectrum", "([FFFF)V");
@@ -594,7 +600,7 @@ JS8Engine_Native* js8_engine_create(JNIEnv* env, jobject callback_handler,
       __android_log_print(ANDROID_LOG_DEBUG, "JS8Engine_Native",
                          "DecodeFinished: count=%zu", e.decoded);
     } else if (std::holds_alternative<js8core::events::Decoded>(event)) {
-      auto const& e = std::get<js8core::events::Decoded>(event);
+      auto e = std::get<js8core::events::Decoded>(event);
       auto rendered = render_decoded_text(native, e);
       __android_log_print(ANDROID_LOG_INFO, "JS8Engine_Native",
                          "DECODED: SNR=%d dB, freq=%.1f Hz, text='%s', raw='%s', type=%d, mode=%d",

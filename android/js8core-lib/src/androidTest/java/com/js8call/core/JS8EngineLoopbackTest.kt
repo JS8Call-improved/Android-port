@@ -2,6 +2,7 @@ package com.js8call.core
 
 import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -35,6 +36,26 @@ class JS8EngineLoopbackTest {
         val decoded = TestEngine().use { it.decode(period) }
         Log.i(TAG, "decoded ${decoded.size}: $decoded")
         assertTrue("own transmission did not decode", decoded.any { "CQ" in it.text })
+    }
+
+    @Test
+    fun dataFrameReportsTheDataType() {
+        val tx = TestEngine().use { it.transmitFromMidPeriod("HELLO", forceData = true) }
+        assertTrue("captured ${tx.seconds}s, expected a whole frame", tx.seconds > 10)
+
+        val period = tx.placedInPeriod(periodMs = 15_000, startDelayMs = 500)
+            .withNoise(rms = 300.0, seed = 1)
+
+        val decoded = TestEngine().use { it.decode(period) }
+        Log.i(TAG, "decoded ${decoded.size}: $decoded")
+        val frame = decoded.firstOrNull { "HELLO" in it.text }
+        assertNotNull("data frame did not decode", frame)
+
+        // Normal mode leaves the data flag out of the transmitted frame type;
+        // the JNI proves it by unpacking and must report it set, or every
+        // consumer keyed on the flag drops the frame.
+        assertTrue("type 0x${"%X".format(frame!!.type)} lacks the data flag",
+            frame.type and 0x4 != 0)
     }
 
     private companion object {
