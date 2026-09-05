@@ -84,13 +84,14 @@ object AudioDevices {
 
     /**
      * Remember the choice, and move a live capture onto it. Returns true when
-     * a live switch was dispatched: an unchanged choice is a no-op, and a
-     * stopped engine reads the saved choice when it next starts.
+     * a switch request was dispatched; the service ignores a request for the
+     * device it is already capturing on, since only it knows the active one.
      */
     fun select(context: Context, device: Device, engineRunning: Boolean): Boolean {
         val prefs = PreferenceManager.getDefaultSharedPreferences(context)
-        if (prefs.getInt(PREF_SELECTED_ID, DEFAULT_DEVICE_ID) == device.id) return false
-        prefs.edit().putInt(PREF_SELECTED_ID, device.id).apply()
+        if (prefs.getInt(PREF_SELECTED_ID, DEFAULT_DEVICE_ID) != device.id) {
+            prefs.edit().putInt(PREF_SELECTED_ID, device.id).apply()
+        }
 
         if (!engineRunning) return false
         val intent = Intent(context, JS8EngineService::class.java).apply {
