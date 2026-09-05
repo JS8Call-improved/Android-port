@@ -31,6 +31,7 @@ import com.js8call.core.TruSdxDirectSerial
 import com.js8call.core.UsbSerialBridge
 import com.js8call.core.UsbSerialPortCatalog
 import com.js8call.example.MainActivity
+import com.js8call.example.ui.AudioDevices
 import com.js8call.example.MessageLogWriter
 import com.js8call.example.R
 import com.js8call.example.BuildConfig
@@ -622,9 +623,9 @@ class JS8EngineService : Service() {
                 if (rigControlMode == "trusdx_serial") {
                     Log.i(TAG, "TruSDX mode active: skipping microphone capture")
                     val label = if (selectedAudioDeviceId == TRUSDX_AUDIO_SPEAKER_ID) {
-                        "TruSDX Speaker"
+                        TRUSDX_AUDIO_SPEAKER_NAME
                     } else {
-                        "TruSDX Serial"
+                        TRUSDX_AUDIO_SERIAL_NAME
                     }
                     broadcastAudioDevice(label)
                     broadcastEngineState(STATE_RUNNING)
@@ -1853,21 +1854,7 @@ class JS8EngineService : Service() {
     }
 
     private fun getDeviceName(device: AudioDeviceInfo): String {
-        return when (device.type) {
-            AudioDeviceInfo.TYPE_BUILTIN_MIC -> "Internal Microphone"
-            AudioDeviceInfo.TYPE_WIRED_HEADSET -> "Wired Headset"
-            AudioDeviceInfo.TYPE_USB_DEVICE -> {
-                // Try to get product name for USB devices
-                device.productName?.toString() ?: "USB Audio Device"
-            }
-            AudioDeviceInfo.TYPE_USB_ACCESSORY -> "USB Audio Accessory"
-            AudioDeviceInfo.TYPE_USB_HEADSET -> "USB Headset"
-            AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> "Bluetooth Headset"
-            AudioDeviceInfo.TYPE_BLUETOOTH_A2DP -> "Bluetooth Audio"
-            AudioDeviceInfo.TYPE_LINE_ANALOG -> "Line Input"
-            AudioDeviceInfo.TYPE_LINE_DIGITAL -> "Digital Line Input"
-            else -> "Unknown Device"
-        }
+        return AudioDevices.nameFor(device) ?: "Unknown Device"
     }
 
     private fun switchAudioDevice(deviceId: Int) {
@@ -1885,7 +1872,7 @@ class JS8EngineService : Service() {
                 if (!ok) {
                     broadcastError("Failed to update TruSDX speaker mode")
                 }
-                val label = if (speakerEnabled) "TruSDX Speaker" else "TruSDX Serial"
+                val label = if (speakerEnabled) TRUSDX_AUDIO_SPEAKER_NAME else TRUSDX_AUDIO_SERIAL_NAME
                 broadcastAudioDevice(label)
                 return
             }
@@ -4076,6 +4063,8 @@ class JS8EngineService : Service() {
         const val TRUSDX_TX_SAMPLE_RATE_HZ = 11520
         const val TRUSDX_AUDIO_SERIAL_ID = -2001
         const val TRUSDX_AUDIO_SPEAKER_ID = -2002
+        const val TRUSDX_AUDIO_SERIAL_NAME = "TruSDX Serial"
+        const val TRUSDX_AUDIO_SPEAKER_NAME = "TruSDX Speaker"
         private const val TRUSDX_RX_FRAME_QUEUE_MAX = 512
         private const val TRUSDX_RX_WATCHDOG_INTERVAL_MS = 1200L
         private const val TRUSDX_RX_STALL_REARM_NS = 2_000_000_000L
