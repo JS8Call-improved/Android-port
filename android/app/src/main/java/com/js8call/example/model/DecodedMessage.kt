@@ -37,6 +37,12 @@ data class DecodedMessage(
     fun isSingleFrame(): Boolean = isFirstFrame() && isLastFrame()
 
     /**
+     * Check if this frame carries a data payload.
+     * JS8CallData flag is bit 2 (type & 4).
+     */
+    fun isDataFrame(): Boolean = isDataFrame(type)
+
+    /**
      * Get color resource ID based on SNR level.
      */
     val snrColorRes: Int
@@ -81,6 +87,11 @@ data class DecodedMessage(
             localCal.get(java.util.Calendar.MINUTE),
             localCal.get(java.util.Calendar.SECOND)
         )
+    }
+
+    companion object {
+        /** The same data-flag test for callers holding only the type bits. */
+        fun isDataFrame(type: Int): Boolean = (type and 4) != 0
     }
 }
 

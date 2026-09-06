@@ -31,6 +31,7 @@ import com.js8call.core.TruSdxDirectSerial
 import com.js8call.core.UsbSerialBridge
 import com.js8call.core.UsbSerialPortCatalog
 import com.js8call.example.MainActivity
+import com.js8call.example.model.DecodedMessage
 import com.js8call.example.ui.AudioDevices
 import com.js8call.example.MessageLogWriter
 import com.js8call.example.R
@@ -2993,7 +2994,7 @@ class JS8EngineService : Service() {
         }
         
         // Not a directed command - check if it's a data frame for a buffered MSG
-        if (!isDataFrame(type)) {
+        if (!DecodedMessage.isDataFrame(type)) {
             return
         }
         
@@ -3071,7 +3072,6 @@ class JS8EngineService : Service() {
         }
     }
     
-    private fun isDataFrame(type: Int): Boolean = (type and 0x4) != 0
     
     private fun isSubscribedGroup(target: String): Boolean {
         if (!target.startsWith("@")) return false
@@ -3196,7 +3196,7 @@ class JS8EngineService : Service() {
             return
         }
 
-        if (!isRelayDataFrame(type)) return
+        if (!DecodedMessage.isDataFrame(type)) return
 
         val result = synchronized(relayLock) {
             val key = findMatchingRelayBufferKey(freq) ?: return@synchronized null
@@ -3443,7 +3443,6 @@ class JS8EngineService : Service() {
         return target.contains("@")
     }
 
-    private fun isRelayDataFrame(type: Int): Boolean = (type and 0x4) != 0
 
     private fun isLastFrame(type: Int): Boolean = (type and 0x2) != 0
 

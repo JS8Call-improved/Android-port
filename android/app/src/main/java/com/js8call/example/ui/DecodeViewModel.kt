@@ -14,27 +14,21 @@ import kotlin.math.roundToInt
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** A decoded frame reaching the list: its rendered text and JS8 type bits. */
-internal data class DecodeFrame(val text: String, val type: Int)
-
-private fun isDataFrame(type: Int): Boolean = (type and 0x4) != 0
-
-internal fun assembleMultipartDecodeText(frames: List<DecodeFrame>): String = buildString {
-    frames.forEachIndexed { index, frame ->
-        if (index > 0 && needsSpaceBefore(this, frames[index - 1].type, frame.text)) {
-            append(' ')
+internal fun assembleMultipartDecodeText(frames: List<DecodedMessage>): String {
+    val parts = frames.filter { it.text.isNotEmpty() }
+    return buildString {
+        parts.forEachIndexed { index, frame ->
+            if (index > 0 && needsSpaceBefore(parts[index - 1], frame)) append(' ')
+            append(frame.text)
         }
-        append(frame.text)
     }
 }
 
-// Data frames split mid-word and carry their own spaces; only a directed header
-// can leave a flush boundary that needs one.
-private fun needsSpaceBefore(soFar: CharSequence, prevType: Int, next: String): Boolean {
-    if (isDataFrame(prevType)) return false
-    if (soFar.isEmpty() || next.isEmpty()) return false
-    return !soFar.last().isWhitespace() && !next.first().isWhitespace()
-}
+// Data frames split mid-word and carry their own spaces. A directed header
+// can meet its payload flush: a buffered command strips the separator
+// before packing, so the boundary needs the space put back.
+private fun needsSpaceBefore(prev: DecodedMessage, next: DecodedMessage): Boolean =
+    !prev.isDataFrame() && !prev.text.last().isWhitespace() && !next.text.first().isWhitespace()
 
 /**
  * ViewModel for the Decodes screen.
@@ -224,10 +218,8 @@ class DecodeViewModel(application: Application) : AndroidViewModel(application) 
      * Assemble a complete message from buffered frames.
      */
     private fun assembleMessage(buffer: MessageBuffer): DecodedMessage {
-        val frameTexts = buffer.frames.map { it.text }.toMutableList()
-        normalizeCompoundDirectedHelpers(buffer.frames, frameTexts)
-
-        val frames = buffer.frames.zip(frameTexts) { frame, text -> DecodeFrame(text, frame.type) }
+        val frames = buffer.frames.toMutableList()
+        normalizeCompoundDirectedHelpers(frames)
         val assembledText = assembleMultipartDecodeText(frames)
 
         // Use the last frame's metadata (most recent)
@@ -247,20 +239,17 @@ class DecodeViewModel(application: Application) : AndroidViewModel(application) 
         )
     }
 
-    private fun normalizeCompoundDirectedHelpers(
-        frames: List<DecodedMessage>,
-        frameTexts: MutableList<String>
-    ) {
-        if (frameTexts.size < 2 || frames.size < 2) return
+    private fun normalizeCompoundDirectedHelpers(frames: MutableList<DecodedMessage>) {
+        if (frames.size < 2) return
 
         val firstFrame = frames[0]
         val secondFrame = frames[1]
-        if (isDataFrame(firstFrame.type) || isDataFrame(secondFrame.type)) return
+        if (firstFrame.isDataFrame() || secondFrame.isDataFrame()) return
         if (!firstFrame.isFirstFrame() || firstFrame.isLastFrame()) return
         if (secondFrame.isFirstFrame()) return
 
-        val first = frameTexts[0].trim()
-        val second = frameTexts[1].trim()
+        val first = firstFrame.text.trim()
+        val second = secondFrame.text.trim()
         if (!isCompoundDeHelperFrame(first)) return
 
         val fromCall = first.substringBefore(' ').trim()
@@ -268,14 +257,14 @@ class DecodeViewModel(application: Application) : AndroidViewModel(application) 
 
         val rewrittenDirected = rewriteDirectedPlaceholder(second, fromCall)
         if (rewrittenDirected != null) {
-            frameTexts[0] = ""
-            frameTexts[1] = rewrittenDirected
+            frames[0] = firstFrame.copy(text = "")
+            frames[1] = secondFrame.copy(text = rewrittenDirected)
             return
         }
 
         if (isDirectedCompoundHeader(second)) {
-            frameTexts[0] = ""
-            frameTexts[1] = "$fromCall: $second"
+            frames[0] = firstFrame.copy(text = "")
+            frames[1] = secondFrame.copy(text = "$fromCall: $second")
         }
     }
 

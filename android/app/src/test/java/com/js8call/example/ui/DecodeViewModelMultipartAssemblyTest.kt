@@ -1,12 +1,18 @@
 package com.js8call.example.ui
 
+import com.js8call.example.model.DecodedMessage
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class DecodeViewModelMultipartAssemblyTest {
     // JS8 frame type bits: 0x1 first, 0x2 last, 0x4 data.
-    private fun directed(text: String) = DecodeFrame(text, 0x1)
-    private fun data(text: String) = DecodeFrame(text, 0x4)
+    private fun frame(text: String, type: Int) = DecodedMessage(
+        utc = 0, snr = 0, dt = 0f, frequency = 0f, text = text,
+        type = type, quality = 0f, mode = 0
+    )
+
+    private fun directed(text: String) = frame(text, 0x1)
+    private fun data(text: String) = frame(text, 0x4)
 
     @Test
     fun dataFramesConcatenateWithoutASpace() {
