@@ -131,6 +131,13 @@ class MonitorFragment : Fragment() {
         val transmitting = engineState == EngineState.RUNNING &&
             transmitViewModel.txState.value == TransmitState.TRANSMITTING
 
+        // Ahead of the repaint skip: a denied permission leaves the state
+        // unchanged but the switch moved, and it has to come back
+        val shouldBeOn = engineState == EngineState.RUNNING || engineState == EngineState.STARTING
+        applyingSwitchState = true
+        powerSwitch.isChecked = shouldBeOn
+        applyingSwitchState = false
+
         val (labelRes, colorRes) = when {
             transmitting -> R.string.monitor_state_transmitting to R.color.tx_button_transmitting
             engineState == EngineState.RUNNING -> R.string.monitor_state_receiving to R.color.snr_excellent
@@ -146,11 +153,6 @@ class MonitorFragment : Fragment() {
         statusText.setText(labelRes)
         stateDot.imageTintList =
             ColorStateList.valueOf(ContextCompat.getColor(requireContext(), colorRes))
-
-        val shouldBeOn = engineState == EngineState.RUNNING || engineState == EngineState.STARTING
-        applyingSwitchState = true
-        powerSwitch.isChecked = shouldBeOn
-        applyingSwitchState = false
     }
 
     private fun renderTelemetry(status: MonitorStatus) {
