@@ -6,6 +6,8 @@ import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.os.Build
 import androidx.preference.PreferenceManager
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.js8call.example.R
 import com.js8call.example.service.JS8EngineService
 
 /**
@@ -100,6 +102,30 @@ object AudioDevices {
         }
         context.startService(intent)
         return true
+    }
+
+    /**
+     * Show the picker. [onSelected] runs after the choice is stored, so the
+     * caller only has to refresh whatever it shows the device on.
+     */
+    fun showPicker(
+        context: Context,
+        engineRunning: Boolean,
+        onSelected: (Device) -> Unit
+    ) {
+        val devices = list(context)
+        val current = selected(context, devices)
+        val checked = devices.indexOf(current)
+
+        MaterialAlertDialogBuilder(context)
+            .setTitle(R.string.monitor_menu_audio_device)
+            .setSingleChoiceItems(devices.map { it.name }.toTypedArray(), checked) { dialog, which ->
+                dialog.dismiss()
+                val device = devices[which]
+                select(context, device, engineRunning)
+                onSelected(device)
+            }
+            .show()
     }
 
     private const val PREF_SELECTED_ID = "last_audio_device_id"

@@ -10,24 +10,27 @@
     <string name="nav_settings">Settings</string>
 
     <!-- Monitor screen -->
-    <string name="monitor_start">Start</string>
-    <string name="monitor_stop">Stop</string>
-    <string name="monitor_version">Version 1.0-RC1</string>
-    <string name="monitor_status_stopped">Stopped</string>
-    <string name="monitor_status_starting">Starting…</string>
-    <string name="monitor_status_running">Monitoring</string>
-    <string name="monitor_status_error">Error: %s</string>
-    <string name="monitor_frequency">Frequency</string>
-    <string name="monitor_bandwidth">Bandwidth</string>
-    <string name="monitor_snr">SNR</string>
-    <string name="monitor_power">Power</string>
-    <string name="monitor_tx_offset">TX Offset</string>
-    <string name="monitor_time_drift">Time Drift</string>
-    <string name="monitor_time_sync">Sync</string>
-    <string name="monitor_time_drift_reset">Reset</string>
+    <string name="monitor_state_starting">Starting…</string>
     <string name="monitor_time_sync_armed">Time sync armed — will apply on next decode</string>
-    <string name="monitor_audio_device">Audio Device</string>
     <string name="monitor_radio_frequency">Radio Frequency</string>
+
+    <!-- Monitor status strip -->
+    <string name="monitor_state_off">Off</string>
+    <string name="monitor_state_receiving">Receiving</string>
+    <string name="monitor_state_transmitting">Transmitting</string>
+    <string name="monitor_state_error">Error</string>
+    <string name="monitor_toggle">Monitoring</string>
+    <string name="monitor_more">More options</string>
+    <string name="monitor_telemetry">TX %1$d Hz · %2$s</string>
+    <string name="monitor_telemetry_power">%1$.1f dB · %2$s</string>
+    <string name="monitor_menu_audio_device">Audio device</string>
+    <string name="monitor_menu_time_sync">Sync clock to next decode</string>
+    <string name="monitor_menu_time_drift_reset">Reset time drift</string>
+    <string name="monitor_audio_device_switching">Switching to %s…</string>
+    <string name="monitor_audio_device_selected">Audio device: %s</string>
+
+    <string name="settings_category_about">About</string>
+    <string name="settings_version">Version</string>
 
     <!-- Decodes screen -->
     <string name="decodes_title">Decoded Messages</string>
@@ -207,7 +210,6 @@
 
     <!-- Format strings -->
     <string name="format_frequency">%d Hz</string>
-    <string name="format_snr">%+d dB</string>
     <string name="format_dt">%+.1f s</string>
     <string name="format_time">%1$02d:%2$02d</string>
     <string name="format_decode">%1$04d  %2$+3d dB  %3$+5.1f s  %4$7.1f Hz  %5$s</string>

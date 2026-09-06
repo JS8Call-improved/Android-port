@@ -300,4 +300,17 @@
 
     </PreferenceCategory>
 
+<!-- About Category -->
+    <PreferenceCategory
+        app:title="@string/settings_category_about"
+        app:iconSpaceReserved="false">
+
+        <Preference
+            app:key="app_version"
+            app:title="@string/settings_version"
+            app:selectable="false"
+            app:iconSpaceReserved="false" />
+
+    </PreferenceCategory>
+
 </PreferenceScreen>

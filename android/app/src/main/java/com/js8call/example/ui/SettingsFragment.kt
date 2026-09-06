@@ -14,12 +14,14 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
+import androidx.preference.Preference
 import androidx.preference.PreferenceFragmentCompat
 import androidx.preference.SwitchPreferenceCompat
 import com.google.android.material.snackbar.Snackbar
 import com.js8call.core.BluetoothSerialPortCatalog
 import com.js8call.core.HamlibRigCatalog
 import com.js8call.core.UsbSerialPortCatalog
+import com.js8call.example.BuildConfig
 import com.js8call.example.R
 import java.util.Locale
 
@@ -66,15 +68,12 @@ class SettingsFragment : PreferenceFragmentCompat() {
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
         setPreferencesFromResource(R.xml.preferences, rootKey)
 
+        findPreference<Preference>("app_version")?.summary = BuildConfig.VERSION_NAME
+
         val prefs = preferenceManager.sharedPreferences
         if (prefs != null && !prefs.contains("my_status")) {
             val statusPref = findPreference<EditTextPreference>("my_status")
-            val versionName = try {
-                requireContext().packageManager.getPackageInfo(requireContext().packageName, 0).versionName
-            } catch (e: PackageManager.NameNotFoundException) {
-                "unknown"
-            }
-            statusPref?.text = "JS8Android-$versionName"
+            statusPref?.text = "JS8Android-${BuildConfig.VERSION_NAME}"
         }
 
         val callsignPref = findPreference<EditTextPreference>("callsign")

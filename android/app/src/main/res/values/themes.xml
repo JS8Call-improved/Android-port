@@ -68,12 +68,6 @@
         <item name="android:textSize">12sp</item>
     </style>
 
-    <!-- Status indicator style -->
-    <style name="StatusIndicator" parent="TextAppearance.Material3.LabelSmall">
-        <item name="android:textAllCaps">true</item>
-        <item name="android:textStyle">bold</item>
-    </style>
-
     <!-- FAB style -->
     <style name="FABStyle" parent="Widget.Material3.FloatingActionButton.Primary">
         <item name="android:layout_margin">16dp</item>
