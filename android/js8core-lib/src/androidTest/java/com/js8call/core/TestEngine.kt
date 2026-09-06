@@ -5,8 +5,8 @@ import org.junit.Assert.assertTrue
 import java.util.concurrent.CopyOnWriteArrayList
 
 /** One decode as the engine reported it. */
-internal data class Decode(val text: String, val snr: Int, val dt: Float, val freq: Float) {
-    override fun toString() = String.format("'%s' dt=%+.2f f=%.0f snr=%d", text, dt, freq, snr)
+internal data class Decode(val text: String, val snr: Int, val dt: Float, val freq: Float, val type: Int) {
+    override fun toString() = String.format("'%s' dt=%+.2f f=%.0f snr=%d type=0x%X", text, dt, freq, snr, type)
 }
 
 /**
@@ -29,7 +29,7 @@ internal class TestEngine : AutoCloseable {
                 utc: Int, snr: Int, dt: Float, freq: Float, text: String,
                 type: Int, quality: Float, mode: Int, driftMs: Int
             ) {
-                decodes.add(Decode(text, snr, dt, freq))
+                decodes.add(Decode(text, snr, dt, freq, type))
             }
 
             override fun onDecodeFinished(count: Int) {
@@ -85,7 +85,7 @@ internal class TestEngine : AutoCloseable {
      * to defer to the next boundary on its own, and returns what came off the
      * TX tap: at the engine rate, leading silence trimmed.
      */
-    fun transmitFromMidPeriod(text: String): ShortArray {
+    fun transmitFromMidPeriod(text: String, forceData: Boolean = false): ShortArray {
         engine.setTransmitReady(true)
         val offset = System.currentTimeMillis() % PERIOD_MS
         engine.setTimeDriftMs((ASK_AT_MS - offset + PERIOD_MS) % PERIOD_MS)
@@ -95,7 +95,8 @@ internal class TestEngine : AutoCloseable {
             myGrid = "EM12",
             submode = 0,
             audioFrequencyHz = 1500.0,
-            txDelaySec = 0.0
+            txDelaySec = 0.0,
+            forceData = forceData
         )
         assertTrue("transmit refused", accepted)
 

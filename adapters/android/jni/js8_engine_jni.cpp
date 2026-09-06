@@ -230,7 +230,9 @@ static bool is_callsign_like(std::string const& token) {
   return has_digit;
 }
 
-static std::string maybe_insert_callsign_prefix(std::string const& text) {
+// First frame of a line only; a continuation's payload is plain text.
+static std::string maybe_insert_callsign_prefix(std::string const& text, bool first_frame) {
+  if (!first_frame) return text;
   std::size_t first_sep = std::string::npos;
   for (std::size_t i = 0; i < text.size(); ++i) {
     if (std::isspace(static_cast<unsigned char>(text[i]))) {
@@ -267,15 +269,21 @@ static std::string maybe_insert_callsign_prefix(std::string const& text) {
   return rebuilt;
 }
 
-static std::string render_decoded_text(JS8Engine_Native* native, js8core::events::Decoded const& decoded) {
+// Renders the display text. *type gets the frame type, with the data flag
+// added when only the payload carried it.
+static std::string render_decoded_text(JS8Engine_Native* native,
+                                       js8core::events::Decoded const& decoded,
+                                       int* type) {
   using namespace js8core::protocol::varicode;
 
+  *type = decoded.type;
   auto const& frame = decoded.data;
   if (frame.size() < 12 || frame.find(' ') != std::string::npos) {
     return frame;
   }
 
   bool is_data_flag = (decoded.type & 0b100) == 0b100;
+  bool is_first_frame = (decoded.type & 0b1) == 0b1;
   // Try data payloads first (mirrors desktop unpack order).
   __android_log_print(ANDROID_LOG_DEBUG, "JS8FrameDebug",
                       "Trying data unpacker: frame='%s', decoded.type=0x%02x",
@@ -284,7 +292,7 @@ static std::string render_decoded_text(JS8Engine_Native* native, js8core::events
     auto data = unpack_fast_data_message(frame);
     __android_log_print(ANDROID_LOG_DEBUG, "JS8FrameDebug",
                         "unpack_fast_data returned: '%s'", data.c_str());
-    if (!data.empty()) return maybe_insert_callsign_prefix(data);
+    if (!data.empty()) return maybe_insert_callsign_prefix(data, is_first_frame);
     // Fast-data frames should not be treated as heartbeat/compound/directed.
     __android_log_print(ANDROID_LOG_WARN, "JS8FrameDebug",
                         "Fast data unpack failed, returning raw frame: '%s'", frame.c_str());
@@ -293,7 +301,12 @@ static std::string render_decoded_text(JS8Engine_Native* native, js8core::events
     auto data = unpack_data_message(frame);
     __android_log_print(ANDROID_LOG_DEBUG, "JS8FrameDebug",
                         "unpack_data returned: '%s'", data.c_str());
-    if (!data.empty()) return maybe_insert_callsign_prefix(data);
+    if (!data.empty()) {
+      // Normal and Slow carry the data flag in the payload, not in the
+      // frame type; set it so Kotlin sees one convention for all modes.
+      *type |= 0b100;
+      return maybe_insert_callsign_prefix(data, is_first_frame);
+    }
   }
 
   // Heartbeat (most common for status beacons)
@@ -429,19 +442,21 @@ static void event_callback(JS8Engine_Native* native, js8core::events::Variant co
 
   // Handle different event types
   if (auto* decoded = std::get_if<js8core::events::Decoded>(&event)) {
-    auto rendered = render_decoded_text(native, *decoded);
+    int type = 0;
+    auto rendered = render_decoded_text(native, *decoded, &type);
+    __android_log_print(ANDROID_LOG_INFO, "JS8Engine_Native",
+                       "DECODED: SNR=%d dB, freq=%.1f Hz, text='%s', raw='%s', type=%d, mode=%d",
+                       decoded->snr, decoded->frequency, rendered.c_str(),
+                       decoded->data.c_str(), type, decoded->mode);
 
-    auto emit_decoded = [&](js8core::events::Decoded const& d, std::string const& text_str) {
-      jmethodID method = env->GetMethodID(handler_class, "onDecoded", "(IIFFLjava/lang/String;IFII)V");
-      if (method) {
-        jstring text = env->NewStringUTF(text_str.c_str());
-        env->CallVoidMethod(native->callback_handler, method,
-                           d.utc, d.snr, d.xdt, d.frequency,
-                           text, d.type, d.quality, d.mode, d.drift_ms);
-        env->DeleteLocalRef(text);
-      }
-    };
-    emit_decoded(*decoded, rendered);
+    jmethodID method = env->GetMethodID(handler_class, "onDecoded", "(IIFFLjava/lang/String;IFII)V");
+    if (method) {
+      jstring text = env->NewStringUTF(rendered.c_str());
+      env->CallVoidMethod(native->callback_handler, method,
+                         decoded->utc, decoded->snr, decoded->xdt, decoded->frequency,
+                         text, type, decoded->quality, decoded->mode, decoded->drift_ms);
+      env->DeleteLocalRef(text);
+    }
   } else if (auto* spectrum = std::get_if<js8core::events::Spectrum>(&event)) {
     // Call onSpectrum(float[] bins, float binHz, float powerDb, float peakDb)
     jmethodID method = env->GetMethodID(handler_class, "onSpectrum", "([FFFF)V");
@@ -591,12 +606,6 @@ JS8Engine_Native* js8_engine_create(JNIEnv* env, jobject callback_handler,
       auto const& e = std::get<js8core::events::DecodeFinished>(event);
       __android_log_print(ANDROID_LOG_DEBUG, "JS8Engine_Native",
                          "DecodeFinished: count=%zu", e.decoded);
-    } else if (std::holds_alternative<js8core::events::Decoded>(event)) {
-      auto const& e = std::get<js8core::events::Decoded>(event);
-      auto rendered = render_decoded_text(native, e);
-      __android_log_print(ANDROID_LOG_INFO, "JS8Engine_Native",
-                         "DECODED: SNR=%d dB, freq=%.1f Hz, text='%s', raw='%s', type=%d, mode=%d",
-                         e.snr, e.frequency, rendered.c_str(), e.data.c_str(), e.type, e.mode);
     }
     event_callback(native, event);
   };

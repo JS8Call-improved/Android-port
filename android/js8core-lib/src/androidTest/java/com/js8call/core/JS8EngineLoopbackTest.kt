@@ -21,7 +21,27 @@ class JS8EngineLoopbackTest {
 
     @Test
     fun ownTransmissionDecodes() {
-        val tx = TestEngine().use { it.transmitFromMidPeriod("CQ CQ CQ") }
+        val decoded = loopback("CQ CQ CQ")
+        assertTrue("own transmission did not decode", decoded.any { "CQ" in it.text })
+    }
+
+    @Test
+    fun dataFrameReportsTheDataType() {
+        val decoded = loopback("HELLO", forceData = true)
+        val frame = requireNotNull(decoded.firstOrNull { "HELLO" in it.text }) {
+            "data frame did not decode"
+        }
+
+        // Normal mode leaves the data flag out of the transmitted frame type;
+        // the JNI proves it by unpacking and must report it set, or every
+        // consumer keyed on the flag drops the frame.
+        assertTrue("type 0x${"%X".format(frame.type)} lacks the data flag",
+            frame.type and 0x4 != 0)
+    }
+
+    /** Transmits [text], places the capture in a noisy period and decodes it. */
+    private fun loopback(text: String, forceData: Boolean = false): List<Decode> {
+        val tx = TestEngine().use { it.transmitFromMidPeriod(text, forceData) }
 
         // A whole frame is 12.6 s. Short means the modulator joined one in
         // progress instead of waiting for the boundary.
@@ -34,7 +54,7 @@ class JS8EngineLoopbackTest {
 
         val decoded = TestEngine().use { it.decode(period) }
         Log.i(TAG, "decoded ${decoded.size}: $decoded")
-        assertTrue("own transmission did not decode", decoded.any { "CQ" in it.text })
+        return decoded
     }
 
     private companion object {
