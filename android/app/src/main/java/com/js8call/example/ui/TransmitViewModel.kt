@@ -49,9 +49,10 @@ class TransmitViewModel(application: Application) : AndroidViewModel(application
         _queue.value = txQueue.toList()
         _txState.value = TransmitState.QUEUED
 
-        // Clear composed message after queuing (only for user-initiated sends)
+        // User sends start a new composition; automated queue entries do not.
         if (clearComposed) {
             _composedMessage.value = ""
+            _directedTo.value = ""
         }
     }
 
