@@ -10,11 +10,11 @@ internal data class Decode(val text: String, val snr: Int, val dt: Float, val fr
 }
 
 /**
- * A running engine for one transmit or one decode, closed by [use]. Submode A
- * at the engine's own rate, TX tap on. Each job shifts the clock first,
+ * A running engine for one transmit or one decode, closed by [use]. The chosen
+ * submode runs at the engine's own rate with the TX tap on. Each job shifts the clock first,
  * because the ring phase and the modulator both follow the wall clock.
  */
-internal class TestEngine : AutoCloseable {
+internal class TestEngine(private val submode: Int = SUBMODE_NORMAL) : AutoCloseable {
     private val decodes = CopyOnWriteArrayList<Decode>()
     private val tapped = ArrayList<ShortArray>()
     private var tapRate = SAMPLE_RATE
@@ -22,7 +22,7 @@ internal class TestEngine : AutoCloseable {
 
     private val engine = JS8Engine.create(
         sampleRateHz = SAMPLE_RATE,
-        submodes = SUBMODE_A,
+        submodes = rxMask(submode),
         enableTxAudioTap = true,
         callbackHandler = object : JS8Engine.CallbackHandler {
             override fun onDecoded(
@@ -81,19 +81,21 @@ internal class TestEngine : AutoCloseable {
     }
 
     /**
-     * Asks for [text] with the clock 13 s into a period, so the modulator has
+     * Asks for [text] from within a period, so the modulator has
      * to defer to the next boundary on its own, and returns what came off the
      * TX tap: at the engine rate, leading silence trimmed.
      */
     fun transmitFromMidPeriod(text: String): ShortArray {
         engine.setTransmitReady(true)
-        val offset = System.currentTimeMillis() % PERIOD_MS
-        engine.setTimeDriftMs((ASK_AT_MS - offset + PERIOD_MS) % PERIOD_MS)
+        val periodMs = periodMs(submode)
+        val askAtMs = periodMs - 2_000L
+        val offset = System.currentTimeMillis() % periodMs
+        engine.setTimeDriftMs((askAtMs - offset + periodMs) % periodMs)
         val accepted = engine.transmitMessage(
             text = text,
             myCall = "N5EKS",
             myGrid = "EM12",
-            submode = 0,
+            submode = submode,
             audioFrequencyHz = 1500.0,
             txDelaySec = 0.0
         )
@@ -125,9 +127,8 @@ internal class TestEngine : AutoCloseable {
 
     private companion object {
         const val TAG = "TestEngine"
-        const val SUBMODE_A = 0x1
-        const val PERIOD_MS = 15_000L
-        const val ASK_AT_MS = 13_000L // inside the frame, late enough to keep the wait short
+        const val SUBMODE_NORMAL = 0
+        const val SUBMODE_TURBO = 2
         const val MINUTE_MS = 60_000L
         const val CHUNK = 4_096
         const val POLL_MS = 50L
@@ -135,5 +136,17 @@ internal class TestEngine : AutoCloseable {
         const val DRAIN_MS = 1_500L
         const val TX_TIMEOUT_MS = 45_000L
         const val DECODE_TIMEOUT_MS = 30_000L
+
+        fun rxMask(submode: Int): Int = when (submode) {
+            SUBMODE_NORMAL -> 1 shl 0
+            SUBMODE_TURBO -> 1 shl 2
+            else -> error("unsupported test submode $submode")
+        }
+
+        fun periodMs(submode: Int): Long = when (submode) {
+            SUBMODE_NORMAL -> 15_000L
+            SUBMODE_TURBO -> 6_000L
+            else -> error("unsupported test submode $submode")
+        }
     }
 }

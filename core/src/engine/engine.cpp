@@ -380,9 +380,11 @@ public:
       int period_samples;
       int start_delay_samples;
       int samples_needed;
+      int retry_samples;
       int start_offset_samples;
       int current_decode_start = -1;  // Absolute position in buffer for current decode window
       int next_decode_start = -1;     // Absolute position in buffer for next decode window
+      int last_decode_sample = -1;
       int next_start = 0;  // Keep for compatibility (unused now)
     };
 
@@ -420,6 +422,7 @@ public:
       for (auto& sch : schedules_) {
         sch.current_decode_start = -1;
         sch.next_decode_start = -1;
+        sch.last_decode_sample = -1;
       }
       if (callbacks_.on_log) {
         char log_msg[256];
@@ -477,12 +480,19 @@ public:
           callbacks_.on_log(LogLevel::Info, log_msg);
         }
 
-        // Calculate samples needed for decode (includes start delay)
+        // Turbo can decode as soon as its 79 symbols are captured. Keep the
+        // slot available for later retries, matching the desktop scheduler.
         int samples_needed = (sm.symbol_samples * JS8_NUM_SYMBOLS) +
                             static_cast<int>((0.5 + sm.start_delay_ms / 1000.0) * sample_rate);
+        int retry_samples = period;
+        if (sm.id == protocol::SubmodeId::C) {
+          samples_needed = sm.symbol_samples * JS8_NUM_SYMBOLS;
+          retry_samples = sample_rate;
+        }
 
         schedules_.push_back(SubmodeSchedule{sm.id, period, start_delay_samples, samples_needed,
-                                             offset_samples, -1, -1, samples_until_next});
+                                             retry_samples, offset_samples, -1, -1, -1,
+                                             samples_until_next});
       }
     }
 
@@ -564,6 +574,7 @@ public:
         int aligned_start = sch.start_offset_samples + currentCycle * cycleFrames;
         sch.current_decode_start = aligned_start;
         sch.next_decode_start = sch.current_decode_start + cycleFrames;
+        sch.last_decode_sample = -1;
 
         if (callbacks_.on_log) {
           char log_msg[512];
@@ -574,8 +585,20 @@ public:
         }
       }
 
-      // Check if we have enough samples for this decode window
-      bool const ready = sch.current_decode_start + framesNeeded <= k;
+      // Advance past slots that have elapsed. Turbo retries stay in the
+      // current slot until the next six-second boundary.
+      while (k >= sch.next_decode_start) {
+        sch.current_decode_start = sch.next_decode_start;
+        sch.next_decode_start += cycleFrames;
+        sch.last_decode_sample = -1;
+      }
+
+      // Check if we have enough samples for this decode window. Turbo retries
+      // once per second so late/degraded frames get the same opportunities as
+      // the desktop scheduler.
+      bool const ready = sch.current_decode_start + framesNeeded <= k &&
+                         (sch.last_decode_sample < sch.current_decode_start ||
+                          k - sch.last_decode_sample >= sch.retry_samples);
 
       // DEBUG: Log ready check
       if (callbacks_.on_log && (debug_counter % 50 == 0 || ready)) {
@@ -592,9 +615,7 @@ public:
         *start = sch.current_decode_start;  // Absolute position in buffer
         *size = std::max(framesNeeded, k - sch.current_decode_start);
 
-        // Advance to next decode window
-        sch.current_decode_start = sch.next_decode_start;
-        sch.next_decode_start = sch.current_decode_start + cycleFrames;
+        sch.last_decode_sample = k;
       }
 
       return ready;
@@ -1038,6 +1059,7 @@ public:
     std::condition_variable decode_cv_;
     std::deque<DecodeState> decode_queue_;
     bool decode_stop_{false};
+    std::atomic<bool> decode_pending_{false};
 
     std::thread spectrum_thread_;
     std::mutex spectrum_mutex_;
@@ -1100,6 +1122,7 @@ public:
         std::lock_guard<std::mutex> lock(decode_mutex_);
         decode_stop_ = true;
         decode_queue_.clear();
+        decode_pending_.store(false);
       }
       decode_cv_.notify_one();
       if (decode_thread_.joinable()) decode_thread_.join();
@@ -1120,6 +1143,9 @@ public:
     }
 
     void enqueue_decode(DecodeState snapshot) {
+      // Turbo can retry every second. Do not turn retries into stale work when
+      // the single decoder worker is still processing the previous snapshot.
+      if (decode_pending_.exchange(true)) return;
       {
         std::lock_guard<std::mutex> lock(decode_mutex_);
         decode_queue_.push_back(std::move(snapshot));
@@ -1178,6 +1204,7 @@ public:
           }
           emit_event(ev);
         });
+        decode_pending_.store(false);
 
         if (callbacks_.on_log) {
           char log_msg[256];

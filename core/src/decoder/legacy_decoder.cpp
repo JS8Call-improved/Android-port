@@ -827,11 +827,6 @@ namespace
                     }
                 }
 
-#ifdef __ANDROID__
-                __android_log_print(ANDROID_LOG_INFO, "JS8Decoder",
-                                   "bpdecode174: Converged at iter %d, nerr=%d", iter, nerr);
-#endif
-
                 return nerr;
             }
 
@@ -840,23 +835,10 @@ namespace
                 int nd = ncheck - nclast;
                 ncnt = (nd < 0) ? 0 : ncnt + 1;
                 if (ncnt >= 5 && iter >= 10 && ncheck > 15) {
-#ifdef __ANDROID__
-                    __android_log_print(ANDROID_LOG_DEBUG, "JS8Decoder",
-                                       "bpdecode174: Early stop at iter %d, ncheck=%d, ncnt=%d",
-                                       iter, ncheck, ncnt);
-#endif
                     return -1;
                 }
             }
             nclast = ncheck;
-
-#ifdef __ANDROID__
-            // Log progress every 5 iterations
-            if (iter % 5 == 0) {
-                __android_log_print(ANDROID_LOG_DEBUG, "JS8Decoder",
-                                   "bpdecode174: iter %d, ncheck=%d", iter, ncheck);
-            }
-#endif
 
             // Send messages from bits to check nodes
             for (int i = 0; i < M; ++i) {
@@ -894,10 +876,6 @@ namespace
             }
         }
 
-#ifdef __ANDROID__
-        __android_log_print(ANDROID_LOG_DEBUG, "JS8Decoder",
-                           "bpdecode174: Max iterations reached, ncheck=%d", nclast);
-#endif
         return -1; // Decoding failed
     }
 }
@@ -1484,38 +1462,18 @@ namespace
                 nharderrors = bpdecode174(llr, decoded, cw);
                 xsnr        = -99.0f;
 
-#ifdef __ANDROID__
-                __android_log_print(ANDROID_LOG_INFO, "JS8Decoder",
-                                   "js8dec: ipass=%d, nharderrors=%d", ipass, nharderrors);
-#endif
-
                 // Check for all-zero codeword
                 if (std::all_of(cw.begin(), cw.end(), [](int x) { return x == 0; }))
                 {
-#ifdef __ANDROID__
-                    __android_log_print(ANDROID_LOG_INFO, "JS8Decoder",
-                                       "js8dec: All-zero codeword, skipping");
-#endif
                     continue;
                 }
-
-#ifdef __ANDROID__
-                __android_log_print(ANDROID_LOG_INFO, "JS8Decoder",
-                                   "js8dec: Checking conditions: nharderrors=%d, sync=%.1f", nharderrors, sync);
-#endif
 
                 if (nharderrors >= 0    && nharderrors < 60  &&
                     !(sync      <  2.0f && nharderrors > 35) &&
                     !(ipass     >  2    && nharderrors > 39) &&
                     !(ipass     == 4    && nharderrors > 30))
                 {
-                   bool crc_ok = checkCRC12(decoded);
-#ifdef __ANDROID__
-                   __android_log_print(ANDROID_LOG_INFO, "JS8Decoder",
-                                      "js8dec: ipass=%d, nharderrors=%d, sync=%.1f, CRC=%s",
-                                      ipass, nharderrors, sync, crc_ok ? "OK" : "FAIL");
-#endif
-                   if (crc_ok)
+                   if (checkCRC12(decoded))
                    {
                         if (syncStats)
                         {
@@ -2474,12 +2432,6 @@ namespace
                 auto candidates = syncjs8(data.params.nfa,
                                           data.params.nfb);
 
-#ifdef __ANDROID__
-                __android_log_print(ANDROID_LOG_INFO, "JS8Decoder",
-                                   "syncjs8 found %zu candidates (nfa=%d, nfb=%d)",
-                                   candidates.size(), data.params.nfa, data.params.nfb);
-#endif
-
                 if (candidates.empty()) break;
 
                 std::sort(candidates.begin(),
@@ -2500,17 +2452,7 @@ namespace
                 // Recompute the baseband signal; subtraction during the last
                 // pass might have changed the landscape.
 
-#ifdef __ANDROID__
-                __android_log_print(ANDROID_LOG_DEBUG, "JS8Decoder",
-                                   "Computing baseband FFT for pass %d", ipass);
-#endif
-
                 computeBasebandFFT();
-
-#ifdef __ANDROID__
-                __android_log_print(ANDROID_LOG_DEBUG, "JS8Decoder",
-                                   "Baseband FFT complete, processing %zu candidates", candidates.size());
-#endif
 
                 bool const subtract = ipass < 3;
                 bool       improved = false;

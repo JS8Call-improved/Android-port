@@ -86,6 +86,7 @@ struct JS8Engine_Native {
   std::vector<float> decimation_taps;
   std::vector<int16_t> decimation_buffer;
   int decimation_pos = 0;
+  int decimation_phase = 0;
 
   // Fractional resampling state for non-integer rate conversion (e.g., 44.1 kHz -> 12 kHz)
   std::vector<float> resample_buffer;
@@ -780,6 +781,7 @@ int js8_engine_submit_audio_raw(JS8Engine_Native* engine, const int16_t* samples
     engine->decimation_mirror = static_cast<int>(engine->decimation_taps.size());
     engine->decimation_buffer.assign(engine->decimation_mirror * 2, 0);
     engine->decimation_pos = 0;
+    engine->decimation_phase = 0;
     __android_log_print(ANDROID_LOG_INFO, "JS8Engine_Native",
                        "Decimator configured: input_rate=%d, target_rate=%d, factor=%d, taps=%zu",
                        input_sample_rate, target_rate, factor, engine->decimation_taps.size());
@@ -803,7 +805,8 @@ int js8_engine_submit_audio_raw(JS8Engine_Native* engine, const int16_t* samples
       engine->decimation_buffer[engine->decimation_pos + mirror] = sample;
       engine->decimation_pos = (engine->decimation_pos + 1) % mirror;
 
-      if ((static_cast<int>(i) % factor) == factor - 1) {
+      engine->decimation_phase = (engine->decimation_phase + 1) % factor;
+      if (engine->decimation_phase == 0) {
         double acc = 0.0;
         int read_pos = (engine->decimation_pos - 1 + mirror) % mirror;
         for (int j = 0; j < taps; ++j) {
