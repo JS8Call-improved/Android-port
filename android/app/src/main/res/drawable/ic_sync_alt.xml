@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="960"
+    android:viewportHeight="960">
+    <!-- No android:tint: MonitorFragment tints this to show the link state -->
+    <group android:translateY="960">
+        <path
+            android:fillColor="@android:color/white"
+            android:pathData="M280,-120 L80,-320l200,-200 57,56 -104,104h607v80H233l104,104 -57,56ZM680,-440l-57,-56 104,-104L120,-600v-80h607L623,-784l57,-56 200,200 -200,200Z" />
+    </group>
+</vector>

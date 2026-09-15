@@ -28,6 +28,9 @@
     <string name="monitor_menu_time_drift_reset">Reset time drift</string>
     <string name="monitor_audio_device_switching">Switching to %s…</string>
     <string name="monitor_audio_device_selected">Audio device: %s</string>
+    <string name="monitor_rig_connected">Rig connected</string>
+    <string name="monitor_rig_connecting">Rig connecting</string>
+    <string name="monitor_rig_disconnected">Rig not connected</string>
 
     <string name="settings_category_about">About</string>
     <string name="settings_version">Version</string>

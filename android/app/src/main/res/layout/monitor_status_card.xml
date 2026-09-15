@@ -35,6 +35,17 @@
             android:textAppearance="?attr/textAppearanceTitleMedium"
             tools:text="Receiving" />
 
+        <!-- Only shown when rig control is switched on in Settings -->
+        <ImageView
+            android:id="@+id/rig_indicator"
+            android:layout_width="18dp"
+            android:layout_height="18dp"
+            android:layout_marginStart="8dp"
+            android:contentDescription="@string/monitor_rig_disconnected"
+            android:src="@drawable/ic_sync_alt"
+            android:visibility="gone"
+            tools:visibility="visible" />
+
         <Space
             android:layout_width="0dp"
             android:layout_height="1dp"

@@ -1630,6 +1630,41 @@ class JS8EngineService : Service() {
             putExtra(EXTRA_STATE, state)
         }
         LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
+
+        // The connected flags are assigned in too many places to broadcast from
+        // each one, so poll while the engine runs. Every poll sends, not only
+        // changes: local broadcasts are not sticky, and a UI that attaches
+        // late or missed one while stopped has no other way to catch up
+        if (state == STATE_RUNNING) {
+            startRigStatusPolling()
+        } else {
+            stopRigStatusPolling()
+        }
+    }
+
+    private val rigStatusHandler = Handler(Looper.getMainLooper())
+    private val rigStatusRunnable = object : Runnable {
+        override fun run() {
+            broadcastRigStatus(isRigControlConnected())
+            rigStatusHandler.postDelayed(this, RIG_STATUS_POLL_INTERVAL_MS)
+        }
+    }
+
+    private fun startRigStatusPolling() {
+        rigStatusHandler.removeCallbacks(rigStatusRunnable)
+        rigStatusHandler.post(rigStatusRunnable)
+    }
+
+    private fun stopRigStatusPolling() {
+        rigStatusHandler.removeCallbacks(rigStatusRunnable)
+        broadcastRigStatus(false)
+    }
+
+    private fun broadcastRigStatus(connected: Boolean) {
+        val intent = Intent(ACTION_RIG_STATUS).apply {
+            putExtra(EXTRA_RIG_CONNECTED, connected)
+        }
+        LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
     }
 
     private fun broadcastDecode(
@@ -3902,6 +3937,12 @@ class JS8EngineService : Service() {
     private fun setFrequency(frequencyHz: Long) {
         if (!isRigControlConnected()) {
             Log.d(TAG, "Cannot set frequency: rig control not connected")
+            // A configured rig with no link is a failure to report; with rig
+            // control off the pick only stores the dial value, so stay quiet
+            if (!rigCtlErrorShown && rigControlMode != "none" && rigControlMode != "rts_ptt") {
+                broadcastError("Rig control is not connected")
+                rigCtlErrorShown = true
+            }
             return
         }
 
@@ -3953,6 +3994,7 @@ class JS8EngineService : Service() {
         private const val PREF_MY_INFO = "my_info"
         private const val PREF_MY_STATUS = "my_status"
         private const val PREF_PSK_REPORTER = "psk_reporter"
+        private const val RIG_STATUS_POLL_INTERVAL_MS = 2000L
         private const val PREF_TRUSDX_DIAGNOSTICS_ENABLED = "trusdx_diagnostics_enabled"
         private const val HEARD_LIMIT = 4
         private const val HEARD_WINDOW_MS = 15 * 60 * 1000L
@@ -3997,6 +4039,7 @@ class JS8EngineService : Service() {
         const val ACTION_TIME_SYNC_ONCE = "com.js8call.example.ACTION_TIME_SYNC_ONCE"
         const val ACTION_SET_TIME_DRIFT = "com.js8call.example.ACTION_SET_TIME_DRIFT"
         const val ACTION_TIME_DRIFT = "com.js8call.example.ACTION_TIME_DRIFT"
+        const val ACTION_RIG_STATUS = "com.js8call.example.ACTION_RIG_STATUS"
 
         // Engine states
         const val STATE_STOPPED = "stopped"
@@ -4006,6 +4049,7 @@ class JS8EngineService : Service() {
 
         // Extras
         const val EXTRA_STATE = "state"
+        const val EXTRA_RIG_CONNECTED = "rig_connected"
         const val EXTRA_UTC = "utc"
         const val EXTRA_SNR = "snr"
         const val EXTRA_DT = "dt"
