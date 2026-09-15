@@ -53,12 +53,24 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
 
-    - name: Setup Android SDK
-      uses: android-actions/setup-android@v3
-
-    - name: Install NDK
+    - name: Install Android SDK packages
       run: |
-        sdkmanager --install "ndk;${ANDROID_NDK_VERSION}" "cmake;3.22.1"
+        SDKMANAGER=""
+        for candidate in "${ANDROID_HOME}"/cmdline-tools/*/bin/sdkmanager; do
+          if [ -x "${candidate}" ]; then
+            SDKMANAGER="${candidate}"
+            break
+          fi
+        done
+        test -n "${SDKMANAGER}"
+        echo "$(dirname "${SDKMANAGER}")" >> "$GITHUB_PATH"
+        yes | "${SDKMANAGER}" --licenses > /dev/null
+        "${SDKMANAGER}" --install \
+          "platform-tools" \
+          "platforms;android-34" \
+          "build-tools;34.0.0" \
+          "ndk;${ANDROID_NDK_VERSION}" \
+          "cmake;3.22.1"
 
     - name: Select NDK
       run: |
