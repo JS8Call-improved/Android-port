@@ -484,6 +484,13 @@ class JS8EngineService : Service() {
         val generation = if (resumeGeneration == null) {
             if (engineStartInProgress || engine != null) {
                 Log.w(TAG, "Ignoring duplicate engine start request")
+                broadcastEngineState(if (engineStartInProgress) STATE_STARTING else STATE_RUNNING)
+                return
+            }
+            if (rigTeardownPending) {
+                Log.w(TAG, "Ignoring engine start while rig teardown is still active")
+                broadcastError("Rig control is still stopping. Please try again.")
+                broadcastEngineState(STATE_STOPPED)
                 return
             }
             if (trusdxStartupWorkerActive) {
@@ -1580,6 +1587,7 @@ class JS8EngineService : Service() {
                 )
             }
 
+            if (shutdownMode != "none") rigTeardownPending = true
             txHandler.post {
                 if (shouldReleasePtt) {
                     // Captured references, not setRigPtt: the fields already
@@ -1609,6 +1617,7 @@ class JS8EngineService : Service() {
                 shutdownBluetooth?.close()
                 shutdownNetwork?.disconnect()
                 Log.i(TAG, "Rig control torn down")
+                rigTeardownPending = false
             }
 
             pskReporterClient?.stop(flush = true)
@@ -3989,6 +3998,8 @@ class JS8EngineService : Service() {
 
     companion object {
         private const val TAG = "JS8EngineService"
+        // The teardown outlives the service instance that posted it
+        @Volatile private var rigTeardownPending = false
         private const val PREF_AUTOREPLY_ENABLED = "autoreply_enabled"
         private const val PREF_RELAY_ENABLED = "relay_enabled"
         private const val PREF_TX_SUBMODE = "tx_submode"
