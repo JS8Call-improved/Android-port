@@ -9,6 +9,7 @@ import android.app.Service
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.media.MediaRecorder
@@ -121,6 +122,19 @@ class JS8EngineService : Service() {
     @Volatile private var trusdxRxWorkerRunning = false
     @Volatile private var trusdxRxWorkerThread: Thread? = null
     private val mainHandler = Handler(Looper.getMainLooper())
+
+    // Stop monitoring when selected audio device is lost
+    private val audioDeviceCallback = object : AudioDeviceCallback() {
+        override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>) {
+            if (engine == null && !engineStartInProgress) return
+            val lost = removed.firstOrNull { it.id == selectedAudioDeviceId } ?: return
+            val name = AudioDevices.nameFor(lost) ?: "Audio device"
+            Log.w(TAG, "Selected audio device removed: $name (ID: ${lost.id}); stopping engine")
+            stopEngine()
+            broadcastAudioDeviceLost(name)
+            stopSelf()
+        }
+    }
     private val txHandlerThread = HandlerThread("Js8Tx")
     private lateinit var txHandler: Handler
     private lateinit var txMonitorHandler: Handler
@@ -275,6 +289,8 @@ class JS8EngineService : Service() {
         txHandlerThread.start()
         txHandler = Handler(txHandlerThread.looper)
         txMonitorHandler = Handler(Looper.getMainLooper())
+        (getSystemService(AUDIO_SERVICE) as AudioManager)
+            .registerAudioDeviceCallback(audioDeviceCallback, mainHandler)
         
         val prefs = PreferenceManager.getDefaultSharedPreferences(this)
         prefs.registerOnSharedPreferenceChangeListener(preferenceChangeListener)
@@ -350,6 +366,8 @@ class JS8EngineService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         Log.i(TAG, "Service destroyed")
+        (getSystemService(AUDIO_SERVICE) as AudioManager)
+            .unregisterAudioDeviceCallback(audioDeviceCallback)
         
         val prefs = PreferenceManager.getDefaultSharedPreferences(this)
         prefs.unregisterOnSharedPreferenceChangeListener(preferenceChangeListener)
@@ -1777,6 +1795,13 @@ class JS8EngineService : Service() {
 
     private fun broadcastAudioDevice(deviceName: String) {
         val intent = Intent(ACTION_AUDIO_DEVICE).apply {
+            putExtra(EXTRA_AUDIO_DEVICE, deviceName)
+        }
+        LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
+    }
+
+    private fun broadcastAudioDeviceLost(deviceName: String) {
+        val intent = Intent(ACTION_AUDIO_DEVICE_LOST).apply {
             putExtra(EXTRA_AUDIO_DEVICE, deviceName)
         }
         LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
@@ -4031,6 +4056,7 @@ class JS8EngineService : Service() {
         const val ACTION_DECODE_STARTED = "com.js8call.example.ACTION_DECODE_STARTED"
         const val ACTION_DECODE_FINISHED = "com.js8call.example.ACTION_DECODE_FINISHED"
         const val ACTION_AUDIO_DEVICE = "com.js8call.example.ACTION_AUDIO_DEVICE"
+        const val ACTION_AUDIO_DEVICE_LOST = "com.js8call.example.ACTION_AUDIO_DEVICE_LOST"
         const val ACTION_ERROR = "com.js8call.example.ACTION_ERROR"
         const val ACTION_TRANSMIT_MESSAGE = "com.js8call.example.ACTION_TRANSMIT_MESSAGE"
         const val ACTION_TX_STATE = "com.js8call.example.ACTION_TX_STATE"

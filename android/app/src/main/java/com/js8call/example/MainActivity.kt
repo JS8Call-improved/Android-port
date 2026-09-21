@@ -9,6 +9,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -29,6 +30,7 @@ import com.js8call.example.ui.TransmitViewModel
 class MainActivity : AppCompatActivity() {
 
     private lateinit var bottomNav: NavigationBarView
+    private var onMonitorTab = true
     private lateinit var decodeViewModel: DecodeViewModel
     private lateinit var monitorViewModel: MonitorViewModel
     private var spectrumBroadcastCount: Long = 0
@@ -128,6 +130,12 @@ class MainActivity : AppCompatActivity() {
                     val message = intent.getStringExtra(JS8EngineService.EXTRA_ERROR_MESSAGE) ?: "Unknown error"
                     monitorViewModel.onError(message)
                 }
+                JS8EngineService.ACTION_AUDIO_DEVICE_LOST -> {
+                    val device = intent.getStringExtra(JS8EngineService.EXTRA_AUDIO_DEVICE) ?: "Audio device"
+                    val message = getString(R.string.monitor_audio_device_lost, device)
+                    monitorViewModel.onError(message)
+                    if (!onMonitorTab) Toast.makeText(this@MainActivity, message, Toast.LENGTH_LONG).show()
+                }
                 JS8EngineService.ACTION_RADIO_FREQUENCY -> {
                     val frequencyHz = intent.getLongExtra(JS8EngineService.EXTRA_RADIO_FREQUENCY_HZ, 0L)
                     if (frequencyHz > 0) {
@@ -172,6 +180,7 @@ class MainActivity : AppCompatActivity() {
 
         bottomNav.setupWithNavController(navController)
         navController.addOnDestinationChangedListener { _, destination, _ ->
+            onMonitorTab = destination.id == R.id.navigation_monitor
             if (destination.id == R.id.navigation_conversation) {
                 bottomNav.menu.findItem(R.id.navigation_messages).isChecked = true
             }
@@ -220,6 +229,7 @@ class MainActivity : AppCompatActivity() {
             addAction(JS8EngineService.ACTION_SPECTRUM)
             addAction(JS8EngineService.ACTION_AUDIO_DEVICE)
             addAction(JS8EngineService.ACTION_ERROR)
+            addAction(JS8EngineService.ACTION_AUDIO_DEVICE_LOST)
             addAction(JS8EngineService.ACTION_RADIO_FREQUENCY)
             addAction(JS8EngineService.ACTION_TIME_DRIFT)
             addAction(JS8EngineService.ACTION_RIG_STATUS)
