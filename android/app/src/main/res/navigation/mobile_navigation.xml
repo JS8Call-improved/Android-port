@@ -10,11 +10,6 @@
         android:label="@string/nav_monitor" />
 
     <fragment
-        android:id="@+id/navigation_decodes"
-        android:name="com.js8call.example.ui.DecodeFragment"
-        android:label="@string/nav_decodes" />
-
-    <fragment
         android:id="@+id/navigation_messages"
         android:name="com.js8call.example.ui.MessagesFragment"
         android:label="@string/nav_messages">

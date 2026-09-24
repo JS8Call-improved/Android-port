@@ -4,7 +4,6 @@
 
     <!-- Bottom navigation -->
     <string name="nav_monitor">Monitor</string>
-    <string name="nav_decodes">Decodes</string>
     <string name="nav_messages">Messages</string>
     <string name="nav_transmit">Transmit</string>
     <string name="nav_settings">Settings</string>
