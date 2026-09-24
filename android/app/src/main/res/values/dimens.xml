@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Monitor split between the waterfall and the decode list -->
+    <item name="monitor_waterfall_weight" format="float" type="dimen">1.1</item>
+    <item name="monitor_decodes_weight" format="float" type="dimen">1</item>
+</resources>
