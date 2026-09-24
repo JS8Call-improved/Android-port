@@ -28,6 +28,7 @@
     <string name="monitor_menu_time_drift_reset">Reset time drift</string>
     <string name="monitor_audio_device_switching">Switching to %s…</string>
     <string name="monitor_audio_device_selected">Audio device: %s</string>
+    <string name="monitor_audio_device_lost">%s was removed. Monitoring stopped.</string>
     <string name="monitor_rig_connected">Rig connected</string>
     <string name="monitor_rig_connecting">Rig connecting</string>
     <string name="monitor_rig_disconnected">Rig not connected</string>
@@ -78,6 +79,7 @@
     <!-- Settings -->
     <string name="settings_title">Settings</string>
     <string name="settings_category_audio">Audio</string>
+    <string name="settings_audio_device">Audio device</string>
     <string name="settings_category_radio">Radio</string>
     <string name="settings_category_network">Network</string>
     <string name="settings_category_general">General</string>
