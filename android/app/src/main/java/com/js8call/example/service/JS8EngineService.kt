@@ -1393,8 +1393,11 @@ class JS8EngineService : Service() {
         portIndex: Int,
         params: SerialParams
     ) {
+        // Captured: a stop swaps these fields while this connects
+        val bridge = usbSerialBridge
+        val hamlib = hamlibRigControl
         Thread {
-            val preopenOk = usbSerialBridge?.open(
+            val preopenOk = bridge?.open(
                 deviceId,
                 portIndex,
                 params.baudRate,
@@ -1413,10 +1416,10 @@ class JS8EngineService : Service() {
                 return@Thread
             }
 
-            val resolvedPortIndex = usbSerialBridge?.getActivePortIndex() ?: portIndex
+            val resolvedPortIndex = bridge?.getActivePortIndex() ?: portIndex
             val serialPath = "android-usb:$deviceId:$resolvedPortIndex"
 
-            val ok = hamlibRigControl?.openSerialPath(
+            val ok = hamlib?.openSerialPath(
                 rigModel,
                 serialPath,
                 params.baudRate,
@@ -1431,7 +1434,7 @@ class JS8EngineService : Service() {
                 if (ok) {
                     Log.i(TAG, "Hamlib rig opened (model=$rigModel path=$serialPath)")
                 } else {
-                    val detail = hamlibRigControl?.getLastError().orEmpty()
+                    val detail = hamlib?.getLastError().orEmpty()
                     if (detail.isNotBlank()) {
                         Log.w(TAG, "Hamlib rig open failed: $detail")
                         broadcastError("Failed to open Hamlib rig: $detail")
@@ -1465,8 +1468,10 @@ class JS8EngineService : Service() {
             return
         }
 
+        val bridge = bluetoothSerialBridge
+        val hamlib = hamlibRigControl
         Thread {
-            val preopenOk = bluetoothSerialBridge?.open(
+            val preopenOk = bridge?.open(
                 address,
                 selection.portIndex,
                 params.baudRate,
@@ -1476,7 +1481,7 @@ class JS8EngineService : Service() {
             ) == true
 
             if (!preopenOk) {
-                val detail = bluetoothSerialBridge?.getLastError().orEmpty()
+                val detail = bridge?.getLastError().orEmpty()
                 mainHandler.post {
                     hamlibRigConnected = false
                     rigCtlErrorShown = true
@@ -1494,7 +1499,7 @@ class JS8EngineService : Service() {
             Log.i(TAG, "Hamlib Bluetooth pre-open ok for addr=$address port=${selection.portIndex}")
             val serialPath = selection.path
             Log.i(TAG, "Hamlib opening Bluetooth rig via path=$serialPath")
-            val ok = hamlibRigControl?.openSerialPath(
+            val ok = hamlib?.openSerialPath(
                 rigModel,
                 serialPath,
                 params.baudRate,
@@ -1509,7 +1514,7 @@ class JS8EngineService : Service() {
                 if (ok) {
                     Log.i(TAG, "Hamlib rig opened (model=$rigModel path=$serialPath)")
                 } else {
-                    val detail = hamlibRigControl?.getLastError().orEmpty()
+                    val detail = hamlib?.getLastError().orEmpty()
                     if (detail.isNotBlank()) {
                         Log.w(TAG, "Hamlib rig open failed: $detail")
                         broadcastError("Failed to open Hamlib rig: $detail")
@@ -1674,11 +1679,6 @@ class JS8EngineService : Service() {
             val shouldReleasePtt = isRigControlConnected()
             if (shutdownMode == "btech_uvpro") uvproWorkersActive.incrementAndGet()
 
-            // Unregistering clears one native global whichever bridge asks, so
-            // it stays here: deferred, it could wipe a restart's registration.
-            shutdownUsb?.unregisterNative()
-            shutdownBluetooth?.unregisterNative()
-
             createRigTransports()
             rigCtlClient = null
             rigCtlConnected = false
@@ -1739,6 +1739,9 @@ class JS8EngineService : Service() {
                     rigTeardownStep("TruSDX stop") { shutdownTruSdx?.stop() }
                     rigTeardownStep("QMX stop") { shutdownQmx?.stop() }
                     rigTeardownStep("UV-Pro stop") { shutdownUvPro?.stop() }
+                    // Not before the release: hamlib sends it through these
+                    rigTeardownStep("USB serial unregister") { shutdownUsb?.unregisterNative() }
+                    rigTeardownStep("Bluetooth serial unregister") { shutdownBluetooth?.unregisterNative() }
                     rigTeardownStep("USB serial close") { shutdownUsb?.close() }
                     rigTeardownStep("Bluetooth serial close") { shutdownBluetooth?.close() }
                     rigTeardownStep("rigctld disconnect") { shutdownNetwork?.disconnect() }
