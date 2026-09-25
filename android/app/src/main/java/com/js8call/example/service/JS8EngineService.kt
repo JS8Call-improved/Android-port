@@ -355,6 +355,9 @@ class JS8EngineService : Service() {
                 driftMmaN = if (driftMs == 0L) 0 else 1
                 applyTimeDrift(driftMs)
             }
+            ACTION_DEBUG_INJECT_DECODE -> {
+                if (BuildConfig.DEBUG) injectDecode(intent)
+            }
         }
         return START_STICKY
     }
@@ -552,11 +555,7 @@ class JS8EngineService : Service() {
                     // Broadcast on main thread
                     mainHandler.post {
                         maybeApplyTimeSync(driftMs)
-                        updateHeardCallsign(text)
-                        broadcastDecode(utc, snr, dt, freq, text, type, quality, mode, driftMs)
-                        handleRelayFrame(text, snr, mode, freq, type)
-                        maybeHandleIncomingMessage(text, snr, freq, type, mode)
-                        maybeHandleAutoReply(text, snr, mode)
+                        handleDecode(utc, snr, dt, freq, text, type, quality, mode, driftMs)
                         maybeReportToPskReporter(utc, snr, freq, text)
                     }
                 }
@@ -1684,6 +1683,35 @@ class JS8EngineService : Service() {
             putExtra(EXTRA_RIG_CONNECTED, connected)
         }
         LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
+    }
+
+    // Shared with injected decodes
+    private fun handleDecode(
+        utc: Int, snr: Int, dt: Float, freq: Float,
+        text: String, type: Int, quality: Float, mode: Int, driftMs: Int
+    ) {
+        updateHeardCallsign(text)
+        broadcastDecode(utc, snr, dt, freq, text, type, quality, mode, driftMs)
+        handleRelayFrame(text, snr, mode, freq, type)
+        maybeHandleIncomingMessage(text, snr, freq, type, mode)
+        maybeHandleAutoReply(text, snr, mode)
+    }
+
+    private fun injectDecode(intent: Intent) {
+        val text = intent.getStringExtra(EXTRA_TEXT)
+        if (text.isNullOrBlank()) {
+            Log.w(TAG, "Injected decode has no text")
+            return
+        }
+        val snr = intent.getIntExtra(EXTRA_SNR, -10)
+        val freq = intent.getFloatExtra(EXTRA_FREQ, 1500f)
+        val type = intent.getIntExtra(EXTRA_TYPE, 3)
+        val mode = intent.getIntExtra(EXTRA_MODE, 0)
+        val now = Calendar.getInstance(TimeZone.getTimeZone("UTC"))
+        val utc = now.get(Calendar.HOUR_OF_DAY) * 10000 +
+            now.get(Calendar.MINUTE) * 100 + now.get(Calendar.SECOND)
+        Log.i(TAG, "Injected decode: '$text' snr=$snr freq=$freq type=$type mode=$mode")
+        handleDecode(utc, snr, 0f, freq, text, type, 1f, mode, 0)
     }
 
     private fun broadcastDecode(
@@ -4067,6 +4095,7 @@ class JS8EngineService : Service() {
         const val ACTION_SET_TIME_DRIFT = "com.js8call.example.ACTION_SET_TIME_DRIFT"
         const val ACTION_TIME_DRIFT = "com.js8call.example.ACTION_TIME_DRIFT"
         const val ACTION_RIG_STATUS = "com.js8call.example.ACTION_RIG_STATUS"
+        const val ACTION_DEBUG_INJECT_DECODE = "com.js8call.example.ACTION_DEBUG_INJECT_DECODE"
 
         // Engine states
         const val STATE_STOPPED = "stopped"
