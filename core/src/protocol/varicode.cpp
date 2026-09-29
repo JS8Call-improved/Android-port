@@ -4,6 +4,7 @@
 #include <array>
 #include <cctype>
 #include <cmath>
+#include <cstdio>
 
 #ifdef __ANDROID__
 #include <android/log.h>
@@ -181,7 +182,10 @@ int dbmTomwatts(int dbm) {
 }
 
 std::string format_snr(int snr) {
-  return (snr >= 0 ? "+" : "") + std::to_string(snr);
+  if (snr < -60 || snr > 60) return {};
+  char buf[8];
+  std::snprintf(buf, sizeof(buf), "%s%0*d", snr >= 0 ? "+" : "", snr < 0 ? 3 : 2, snr);
+  return buf;
 }
 
 std::string trimmed_left(std::string s) {
@@ -775,19 +779,47 @@ bool is_command_autoreply(std::string const& cmd) {
   return false;
 }
 
+namespace {
+bool has_letter_digit_pair(std::string const& s) {
+  for (std::size_t i = 1; i < s.size(); ++i) {
+    bool const previous_digit = std::isdigit(static_cast<unsigned char>(s[i - 1]));
+    bool const current_digit = std::isdigit(static_cast<unsigned char>(s[i]));
+    bool const previous_letter = std::isupper(static_cast<unsigned char>(s[i - 1]));
+    bool const current_letter = std::isupper(static_cast<unsigned char>(s[i]));
+    if ((previous_digit && current_letter) || (previous_letter && current_digit)) return true;
+  }
+  return false;
+}
+
+bool is_valid_compound_callsign(std::string const& callsign) {
+  auto const slashes = std::count(callsign.begin(), callsign.end(), '/');
+  if (static_cast<long>(callsign.size()) - slashes > 9) return false;
+  if (auto const slash = callsign.find('/'); slash != std::string::npos) {
+    return kBaseCalls.find(callsign.substr(0, slash)) == kBaseCalls.end();
+  }
+  if (!callsign.empty() && callsign.front() == '@') return true;
+  return callsign.size() > 2 && has_letter_digit_pair(callsign);
+}
+}  // namespace
+
 bool is_valid_callsign(std::string const& callsign, bool* p_is_compound) {
   if (kBaseCalls.find(callsign) != kBaseCalls.end()) {
     if (p_is_compound) *p_is_compound = false;
     return true;
   }
-  static const std::regex re(R"(([@]?|\b)([A-Z0-9\/@][A-Z0-9\/]{0,2}[\/]?[A-Z0-9\/]{0,3}[\/]?[A-Z0-9\/]{0,3})\b)");
-  bool match = std::regex_match(callsign, re);
-  if (p_is_compound) {
-    auto slash = callsign.rfind('/');
-    // /P is represented by the portable bit in a normal directed frame.
-    *p_is_compound = slash != std::string::npos && callsign.substr(slash) != "/P";
+  static const std::regex base_re(R"(\b(([0-9A-Z])?([0-9A-Z])([0-9])([A-Z])?([A-Z])?([A-Z])?)([/][P])?\b)");
+  if (std::regex_match(callsign, base_re)) {
+    if (p_is_compound) *p_is_compound = false;
+    return callsign.size() > 2 && has_letter_digit_pair(callsign);
   }
-  return match;
+  static const std::regex compound_re(R"((?:[@]?|\b)([A-Z0-9\/@][A-Z0-9\/]{0,2}[\/]?[A-Z0-9\/]{0,3}[\/]?[A-Z0-9\/]{0,3})\b)");
+  if (std::regex_match(callsign, compound_re)) {
+    bool const valid = is_valid_compound_callsign(callsign);
+    if (p_is_compound) *p_is_compound = valid;
+    return valid;
+  }
+  if (p_is_compound) *p_is_compound = false;
+  return false;
 }
 
 bool is_compound_callsign(std::string const& callsign) {
