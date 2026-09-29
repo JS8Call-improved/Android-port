@@ -358,6 +358,8 @@ public:
     enabled_submodes_.store(submodes & knownSubmodes);
   }
 
+  void set_sync_stats(bool enabled) override { sync_stats_.store(enabled); }
+
   void set_time_drift_ms(std::int64_t drift_ms) override {
     if (time_drift_ms_.exchange(drift_ms) == drift_ms) return;
     tx_modulator_.set_clock_offset_ms(drift_ms);
@@ -533,7 +535,7 @@ public:
 #endif
       decode_state_.params.utc = utc_tm.tm_hour * 10000 + utc_tm.tm_min * 100 + utc_tm.tm_sec;
       decode_state_.params.newdat = true;
-      decode_state_.params.syncStats = false;
+      decode_state_.params.syncStats = sync_stats_.load();
     }
 
     // Port of isDecodeReady() from mainwindow.cpp
@@ -1059,7 +1061,7 @@ public:
     std::condition_variable decode_cv_;
     std::deque<DecodeState> decode_queue_;
     bool decode_stop_{false};
-    std::atomic<bool> decode_pending_{false};
+    std::atomic<bool> sync_stats_{false};
 
     std::thread spectrum_thread_;
     std::mutex spectrum_mutex_;
@@ -1122,7 +1124,6 @@ public:
         std::lock_guard<std::mutex> lock(decode_mutex_);
         decode_stop_ = true;
         decode_queue_.clear();
-        decode_pending_.store(false);
       }
       decode_cv_.notify_one();
       if (decode_thread_.joinable()) decode_thread_.join();
@@ -1142,13 +1143,38 @@ public:
       if (spectrum_thread_.joinable()) spectrum_thread_.join();
     }
 
+    static void merge_decode_windows(DecodeParams& into, DecodeParams const& older) {
+      struct Window {
+        int bit;
+        int DecodeParams::*position;
+        int DecodeParams::*size;
+      };
+      static constexpr Window windows[] = {
+          {1 << static_cast<int>(protocol::SubmodeId::A), &DecodeParams::kposA, &DecodeParams::kszA},
+          {1 << static_cast<int>(protocol::SubmodeId::B), &DecodeParams::kposB, &DecodeParams::kszB},
+          {1 << static_cast<int>(protocol::SubmodeId::C), &DecodeParams::kposC, &DecodeParams::kszC},
+          {1 << static_cast<int>(protocol::SubmodeId::E), &DecodeParams::kposE, &DecodeParams::kszE},
+          {1 << static_cast<int>(protocol::SubmodeId::I), &DecodeParams::kposI, &DecodeParams::kszI},
+      };
+      for (auto const& window : windows) {
+        if ((older.nsubmodes & window.bit) == 0 || (into.nsubmodes & window.bit) != 0) continue;
+        into.*window.position = older.*window.position;
+        into.*window.size = older.*window.size;
+        into.nsubmodes |= window.bit;
+      }
+    }
+
     void enqueue_decode(DecodeState snapshot) {
-      // Turbo can retry every second. Do not turn retries into stale work when
-      // the single decoder worker is still processing the previous snapshot.
-      if (decode_pending_.exchange(true)) return;
       {
         std::lock_guard<std::mutex> lock(decode_mutex_);
-        decode_queue_.push_back(std::move(snapshot));
+        // Keep the freshest snapshot queued, carrying forward any ready
+        // submode windows that appeared only in the replaced snapshot.
+        if (decode_queue_.empty()) {
+          decode_queue_.push_back(std::move(snapshot));
+        } else {
+          merge_decode_windows(snapshot.params, decode_queue_.back().params);
+          decode_queue_.back() = std::move(snapshot);
+        }
       }
       decode_cv_.notify_one();
     }
@@ -1199,13 +1225,12 @@ public:
           if (auto const* d = std::get_if<events::Decoded>(&ev)) {
             auto out = *d;
             out.drift_ms = compute_drift_estimate(task, out);
+            out.capture_drift_ms = task.drift_ms_at_capture;
             emit_event(events::Variant{std::move(out)});
             return;
           }
           emit_event(ev);
         });
-        decode_pending_.store(false);
-
         if (callbacks_.on_log) {
           char log_msg[256];
           snprintf(log_msg, sizeof(log_msg),
