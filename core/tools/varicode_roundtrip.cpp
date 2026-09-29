@@ -56,6 +56,74 @@ int main() {
   }
 
   {
+    check(!js8core::protocol::varicode::is_valid_callsign("HELLO", nullptr),
+          "ordinary text is not accepted as a callsign");
+    check(js8core::protocol::varicode::is_valid_callsign("2E0ABC", nullptr),
+          "callsign beginning with a digit is accepted");
+    check(js8core::protocol::varicode::is_valid_callsign("EA8/K1ABC", nullptr),
+          "compound callsign is accepted");
+
+    auto frames = js8core::protocol::varicode::build_message_frames(
+        "W1ABC", "EM73", "", "JUST TESTING", true, false, 0, nullptr);
+    check(!frames.empty(), "forced identification produces frames for ordinary text");
+    bool identified = false;
+    for (auto const& frame : frames) {
+      auto text = js8core::protocol::varicode::unpack_data_message(frame.first);
+      identified = identified || text.find("W1ABC:") != std::string::npos;
+    }
+    check(identified, "forced identification prefixes sender to ordinary text");
+  }
+
+  {
+    std::string to, cmd, num;
+    bool compound = false;
+    int consumed = 0;
+    auto directed = js8core::protocol::varicode::pack_directed_message(
+        "2E0ABC HELLO", "VE7NHW", &to, &compound, &cmd, &num, &consumed);
+    check(!directed.empty() && to == "2E0ABC", "relay keeps leading digit in destination callsign");
+
+    auto frames = js8core::protocol::varicode::build_message_frames(
+        "VE7NHW", "CN89", "", "N0XYZ RR 73", false, false, 0, nullptr);
+    bool saw_rr = false;
+    bool saw_remainder = false;
+    for (auto const& frame : frames) {
+      auto decoded = js8core::protocol::varicode::unpack_directed_message(frame.first, nullptr);
+      if (decoded.size() >= 3 && decoded[2] == " RR") {
+        saw_rr = true;
+      }
+      saw_remainder = saw_remainder || js8core::protocol::varicode::unpack_data_message(frame.first) == "73";
+    }
+    check(saw_rr, "RR 73 is not parsed as an SNR number");
+    check(saw_remainder, "non-buffered command remainder is left-stripped");
+
+    auto snr_frame = js8core::protocol::varicode::pack_directed_message(
+        "K1ABC SNR -8", "VE7NHW", &to, &compound, &cmd, &num, &consumed);
+    auto snr_decoded = js8core::protocol::varicode::unpack_directed_message(snr_frame, nullptr);
+    check(snr_decoded.size() >= 4 && snr_decoded[3] == "-08", "SNR is zero-padded like desktop");
+  }
+
+  {
+    int chars = 0;
+    auto frame = js8core::protocol::varicode::pack_data_message("N0XYZ QUERY CALL W1ABC?", &chars);
+    check(!frame.empty() && chars > 0, "normal-speed data selects a usable compressed frame");
+    auto const decoded_data = js8core::protocol::varicode::unpack_data_message(frame);
+    check(decoded_data == std::string("N0XYZ QUERY CALL W1ABC?").substr(0, decoded_data.size()) &&
+              decoded_data.size() == static_cast<std::size_t>(chars),
+          "normal-speed compressed frame decodes its packed text prefix");
+  }
+
+  {
+    auto frames = js8core::protocol::varicode::build_message_frames(
+        "VE7NHW", "CN89", "", "@APRSIS MSG HELLO APRS", false, false, 0, nullptr);
+    bool has_message_data = false;
+    for (auto const& frame : frames) {
+      auto payload = js8core::protocol::varicode::unpack_data_message(frame.first);
+      has_message_data = has_message_data || payload == "HELLO APRS";
+    }
+    check(has_message_data, "@APRSIS MSG data is sent without an appended checksum");
+  }
+
+  {
     // Regression: an explicit destination must not be replaced by selectedCall.
     auto frames = js8core::protocol::varicode::build_message_frames(
         "KN4CRD", "EM73", "W1AW", "K1ABC SNR?", false, false, 2, nullptr);

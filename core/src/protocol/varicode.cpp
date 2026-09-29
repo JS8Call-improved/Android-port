@@ -4,6 +4,7 @@
 #include <array>
 #include <cctype>
 #include <cmath>
+#include <cstdio>
 
 #ifdef __ANDROID__
 #include <android/log.h>
@@ -181,7 +182,10 @@ int dbmTomwatts(int dbm) {
 }
 
 std::string format_snr(int snr) {
-  return (snr >= 0 ? "+" : "") + std::to_string(snr);
+  if (snr < -60 || snr > 60) return {};
+  char buf[8];
+  std::snprintf(buf, sizeof(buf), "%s%0*d", snr >= 0 ? "+" : "", snr < 0 ? 3 : 2, snr);
+  return buf;
 }
 
 std::string trimmed_left(std::string s) {
@@ -775,19 +779,47 @@ bool is_command_autoreply(std::string const& cmd) {
   return false;
 }
 
+namespace {
+bool has_letter_digit_pair(std::string const& s) {
+  for (std::size_t i = 1; i < s.size(); ++i) {
+    bool const previous_digit = std::isdigit(static_cast<unsigned char>(s[i - 1]));
+    bool const current_digit = std::isdigit(static_cast<unsigned char>(s[i]));
+    bool const previous_letter = std::isupper(static_cast<unsigned char>(s[i - 1]));
+    bool const current_letter = std::isupper(static_cast<unsigned char>(s[i]));
+    if ((previous_digit && current_letter) || (previous_letter && current_digit)) return true;
+  }
+  return false;
+}
+
+bool is_valid_compound_callsign(std::string const& callsign) {
+  auto const slashes = std::count(callsign.begin(), callsign.end(), '/');
+  if (static_cast<long>(callsign.size()) - slashes > 9) return false;
+  if (auto const slash = callsign.find('/'); slash != std::string::npos) {
+    return kBaseCalls.find(callsign.substr(0, slash)) == kBaseCalls.end();
+  }
+  if (!callsign.empty() && callsign.front() == '@') return true;
+  return callsign.size() > 2 && has_letter_digit_pair(callsign);
+}
+}  // namespace
+
 bool is_valid_callsign(std::string const& callsign, bool* p_is_compound) {
   if (kBaseCalls.find(callsign) != kBaseCalls.end()) {
     if (p_is_compound) *p_is_compound = false;
     return true;
   }
-  static const std::regex re(R"(([@]?|\b)([A-Z0-9\/@][A-Z0-9\/]{0,2}[\/]?[A-Z0-9\/]{0,3}[\/]?[A-Z0-9\/]{0,3})\b)");
-  bool match = std::regex_match(callsign, re);
-  if (p_is_compound) {
-    auto slash = callsign.rfind('/');
-    // /P is represented by the portable bit in a normal directed frame.
-    *p_is_compound = slash != std::string::npos && callsign.substr(slash) != "/P";
+  static const std::regex base_re(R"(\b(([0-9A-Z])?([0-9A-Z])([0-9])([A-Z])?([A-Z])?([A-Z])?)([/][P])?\b)");
+  if (std::regex_match(callsign, base_re)) {
+    if (p_is_compound) *p_is_compound = false;
+    return callsign.size() > 2 && has_letter_digit_pair(callsign);
   }
-  return match;
+  static const std::regex compound_re(R"((?:[@]?|\b)([A-Z0-9\/@][A-Z0-9\/]{0,2}[\/]?[A-Z0-9\/]{0,3}[\/]?[A-Z0-9\/]{0,3})\b)");
+  if (std::regex_match(callsign, compound_re)) {
+    bool const valid = is_valid_compound_callsign(callsign);
+    if (p_is_compound) *p_is_compound = valid;
+    return valid;
+  }
+  if (p_is_compound) *p_is_compound = false;
+  return false;
 }
 
 bool is_compound_callsign(std::string const& callsign) {
@@ -990,9 +1022,20 @@ std::string pack_directed_message(std::string const& text, std::string const& my
 
   auto to = match[1].str();
   auto cmd = match.size() > 2 ? match[2].str() : std::string{};
-  auto num = match.size() > 3 ? match[3].str() : std::string{};
+  std::string num;
 
   if (cmd.empty()) { if (n) *n = 0; return {}; }
+
+  std::size_t consumed = static_cast<std::size_t>(match.position(2) + match.length(2));
+  if (cmd.size() >= 3 && cmd.compare(cmd.size() - 3, 3, "SNR") == 0) {
+    static const std::regex snr_num_re(R"(^\s?[-+]?(?:3[01]|[0-2]?[0-9]))");
+    std::smatch num_match;
+    auto const rest = text.substr(consumed);
+    if (std::regex_search(rest, num_match, snr_num_re)) {
+      num = num_match.str(0);
+      consumed += static_cast<std::size_t>(num_match.length(0));
+    }
+  }
 
   bool isToCompound = false;
   bool validTo = (to != mycall) && is_valid_callsign(to, &isToCompound);
@@ -1043,7 +1086,7 @@ std::string pack_directed_message(std::string const& text, std::string const& my
   bits.insert(bits.end(), to_bits.begin(), to_bits.end());
   bits.insert(bits.end(), cmd_bits.begin(), cmd_bits.end());
 
-  if (n) *n = static_cast<int>(match.length(0));
+  if (n) *n = static_cast<int>(consumed);
   return pack72bits(bits_to_int(bits), packed_extra);
 }
 std::vector<std::string> unpack_directed_message(std::string const& text, std::uint8_t* pType) {
@@ -1098,7 +1141,49 @@ static std::string to_upper(std::string const& s) {
   return result;
 }
 
+namespace {
+std::string pack_huff_message(std::string const& text, int* n) {
+  constexpr int frameSize = 72;
+  auto const table = default_huff_table();
+  auto const valid = huff_valid_chars(table);
+  for (char ch : text) {
+    if (!valid.count(std::string(1, static_cast<char>(std::toupper(static_cast<unsigned char>(ch)))))) {
+      if (n) *n = 0;
+      return {};
+    }
+  }
+  std::vector<bool> frameBits{true, false};
+  int chars_used = 0;
+  for (auto const& [chars, bits] : huff_encode(table, text)) {
+    if (static_cast<int>(frameBits.size() + bits.size()) >= frameSize) break;
+    frameBits.insert(frameBits.end(), bits.begin(), bits.end());
+    chars_used += chars;
+  }
+  int const pad = frameSize - static_cast<int>(frameBits.size());
+  for (int i = 0; i < pad; ++i) frameBits.push_back(i == 0 ? false : true);
+  auto const value = bits_to_int(std::vector<bool>(frameBits.begin(), frameBits.begin() + 64));
+  auto const rem = static_cast<std::uint8_t>(bits_to_int(std::vector<bool>(frameBits.begin() + 64, frameBits.end())));
+  if (n) *n = chars_used;
+  return pack72bits(static_cast<std::uint64_t>(value), rem);
+}
+}  // namespace
+
+static std::string pack_jsc_data_message(std::string const& text, int* n);
+
 std::string pack_data_message(std::string const& text, int* n) {
+  int huff_chars = 0;
+  int jsc_chars = 0;
+  auto const huff = pack_huff_message(to_upper(text), &huff_chars);
+  auto const jsc_frame = pack_jsc_data_message(text, &jsc_chars);
+  if (huff_chars > jsc_chars) {
+    if (n) *n = huff_chars;
+    return huff;
+  }
+  if (n) *n = jsc_chars;
+  return jsc_frame;
+}
+
+static std::string pack_jsc_data_message(std::string const& text, int* n) {
   // Legacy data frames use a 2-bit prefix: [data=1][compressed=1] + payload.
   // JSC dictionary only contains uppercase, so convert input first
   std::string upperText = to_upper(text);
@@ -1355,9 +1440,13 @@ std::vector<std::pair<std::string, int>> build_message_frames(std::string const&
           lineFrames.push_back({frame, 0});
         }
         line = line.substr(nlen);
-        if (is_command_buffered(dirCmd) && !line.empty()) {
+        bool const desktopBuffered = is_command_buffered(dirCmd) ||
+            (dirCmd.find(' ') != std::string::npos && is_command_allowed(dirCmd));
+        if (desktopBuffered && !line.empty()) {
           line = lstrip(line);
-          int checksumSize = is_command_checksummed(dirCmd);
+          bool const skipAprsChecksum = to_upper(dirTo) == "@APRSIS" &&
+              (dirCmd == " MSG" || dirCmd == " MSG TO:");
+          int checksumSize = skipAprsChecksum ? 0 : is_command_checksummed(dirCmd);
           if (checksumSize == 32) {
             line = line + " " + checksum32(line);
           } else if (checksumSize == 16) {

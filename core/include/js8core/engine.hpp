@@ -53,6 +53,9 @@ struct Decoded {
   int mode = 0;
   // Suggested total drift (ms) to center this signal's cycle.
   int drift_ms = 0;
+  // Ring alignment (ms) when the audio was captured. The signal is on time
+  // with capture_drift_ms - 1000 * xdt.
+  std::int64_t capture_drift_ms = 0;
 };
 
 struct DecodeFinished {
@@ -133,6 +136,7 @@ public:
   virtual void set_tx_ready(bool ready) = 0;
   virtual void set_tx_boost_enabled(bool enabled) = 0;
   virtual void set_submodes(int submodes) = 0;
+  virtual void set_sync_stats(bool enabled) = 0;
 
   // Positive = engine clock ahead of system clock; takes effect at the next captured buffer.
   virtual void set_time_drift_ms(std::int64_t drift_ms) = 0;
