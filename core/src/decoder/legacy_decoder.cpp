@@ -13,6 +13,7 @@
 #include <android/log.h>
 #endif
 #include <limits>
+#include <memory>
 #include <mutex>
 #include "js8core/compat/numbers.hpp"
 #include "js8core/compat/concepts.hpp"
@@ -21,6 +22,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
@@ -1114,17 +1116,17 @@ namespace
     {
         // Data members
 
-        std::array<float, Mode::NFFT1>                                                nuttal;
-        std::array<std::array<std::array<std::complex<float>, Mode::NDOWNSPS>, 7>, 3> csyncs;
-        alignas(64) std::array<std::complex<float>, Mode::NDOWNSPS>                   csymb;
-        alignas(64) std::array<std::complex<float>, Mode::NMAX>                       filter;
-        alignas(64) std::array<std::complex<float>, Mode::NMAX>                       cfilt;
-        alignas(64) std::array<std::complex<float>, Mode::NDFFT1 / 2 + 1>             ds_cx;
-        alignas(64) std::array<std::complex<float>, Mode::NFFT1  / 2 + 1>             sd;
-        alignas(64) std::array<std::complex<float>, NP>                               cd0;
-        std::array<float, Mode::NMAX>                                                 dd;
-        std::array<std::array<float, Mode::NHSYM>, Mode::NSPS>                        s;
-        std::array<float, Mode::NSPS>                                                 savg;
+        std::array<float, Mode::NFFT1>                                                nuttal{};
+        std::array<std::array<std::array<std::complex<float>, Mode::NDOWNSPS>, 7>, 3> csyncs{};
+        alignas(64) std::array<std::complex<float>, Mode::NDOWNSPS>                   csymb{};
+        alignas(64) std::array<std::complex<float>, Mode::NMAX>                       filter{};
+        alignas(64) std::array<std::complex<float>, Mode::NMAX>                       cfilt{};
+        alignas(64) std::array<std::complex<float>, Mode::NDFFT1 / 2 + 1>             ds_cx{};
+        alignas(64) std::array<std::complex<float>, Mode::NFFT1  / 2 + 1>             sd{};
+        alignas(64) std::array<std::complex<float>, NP>                               cd0{};
+        std::array<float, Mode::NMAX>                                                 dd{};
+        std::array<std::array<float, Mode::NHSYM>, Mode::NSPS>                        s{};
+        std::array<float, Mode::NSPS>                                                 savg{};
         FFTWPlanManager                                                               plans;
         SyncIndex                                                                     sync;
 
@@ -2527,40 +2529,21 @@ namespace
 std::size_t legacy_decode(DecodeState const& state,
                           std::function<void(events::Variant const&)> emit_fn)
 {
-    using DecoderRef = std::variant<
-        std::reference_wrapper<DecodeMode<ModeA>>,
-        std::reference_wrapper<DecodeMode<ModeB>>,
-        std::reference_wrapper<DecodeMode<ModeC>>,
-        std::reference_wrapper<DecodeMode<ModeE>>,
-        std::reference_wrapper<DecodeMode<ModeI>>>;
-
-    struct DecodeEntry
-    {
-        DecoderRef decode;
-        int        mode;
-        int        kpos;
-        int        ksz;
-    };
-
-    // Keep decoder instances in static storage to avoid heavy stack allocations.
-    // Thread-local to prevent cross-thread state corruption.
-    static thread_local DecodeMode<ModeA> decA;
-    static thread_local DecodeMode<ModeB> decB;
-    static thread_local DecodeMode<ModeC> decC;
-    static thread_local DecodeMode<ModeE> decE;
-    static thread_local DecodeMode<ModeI> decI;
-
-    std::array<DecodeEntry, 5> entries{{
-        DecodeEntry{DecoderRef{std::ref(decI)}, 1 << 4, state.params.kposI, state.params.kszI},
-        DecodeEntry{DecoderRef{std::ref(decE)}, 1 << 3, state.params.kposE, state.params.kszE},
-        DecodeEntry{DecoderRef{std::ref(decC)}, 1 << 2, state.params.kposC, state.params.kszC},
-        DecodeEntry{DecoderRef{std::ref(decB)}, 1 << 1, state.params.kposB, state.params.kszB},
-        DecodeEntry{DecoderRef{std::ref(decA)}, 1 << 0, state.params.kposA, state.params.kszA},
-    }};
+    static thread_local std::unique_ptr<DecodeMode<ModeA>> decA;
+    static thread_local std::unique_ptr<DecodeMode<ModeB>> decB;
+    static thread_local std::unique_ptr<DecodeMode<ModeC>> decC;
+    static thread_local std::unique_ptr<DecodeMode<ModeE>> decE;
+    static thread_local std::unique_ptr<DecodeMode<ModeI>> decI;
 
     auto emit = [&](events::Variant const& ev)
     {
         if (emit_fn) emit_fn(ev);
+    };
+
+    auto run = [&](auto& decoder, int kpos, int ksz) {
+        using Decoder = typename std::remove_reference_t<decltype(decoder)>::element_type;
+        if (!decoder) decoder = std::make_unique<Decoder>();
+        return (*decoder)(state, kpos, ksz, emit);
     };
 
     auto const set = state.params.nsubmodes;
@@ -2580,16 +2563,11 @@ std::size_t legacy_decode(DecodeState const& state,
                        "DecodeStarted emitted, processing %d submodes", set);
 #endif
 
-    for (auto const & entry : entries)
-    {
-        if ((set & entry.mode) == entry.mode)
-        {
-            std::visit([&](auto && decode_ref)
-            {
-                sum += decode_ref.get()(state, entry.kpos, entry.ksz, emit);
-            }, entry.decode);
-        }
-    }
+    if (set & (1 << 4)) sum += run(decI, state.params.kposI, state.params.kszI);
+    if (set & (1 << 3)) sum += run(decE, state.params.kposE, state.params.kszE);
+    if (set & (1 << 2)) sum += run(decC, state.params.kposC, state.params.kszC);
+    if (set & (1 << 1)) sum += run(decB, state.params.kposB, state.params.kszB);
+    if (set & (1 << 0)) sum += run(decA, state.params.kposA, state.params.kszA);
 
 #ifdef __ANDROID__
     __android_log_print(ANDROID_LOG_INFO, "JS8Decoder",
