@@ -64,6 +64,32 @@ To run one class:
 JAVA_HOME=/opt/homebrew/opt/openjdk ANDROID_HOME=~/Library/Android/sdk ./gradlew :js8core-lib:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.js8call.core.JS8EngineLoopbackTest
 ```
 
+## Inject decodes
+
+On a station with a rig, turn off Enable Autoreply and Enable Relay in Settings first. Both act on injected decodes like real ones, and a reply queued with monitoring off goes out at the next start.
+
+Debug builds take synthetic decodes over adb, no audio needed. With the app in front, and your callsign from Settings in place of `N0CALL`:
+
+```bash
+adb shell am broadcast -n com.js8call.example/.debug.DebugDecodeReceiver --es text "'K1ABC: N0CALL SNR?'"
+```
+
+Optional extras:
+
+- `--ei snr -12` (default -10)
+- `--ef freq 1450` audio offset in Hz (default 1500)
+- `--ei mode 2` submode: 0 Normal, 1 Fast, 2 Turbo, 4 Slow (default 0)
+- `--ei type 1` frame flags, added together: 1 first, 2 last, 4 data (default 3, a single frame)
+
+A multi-frame message is one broadcast per frame, back to back, at the same `freq`. The frames after a `MSG` header are data frames: 4 in the middle, 6 last.
+
+```bash
+adb shell am broadcast -n com.js8call.example/.debug.DebugDecodeReceiver --es text "'K1ABC: N0CALL MSG HELLO'" --ei type 1
+adb shell am broadcast -n com.js8call.example/.debug.DebugDecodeReceiver --es text "' WORLD'" --ei type 6
+```
+
+Output: the Decodes tab, and Messages for a complete `MSG` to your callsign. Log: `adb logcat -s JS8EngineService DebugDecodeReceiver`
+
 ## Build Release APK (signed)
 
 Create a keystore once:
