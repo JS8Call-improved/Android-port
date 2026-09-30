@@ -10,6 +10,10 @@
         android:title="@string/monitor_menu_time_sync" />
 
     <item
+        android:id="@+id/action_time_drift_adjust"
+        android:title="@string/monitor_menu_time_drift_adjust" />
+
+    <item
         android:id="@+id/action_time_drift_reset"
         android:title="@string/monitor_menu_time_drift_reset" />
 

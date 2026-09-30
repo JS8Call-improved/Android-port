@@ -11,13 +11,17 @@ import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.PopupMenu
 import android.widget.TextView
+import androidx.appcompat.app.AlertDialog
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModelProvider
+import androidx.preference.PreferenceManager
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.materialswitch.MaterialSwitch
 import com.google.android.material.snackbar.Snackbar
+import com.google.android.material.textfield.TextInputEditText
+import com.google.android.material.textfield.TextInputLayout
 import com.js8call.example.R
 import com.js8call.example.model.EngineState
 import com.js8call.example.model.MonitorStatus
@@ -40,6 +44,7 @@ class MonitorFragment : Fragment() {
     private lateinit var frequencyButton: MaterialButton
     private lateinit var powerSwitch: MaterialSwitch
     private lateinit var telemetryText: TextView
+    private lateinit var driftText: TextView
 
     // Frequency management
     private var frequencyEntries = listOf<String>()
@@ -78,6 +83,7 @@ class MonitorFragment : Fragment() {
         frequencyButton = view.findViewById(R.id.frequency_button)
         powerSwitch = view.findViewById(R.id.power_switch)
         telemetryText = view.findViewById(R.id.telemetry_text)
+        driftText = view.findViewById(R.id.drift_text)
 
         // Navigation keeps this fragment instance but recreates its views at
         // their layout defaults, so the repaint memo has to reset with them or
@@ -113,6 +119,7 @@ class MonitorFragment : Fragment() {
         frequencyButton.setOnClickListener { showFrequencyDialog() }
         view.findViewById<MaterialButton>(R.id.monitor_overflow)
             .setOnClickListener { showOverflowMenu(it) }
+        driftText.setOnClickListener { showTimeDriftDialog() }
     }
 
     override fun onResume() {
@@ -214,21 +221,17 @@ class MonitorFragment : Fragment() {
     }
 
     private fun renderTelemetry(status: MonitorStatus) {
-        val drift = if (status.timeDriftMs != 0L) {
+        val offset = getString(R.string.monitor_telemetry, status.txOffsetHz.toInt())
+        // A stopped engine reads no power, and a leading placeholder just adds noise
+        telemetryText.text = if (status.powerDb != 0f) {
+            getString(R.string.monitor_telemetry_power, status.powerDb, offset)
+        } else {
+            offset
+        }
+        driftText.text = if (status.timeDriftMs != 0L) {
             String.format("%+d ms", status.timeDriftMs)
         } else {
             "0 ms"
-        }
-        val offsetAndDrift = getString(
-            R.string.monitor_telemetry,
-            status.txOffsetHz.toInt(),
-            drift
-        )
-        // A stopped engine reads no power, and a leading placeholder just adds noise
-        telemetryText.text = if (status.powerDb != 0f) {
-            getString(R.string.monitor_telemetry_power, status.powerDb, offsetAndDrift)
-        } else {
-            offsetAndDrift
         }
     }
 
@@ -243,6 +246,10 @@ class MonitorFragment : Fragment() {
                 }
                 R.id.action_time_sync -> {
                     armTimeSync()
+                    true
+                }
+                R.id.action_time_drift_adjust -> {
+                    showTimeDriftDialog()
                     true
                 }
                 R.id.action_time_drift_reset -> {
@@ -264,11 +271,71 @@ class MonitorFragment : Fragment() {
     }
 
     private fun resetTimeDrift() {
+        applyTimeDrift(0L)
+    }
+
+    private fun applyTimeDrift(driftMs: Long) {
         val intent = Intent(requireContext(), JS8EngineService::class.java).apply {
             action = JS8EngineService.ACTION_SET_TIME_DRIFT
-            putExtra(JS8EngineService.EXTRA_TIME_DRIFT_MS, 0L)
+            putExtra(JS8EngineService.EXTRA_TIME_DRIFT_MS, driftMs)
         }
         requireContext().startService(intent)
+    }
+
+    private fun showTimeDriftDialog() {
+        val view = layoutInflater.inflate(R.layout.dialog_time_drift, null)
+        val input = view.findViewById<TextInputEditText>(R.id.drift_input)
+        val inputLayout = view.findViewById<TextInputLayout>(R.id.drift_input_layout)
+
+        // Not the strip's copy, which reads 0 after a relaunch
+        val currentMs = PreferenceManager.getDefaultSharedPreferences(requireContext())
+            .getLong(JS8EngineService.PREF_TIME_DRIFT_MS, 0L)
+        input.setText(currentMs.toString())
+        input.setSelection(input.text?.length ?: 0)
+
+        fun nudge(deltaMs: Long) {
+            val current = input.text?.toString()?.toLongOrNull() ?: 0L
+            input.setText((current + deltaMs).coerceIn(-DRIFT_LIMIT_MS, DRIFT_LIMIT_MS).toString())
+            input.setSelection(input.text?.length ?: 0)
+            inputLayout.error = null
+        }
+        view.findViewById<MaterialButton>(R.id.nudge_minus_second).setOnClickListener { nudge(-1000L) }
+        view.findViewById<MaterialButton>(R.id.nudge_minus_fine).setOnClickListener { nudge(-100L) }
+        view.findViewById<MaterialButton>(R.id.nudge_plus_fine).setOnClickListener { nudge(100L) }
+        view.findViewById<MaterialButton>(R.id.nudge_plus_second).setOnClickListener { nudge(1000L) }
+
+        val dialog = MaterialAlertDialogBuilder(requireContext())
+            .setTitle(R.string.monitor_time_drift_title)
+            .setView(view)
+            .setPositiveButton(R.string.monitor_time_drift_set, null)
+            .setNegativeButton(android.R.string.cancel, null)
+            .setNeutralButton(R.string.monitor_time_drift_reset_action, null)
+            .create()
+
+        dialog.setOnShowListener {
+            // Set here, not in the builder, so a bad value keeps the dialog open
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val value = input.text?.toString()?.toLongOrNull()
+                if (value == null || value < -DRIFT_LIMIT_MS || value > DRIFT_LIMIT_MS) {
+                    inputLayout.error = getString(
+                        R.string.monitor_time_drift_range, -DRIFT_LIMIT_MS.toInt(), DRIFT_LIMIT_MS.toInt()
+                    )
+                    return@setOnClickListener
+                }
+                applyTimeDrift(value)
+                Snackbar.make(
+                    requireView(),
+                    getString(R.string.monitor_time_drift_applied, value.toInt()),
+                    Snackbar.LENGTH_SHORT
+                ).show()
+                dialog.dismiss()
+            }
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                input.setText("0")
+                inputLayout.error = null
+            }
+        }
+        dialog.show()
     }
 
     private fun startMonitoring() {
@@ -498,5 +565,8 @@ class MonitorFragment : Fragment() {
 
     companion object {
         private const val REQUEST_AUDIO_PERMISSION = 1
+
+        // The RX ring aligns to the UTC minute, so a larger offset wraps
+        private const val DRIFT_LIMIT_MS = 30_000L
     }
 }
