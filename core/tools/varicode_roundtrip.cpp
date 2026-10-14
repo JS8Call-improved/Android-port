@@ -275,6 +275,48 @@ int main() {
     check(!saw_directed, "compound sender and recipient do not emit standard directed frame");
   }
 
+  {
+    // Commands to and from a compound call (KG4UHM/6) packed as desktop's
+    // Varicode::packCmd(): frames from desktop's buildMessageFrames() (built
+    // with Qt), Normal speed. pack_cmd() kept 2 bits of the SNR and shifted
+    // every command: "KG4UHM/6 SNR -03" went out as SNR -31.
+    struct Case { char const* mycall; char const* text; char const* frames; };
+    for (auto const& c : std::vector<Case>{
+             {"VE7NHW", "KG4UHM/6 SNR -03", "Bu7hI9zNOrMu 1 IXXfezaRO+cm 2"},
+             {"VE7NHW", "KG4UHM/6 SNR +05", "Bu7hI9zNOrMu 1 IXXfezaRO+dm 2"},
+             {"VE7NHW", "KG4UHM/6 HEARTBEAT SNR -08", "Bu7hI9zNOrMu 1 IXXfezaRO+k8 2"},
+             {"VE7NHW", "KG4UHM/6 HW CPY?", "Bu7hI9zNOrMu 1 IXXfezaRO+Le 2"},
+             {"VE7NHW", "KG4UHM/6 RR", "Bu7hI9zNOrMu 1 IXXfezaRO+Lu 2"},
+             {"VE7NHW", "KG4UHM/6 SNR?", "Bu7hI9zNOrMu 1 IXXfezaRO+JG 2"},
+             {"KG4UHM/6", "KJ7PRS SNR -03", "AXXfezaROrMu 1 IYAexYQ7O+cm 2"},
+             {"KG4UHM/6", "KJ7PRS HEARTBEAT SNR -08", "AXXfezaROrMu 1 IYAexYQ7O+k8 2"},
+             {"KG4UHM/6", "VE7NHW FB", "AXXfezaROrMu 1 Ju7hI9zNO+LW 2"},
+         }) {
+      std::string got;
+      for (auto const& [frame, bits] : js8core::protocol::varicode::build_message_frames(
+               c.mycall, "CN89", "", c.text, false, false, 0, nullptr))
+        got += (got.empty() ? "" : " ") + frame + " " + std::to_string(bits);
+      check(got == c.frames, std::string("'") + c.text + "' from " + c.mycall + " matches desktop's frames");
+    }
+
+    // Desktop's frames read back with their command and SNR (KG4UHM/6 acking
+    // a heartbeat showed as "HW CPY?").
+    struct Back { char const* frame; char const* call; char const* cmd; char const* num; };
+    for (auto const& b : std::vector<Back>{
+             {"Ju7hI9zNO+j0", "VE7NHW", " HEARTBEAT SNR", "-17"},
+             {"IXXfezaRO+cm", "KG4UHM/6", " SNR", "-03"},
+             {"IXXfezaRO+a8", "KG4UHM/6", " SNR", "-24"},
+             {"IXXfezaRO+Le", "KG4UHM/6", " HW CPY?", ""},
+             {"IXXfezaRO+Mm", "KG4UHM/6", " 73", ""},
+         }) {
+      std::uint8_t type = 0;
+      auto parts = js8core::protocol::varicode::unpack_compound_message(b.frame, &type, nullptr, nullptr);
+      bool ok = parts.size() >= 3 && parts[0] == b.call && parts[2] == b.cmd &&
+                (!*b.num || (parts.size() >= 4 && parts[3] == b.num));
+      check(ok, std::string("desktop's compound frame ") + b.frame + " reads as" + b.cmd + " " + b.num);
+    }
+  }
+
   if (failures != 0) {
     std::cerr << "varicode_roundtrip failures: " << failures << "\n";
     return 1;

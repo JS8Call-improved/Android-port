@@ -731,14 +731,26 @@ std::uint8_t pack_pwr(std::string const& pwr, bool* ok) {
   }
 }
 
+// As desktop's Varicode::packCmd(): an SNR command is [1][type][6-bit
+// number] (type 1 = HEARTBEAT SNR), any other command its 7-bit value.
 std::uint8_t pack_cmd(std::uint8_t cmd, std::uint8_t num, bool* p_packed_num) {
-  if (p_packed_num) *p_packed_num = kSnrCmds.count(cmd) > 0;
-  return (cmd & 0x1F) << 2 | (num & 0x03);
+  if (kSnrCmds.count(cmd) > 0) {
+    if (p_packed_num) *p_packed_num = true;
+    std::uint8_t value = static_cast<std::uint8_t>(((1 << 1) | (cmd == 29 ? 1 : 0)) << 6);
+    return static_cast<std::uint8_t>(value + (num & ((1 << 6) - 1)));
+  }
+  if (p_packed_num) *p_packed_num = false;
+  return static_cast<std::uint8_t>(cmd & ((1 << 7) - 1));
 }
 
+// As desktop's Varicode::unpackCmd().
 std::uint8_t unpack_cmd(std::uint8_t value, std::uint8_t* p_num) {
-  if (p_num) *p_num = value & 0x03;
-  return (value >> 2) & 0x1F;
+  if (value & (1 << 7)) {
+    if (p_num) *p_num = value & ((1 << 6) - 1);
+    return (value & (1 << 6)) ? 29 /* HEARTBEAT SNR */ : 25 /* SNR */;
+  }
+  if (p_num) *p_num = 0;
+  return value & ((1 << 7) - 1);
 }
 
 bool is_snr_command(std::string const& cmd) {
