@@ -487,8 +487,7 @@ public:
         int samples_needed = (sm.symbol_samples * JS8_NUM_SYMBOLS) +
                             static_cast<int>((0.5 + sm.start_delay_ms / 1000.0) * sample_rate);
         int retry_samples = period;
-        // Desktop schedules Ultra (I, its "JS8 60") exactly as Turbo (turboOrUltra).
-        if (sm.id == protocol::SubmodeId::C || sm.id == protocol::SubmodeId::I) {
+        if (sm.id == protocol::SubmodeId::C) {
           samples_needed = sm.symbol_samples * JS8_NUM_SYMBOLS;
           retry_samples = sample_rate;
         }
