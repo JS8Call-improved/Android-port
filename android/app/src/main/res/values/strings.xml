@@ -141,6 +141,9 @@
     <string name="settings_rts_ptt">Serial (RTS PTT)</string>
     <string name="settings_trusdx_serial">TruSDX Serial (USB)</string>
     <string name="settings_qmx_serial">QRP Labs QMX (USB)</string>
+    <string name="settings_btech_uvpro">BTECH UV-Pro (Bluetooth)</string>
+    <string name="settings_btech_uvpro_squelch_hint">Set squelch to 0 on the UV-Pro, or the waterfall stays dark between signals.</string>
+    <string name="permission_bluetooth_denied">The UV-Pro needs the Nearby devices permission. Allow it for JS8Call in Android Settings.</string>
     <string name="settings_qmx_category">QRP Labs QMX</string>
     <string name="settings_qmx_band_profile">Installed QMX Band Profile</string>
     <string name="settings_qmx_band_profile_summary">Limits JS8 frequencies to bands fitted in the radio</string>
