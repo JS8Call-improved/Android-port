@@ -42,10 +42,14 @@ object AudioDevices {
     /**
      * Inputs available right now, in the order they are offered.
      *
-     * A TruSDX rig replaces the list: its audio arrives over the serial link,
-     * so the phone's own inputs cannot carry it.
+     * A TruSDX or UV-Pro rig replaces the list: its audio arrives over the
+     * serial link, so the phone's own inputs cannot carry it.
      */
     fun list(context: Context): List<Device> {
+        val prefs = PreferenceManager.getDefaultSharedPreferences(context)
+        if (prefs.getBoolean("rig_control_enabled", false) && prefs.getString("rig_type", "none") == "btech_uvpro") {
+            return listOf(Device(JS8EngineService.UVPRO_AUDIO_ID, JS8EngineService.UVPRO_AUDIO_NAME))
+        }
         if (usesSerialAudio(context)) {
             return listOf(
                 Device(JS8EngineService.TRUSDX_AUDIO_SERIAL_ID, JS8EngineService.TRUSDX_AUDIO_SERIAL_NAME),
