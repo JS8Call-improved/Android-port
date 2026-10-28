@@ -122,6 +122,11 @@ class JS8Engine private constructor(
         withNativeHandle { nativeSetTxBoostEnabled(it, enabled) }
     }
 
+    /** Configure an audio-only VOX lead-in for subsequent frames. */
+    fun setVoxLeadMs(milliseconds: Int) {
+        withNativeHandle { nativeSetVoxLeadMs(it, milliseconds) }
+    }
+
     /**
      * Set preferred output audio device ID (0 or negative for default).
      */
@@ -308,6 +313,7 @@ class JS8Engine private constructor(
     private external fun nativeSetSubmodes(handle: Long, submodes: Int)
     private external fun nativeSetOutputDevice(handle: Long, deviceId: Int)
     private external fun nativeSetTxBoostEnabled(handle: Long, enabled: Boolean)
+    private external fun nativeSetVoxLeadMs(handle: Long, milliseconds: Int)
     private external fun nativeIsRunning(handle: Long): Boolean
     private external fun nativeTransmitMessage(
         handle: Long,

@@ -35,6 +35,7 @@ JNIEXPORT void JNICALL Java_com_js8call_core_JS8Engine_nativeSetFrequency(JNIEnv
 JNIEXPORT void JNICALL Java_com_js8call_core_JS8Engine_nativeSetSubmodes(JNIEnv*, jobject, jlong, jint);
 JNIEXPORT void JNICALL Java_com_js8call_core_JS8Engine_nativeSetOutputDevice(JNIEnv*, jobject, jlong, jint);
 JNIEXPORT void JNICALL Java_com_js8call_core_JS8Engine_nativeSetTxBoostEnabled(JNIEnv*, jobject, jlong, jboolean);
+JNIEXPORT void JNICALL Java_com_js8call_core_JS8Engine_nativeSetVoxLeadMs(JNIEnv*, jobject, jlong, jint);
 JNIEXPORT jboolean JNICALL Java_com_js8call_core_JS8Engine_nativeIsRunning(JNIEnv*, jobject, jlong);
 JNIEXPORT jboolean JNICALL Java_com_js8call_core_JS8Engine_nativeTransmitMessage(JNIEnv*, jobject, jlong, jstring, jstring, jstring, jstring, jint, jdouble, jdouble, jboolean, jboolean);
 JNIEXPORT jboolean JNICALL Java_com_js8call_core_JS8Engine_nativeTransmitFrame(JNIEnv*, jobject, jlong, jstring, jint, jint, jdouble, jdouble);
@@ -860,6 +861,10 @@ void js8_engine_set_tx_boost_enabled(JS8Engine_Native* engine, bool enabled) {
   engine->engine->set_tx_boost_enabled(enabled);
 }
 
+void js8_engine_set_vox_lead_ms(JS8Engine_Native* engine, int milliseconds) {
+  if (engine && engine->engine) engine->engine->set_vox_lead_ms(milliseconds);
+}
+
 int js8_engine_transmit_message(JS8Engine_Native* engine,
                                 const char* text,
                                 const char* my_call,
@@ -975,6 +980,7 @@ int js8_register_natives(JavaVM* vm, JNIEnv* env) {
     {"nativeSetSubmodes", "(JI)V", (void*)Java_com_js8call_core_JS8Engine_nativeSetSubmodes},
     {"nativeSetOutputDevice", "(JI)V", (void*)Java_com_js8call_core_JS8Engine_nativeSetOutputDevice},
     {"nativeSetTxBoostEnabled", "(JZ)V", (void*)Java_com_js8call_core_JS8Engine_nativeSetTxBoostEnabled},
+    {"nativeSetVoxLeadMs", "(JI)V", (void*)Java_com_js8call_core_JS8Engine_nativeSetVoxLeadMs},
     {"nativeTransmitMessage", "(JLjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;IDDZZ)Z",
      (void*)Java_com_js8call_core_JS8Engine_nativeTransmitMessage},
     {"nativeTransmitFrame", "(JLjava/lang/String;IIDD)Z",

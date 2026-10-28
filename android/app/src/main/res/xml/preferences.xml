@@ -61,6 +61,15 @@
             app:defaultValue="false"
             app:iconSpaceReserved="false" />
 
+        <ListPreference
+            app:key="vox_lead_seconds"
+            app:title="@string/settings_vox_lead"
+            app:entries="@array/vox_lead_entries"
+            app:entryValues="@array/vox_lead_values"
+            app:defaultValue="0"
+            app:useSimpleSummaryProvider="true"
+            app:iconSpaceReserved="false" />
+
     </PreferenceCategory>
 
     <!-- Radio Category -->

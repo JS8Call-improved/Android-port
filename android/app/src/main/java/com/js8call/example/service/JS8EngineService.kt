@@ -4073,6 +4073,9 @@ class JS8EngineService : Service() {
     private fun isRigPttRequired(): Boolean = rigControlMode != "none"
 
     private fun prepareEngineForTransmit(activeEngine: JS8Engine) {
+        val prefs = PreferenceManager.getDefaultSharedPreferences(this)
+        val seconds = prefs.getString("vox_lead_seconds", "0")?.toIntOrNull() ?: 0
+        activeEngine.setVoxLeadMs(voxPreambleDurationMs(rigControlMode, seconds, prefs.getBoolean("rig_control_enabled", false)))
         activeEngine.setTransmitReady(!isRigPttRequired())
     }
 

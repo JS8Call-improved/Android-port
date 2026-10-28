@@ -1,6 +1,7 @@
 #include "js8core/tx/modulator.hpp"
 
 #include <chrono>
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include "js8core/compat/numbers.hpp"
@@ -17,7 +18,8 @@ void Modulator::start(std::array<int, protocol::kJs8NumSymbols> const& tones,
                       int period_ms,
                       double audio_frequency_hz,
                       double tx_delay_s,
-                      bool tuning) {
+                      bool tuning,
+                      int vox_lead_ms) {
   if (symbol_samples <= 0 || period_ms <= 0) {
     stop();
     return;
@@ -36,6 +38,9 @@ void Modulator::start(std::array<int, protocol::kJs8NumSymbols> const& tones,
   silent_frames_.store(0);
   ic_ = 0;
   isym0_ = std::numeric_limits<std::uint64_t>::max();
+  vox_lead_ms = tuning_ ? 0 : std::clamp(vox_lead_ms, 0, 5000);
+  vox_lead_frames_ = static_cast<std::int64_t>(vox_lead_ms) * base_rate_ / 1000;
+  vox_sample_ = 0;
 
   if (!tuning_) {
     auto now = std::chrono::system_clock::now();
@@ -56,6 +61,8 @@ void Modulator::start(std::array<int, protocol::kJs8NumSymbols> const& tones,
       // through a frame sends a partial waveform that receivers cannot decode.
       wait_ms = period_ms - period_offset + start_delay_ms;
     }
+    // Do not start a shortened lead-in: use the next complete slot instead.
+    if (vox_lead_ms > 0 && wait_ms < vox_lead_ms) wait_ms += period_ms;
     silent_frames_.store(wait_ms * base_rate_ / 1000);
   }
 
@@ -78,6 +85,16 @@ float Modulator::next_sample() {
     if (remaining > 0) {
       if (silent_frames_.fetch_sub(1) == 1) {
         state_.store(State::Active);
+      }
+      if (vox_lead_frames_ > 0 && remaining <= vox_lead_frames_) {
+        // Five millisecond ramps reduce clicks; phase is independent of the
+        // JS8 waveform, which starts at its unchanged scheduled boundary.
+        const auto ramp = std::max<std::int64_t>(1, base_rate_ / 200);
+        const double gain = std::min({1.0, static_cast<double>(vox_sample_ + 1) / ramp,
+                                     static_cast<double>(remaining) / ramp});
+        const float sample = static_cast<float>(gain * std::sin(kTau * audio_frequency_ * vox_sample_ / base_rate_));
+        ++vox_sample_;
+        return sample;
       }
       return 0.0f;
     }

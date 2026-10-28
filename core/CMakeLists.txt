@@ -47,3 +47,10 @@ add_executable(js8core-varicode-test EXCLUDE_FROM_ALL
 )
 
 target_link_libraries(js8core-varicode-test PRIVATE js8core)
+
+add_executable(js8core-vox-test EXCLUDE_FROM_ALL
+  tools/vox_modulator_test.cpp
+  src/tx/modulator.cpp
+)
+target_compile_features(js8core-vox-test PRIVATE cxx_std_20)
+target_include_directories(js8core-vox-test PRIVATE include)

@@ -234,10 +234,12 @@ class SettingsFragment : PreferenceFragmentCompat() {
             true
         }
         // The UV-Pro input is offered only while rig control is on
-        findPreference<SwitchPreferenceCompat>("rig_control_enabled")?.setOnPreferenceChangeListener { _, _ ->
+        findPreference<SwitchPreferenceCompat>("rig_control_enabled")?.setOnPreferenceChangeListener { _, newValue ->
             view?.post { updateAudioDeviceSummary() }
+            updateVoxPreambleEnabled(rigEnabled = newValue as? Boolean ?: false)
             true
         }
+        updateVoxPreambleEnabled()
 
         gridPreference = findPreference("grid")
         gridPreference?.onUpdateClickListener = { onGridUpdateRequested() }
@@ -267,6 +269,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
 
     override fun onStart() {
         super.onStart()
+        updateVoxPreambleEnabled()
         audioManager().registerAudioDeviceCallback(audioDeviceCallback, null)
     }
 
@@ -275,6 +278,12 @@ class SettingsFragment : PreferenceFragmentCompat() {
 
     private fun updateAudioDeviceSummary() {
         audioDevicePreference?.summary = AudioDevices.selectedName(requireContext())
+    }
+
+    private fun updateVoxPreambleEnabled(
+        rigEnabled: Boolean = preferenceManager.sharedPreferences?.getBoolean("rig_control_enabled", false) ?: false
+    ) {
+        findPreference<ListPreference>("vox_lead_seconds")?.isEnabled = !rigEnabled
     }
 
     override fun onStop() {

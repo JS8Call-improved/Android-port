@@ -113,6 +113,7 @@
     <string name="settings_audio_source_summary">Microphone or line input</string>
     <string name="settings_tx_boost">TX Output Boost</string>
     <string name="settings_tx_boost_summary">Increase transmit output level by +10 dB (may cause distortion on loud signals)</string>
+    <string name="settings_vox_lead">VOX Preamble</string>
 
     <string name="settings_rig_control">Rig Control</string>
     <string name="settings_rig_control_summary">Enable CAT control</string>

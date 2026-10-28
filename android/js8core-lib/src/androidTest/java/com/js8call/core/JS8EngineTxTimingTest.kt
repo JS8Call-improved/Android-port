@@ -10,6 +10,22 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class JS8EngineTxTimingTest {
     @Test
+    fun voxLeadReservesACompleteLeadIn() {
+        val engine = JS8Engine.create(callbackHandler = NoOpCallbackHandler, enableTxAudioTap = true)
+        try {
+            assertTrue(engine.start())
+            engine.setTransmitReady(true)
+            engine.setVoxLeadMs(5000)
+            assertTrue(engine.transmitFrame("0123456789AB", 0, 2, 1500.0))
+            // The audio callback may have consumed a small portion already.
+            assertTrue(engine.txMillisecondsUntilAudio() >= 4900)
+            engine.stopTransmit()
+        } finally {
+            engine.close()
+        }
+    }
+
+    @Test
     fun transmitReadyGateHoldsActiveModulation() {
         val engine = JS8Engine.create(
             callbackHandler = NoOpCallbackHandler,

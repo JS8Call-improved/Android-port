@@ -240,6 +240,12 @@ Java_com_js8call_core_JS8Engine_nativeSetTxBoostEnabled(
 }
 
 JNIEXPORT void JNICALL
+Java_com_js8call_core_JS8Engine_nativeSetVoxLeadMs(
+    JNIEnv*, jobject, jlong handle, jint milliseconds) {
+  js8_engine_set_vox_lead_ms(reinterpret_cast<JS8Engine_Native*>(handle), milliseconds);
+}
+
+JNIEXPORT void JNICALL
 Java_com_js8call_core_JS8Engine_nativeSetTimeDriftMs(
     JNIEnv* /* env */,
     jobject /* thiz */,

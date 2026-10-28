@@ -349,6 +349,10 @@ public:
     config_.tx_output_gain_boost_enabled = enabled;
   }
 
+  void set_vox_lead_ms(int milliseconds) override {
+    vox_lead_ms_.store(std::clamp(milliseconds, 0, 5000));
+  }
+
   void set_submodes(int submodes) override {
     constexpr int knownSubmodes = (1 << static_cast<int>(protocol::SubmodeId::A)) |
                                  (1 << static_cast<int>(protocol::SubmodeId::B)) |
@@ -402,6 +406,8 @@ public:
       double tx_delay_s = 0.0;
       bool tuning = false;
     };
+
+    std::atomic<int> vox_lead_ms_{0};
 
     std::chrono::system_clock::time_point drifted_now() const {
       return std::chrono::system_clock::now() +
@@ -907,7 +913,8 @@ public:
                           sm->tx_seconds * 1000,
                           tx_settings_.audio_frequency_hz,
                           tx_settings_.tx_delay_s,
-                          tx_settings_.tuning);
+                          tx_settings_.tuning,
+                          vox_lead_ms_.load());
     }
 
     static std::size_t next_pow2(std::size_t v) {

@@ -26,6 +26,7 @@ void js8_engine_set_frequency(JS8Engine_Native* engine, uint64_t frequency_hz);
 void js8_engine_set_submodes(JS8Engine_Native* engine, int submodes);
 void js8_engine_set_output_device(JS8Engine_Native* engine, int device_id);
 void js8_engine_set_tx_boost_enabled(JS8Engine_Native* engine, bool enabled);
+void js8_engine_set_vox_lead_ms(JS8Engine_Native* engine, int milliseconds);
 void js8_engine_set_time_drift_ms(JS8Engine_Native* engine, long long drift_ms);
 long long js8_engine_get_time_drift_ms(JS8Engine_Native* engine);
 

@@ -18,7 +18,8 @@ public:
              int period_ms,
              double audio_frequency_hz,
              double tx_delay_s,
-             bool tuning);
+             bool tuning,
+             int vox_lead_ms = 0);
 
   void stop();
   void set_clock_offset_ms(std::int64_t offset_ms) { clock_offset_ms_.store(offset_ms); }
@@ -40,6 +41,8 @@ private:
   double phi_ = 0.0;
   double dphi_ = 0.0;
   double amp_ = 1.0;
+  std::int64_t vox_lead_frames_ = 0;
+  std::int64_t vox_sample_ = 0;
   std::atomic<std::int64_t> silent_frames_{0};
   std::atomic<std::int64_t> clock_offset_ms_{0};
   std::uint64_t ic_ = 0;
