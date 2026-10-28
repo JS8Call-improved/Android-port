@@ -1,9 +1,6 @@
 package com.js8call.example.ui
 
-import android.content.BroadcastReceiver
-import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -18,7 +15,6 @@ import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
 import com.js8call.example.R
-import com.js8call.example.service.JS8EngineService
 
 /**
  * Fragment showing a single conversation with chat bubbles.
@@ -36,24 +32,6 @@ class ConversationFragment : Fragment() {
     private lateinit var sendButton: FloatingActionButton
 
     private var callsign: String = ""
-
-    // Track the last sent message ID for status updates
-    private var lastSentMessageId: Long? = null
-
-    private val txStateReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            when (intent?.action) {
-                JS8EngineService.ACTION_TX_STATE -> {
-                    val state = intent.getStringExtra(JS8EngineService.EXTRA_TX_STATE)
-                    if (state == JS8EngineService.TX_STATE_FINISHED) {
-                        lastSentMessageId?.let { id ->
-                            viewModel.updateMessageStatus(id, com.js8call.example.data.MessageEntity.STATUS_SENT)
-                        }
-                    }
-                }
-            }
-        }
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -141,21 +119,8 @@ class ConversationFragment : Fragment() {
 
     override fun onResume() {
         super.onResume()
-        // Register for TX state updates
-        val filter = IntentFilter().apply {
-            addAction(JS8EngineService.ACTION_TX_STATE)
-        }
-        LocalBroadcastManager.getInstance(requireContext())
-            .registerReceiver(txStateReceiver, filter)
-
         // Mark as read again in case new messages arrived
         viewModel.markConversationAsRead(callsign)
-    }
-
-    override fun onPause() {
-        super.onPause()
-        LocalBroadcastManager.getInstance(requireContext())
-            .unregisterReceiver(txStateReceiver)
     }
 
     private fun sendMessage() {
@@ -167,13 +132,11 @@ class ConversationFragment : Fragment() {
 
         // Insert outgoing message to database
         viewModel.insertOutgoingMessage(callsign, text).observe(viewLifecycleOwner) { messageId ->
-            lastSentMessageId = messageId
-
             // Queue the message for transmission via the TX queue
             // Format: MSG text, directed to callsign
             // The engine will prepend the callsign when selectedCall is set
             val fullMessage = "MSG $text"
-            transmitViewModel.queueMessage(fullMessage, callsign, priority = 0, clearComposed = false)
+            transmitViewModel.queueMessage(fullMessage, callsign, priority = 0, clearComposed = false, messageId = messageId)
             
             // Trigger queue processing
             LocalBroadcastManager.getInstance(requireContext()).sendBroadcast(

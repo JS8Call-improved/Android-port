@@ -383,12 +383,13 @@ class TransmitFragment : Fragment() {
         }
 
         // Queue the message - MainActivity will handle sending to service
-        viewModel.queueMessage(payloadText, directed)
-
-        // Broadcast to trigger queue processing (MainActivity handles this)
-        LocalBroadcastManager.getInstance(requireContext()).sendBroadcast(
-            Intent(com.js8call.example.MainActivity.ACTION_PROCESS_TX_QUEUE)
-        )
+        val context = requireContext().applicationContext
+        viewModel.queueManualMessage(payloadText, directed) {
+            // Broadcast only after the message has been added to the queue.
+            LocalBroadcastManager.getInstance(context).sendBroadcast(
+                Intent(com.js8call.example.MainActivity.ACTION_PROCESS_TX_QUEUE)
+            )
+        }
 
         // Show confirmation
         val message = if (directed != null) {

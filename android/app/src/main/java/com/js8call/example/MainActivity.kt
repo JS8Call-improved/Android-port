@@ -256,10 +256,13 @@ class MainActivity : AppCompatActivity() {
      * Process the next message in the TX queue if not currently transmitting.
      */
     private fun processNextTxIfIdle() {
+        // Keep queued entries until the engine can accept them. Otherwise the
+        // service reports an error without a TX completion event.
+        if (monitorViewModel.isRunning.value != true) return
         // Don't send if already transmitting
         val state = transmitViewModel.txState.value
         android.util.Log.d("MainActivity", "processNextTxIfIdle: state=$state")
-        if (state == com.js8call.example.model.TransmitState.TRANSMITTING) {
+        if (state == com.js8call.example.model.TransmitState.TRANSMITTING || transmitViewModel.hasActiveTransmission()) {
             android.util.Log.d("MainActivity", "processNextTxIfIdle: already transmitting, skipping")
             return
         }
@@ -271,6 +274,9 @@ class MainActivity : AppCompatActivity() {
             return
         }
         
+        // Keep the specific entry associated with the eventual TX result even
+        // if a higher-priority message is queued while it is transmitting.
+        transmitViewModel.beginTransmission(nextMessage)
         // Send to service for transmission
         android.util.Log.d("MainActivity", "processNextTxIfIdle: sending to service: text='${nextMessage.text}' directed=${nextMessage.directed}")
         val txIntent = Intent(this, JS8EngineService::class.java).apply {
