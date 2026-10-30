@@ -31,6 +31,8 @@ class DecodeFragment : Fragment() {
     private lateinit var clearButton: View
 
     private var myGroups: Set<String> = emptySet()
+    private var followNewest = true
+    private var userScrolling = false
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -78,15 +80,47 @@ class DecodeFragment : Fragment() {
             }
         }
         recyclerView.adapter = adapter
+        (recyclerView.layoutManager as? androidx.recyclerview.widget.LinearLayoutManager)?.stackFromEnd = true
+        followNewest = true
+        userScrolling = false
+        // Only a drag changes this; a burst lands while the last smooth scroll still runs
+        recyclerView.addOnScrollListener(object : RecyclerView.OnScrollListener() {
+            override fun onScrollStateChanged(rv: RecyclerView, newState: Int) {
+                if (newState == RecyclerView.SCROLL_STATE_DRAGGING) userScrolling = true
+                if (newState == RecyclerView.SCROLL_STATE_IDLE && userScrolling) {
+                    userScrolling = false
+                    followNewest = !rv.canScrollVertically(1)
+                }
+            }
+        })
 
         // Set up clear button
         clearButton.setOnClickListener {
             confirmClearDecodes()
         }
 
+        view.findViewById<View>(R.id.cq_button).setOnClickListener {
+            queueBroadcast("CQ CQ CQ")
+        }
+        view.findViewById<View>(R.id.heartbeat_button).setOnClickListener {
+            queueBroadcast("HB")
+        }
+
         // Observe decodes
         viewModel.decodes.observe(viewLifecycleOwner) { decodes ->
-            adapter.submitList(decodes)
+            val firstLoad = adapter.itemCount == 0
+            if (firstLoad) followNewest = true
+
+            // The new row only exists once the diff commits
+            adapter.submitList(decodes) {
+                if (decodes.isNotEmpty() && followNewest) {
+                    if (firstLoad) {
+                        recyclerView.scrollToPosition(decodes.size - 1)
+                    } else {
+                        recyclerView.smoothScrollToPosition(decodes.size - 1)
+                    }
+                }
+            }
 
             // Show/hide empty state
             if (decodes.isEmpty()) {
@@ -95,19 +129,16 @@ class DecodeFragment : Fragment() {
             } else {
                 emptyText.visibility = View.GONE
                 recyclerView.visibility = View.VISIBLE
-
-                // Auto-scroll to top for new messages
-                recyclerView.scrollToPosition(0)
             }
         }
     }
 
     private fun showDecodeOptions(decode: com.js8call.example.model.DecodedMessage) {
-        val options = arrayOf(
+        val options = listOfNotNull(
             getString(R.string.decodes_copy),
             getString(R.string.decodes_reply),
-            getString(R.string.decodes_sync_time, decode.driftMs)
-        )
+            if (decode.outgoing) null else getString(R.string.decodes_sync_time, decode.driftMs)
+        ).toTypedArray()
 
         MaterialAlertDialogBuilder(requireContext())
             .setTitle(decode.formattedTime())
@@ -161,9 +192,18 @@ class DecodeFragment : Fragment() {
         val trimmed = text.trim()
         if (trimmed.isBlank()) return null
 
-        val firstToken = trimmed.split(Regex("\\s+"), limit = 2)[0]
-        val callsign = firstToken.trimEnd(':').uppercase()
+        val tokens = trimmed.split(Regex("\\s+"), limit = 3)
+        var callsign = tokens[0].trimEnd(':').uppercase()
+        // Own auto-replies start with our callsign
+        if (callsign == ownCallsign() && tokens.size > 1) {
+            callsign = tokens[1].trimEnd(':').uppercase()
+        }
         return if (isCallsignPrefix(callsign)) callsign else null
+    }
+
+    private fun ownCallsign(): String {
+        val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext())
+        return prefs.getString("callsign", "")?.trim()?.uppercase().orEmpty()
     }
 
     private fun isCallsignPrefix(token: String): Boolean {
@@ -176,6 +216,23 @@ class DecodeFragment : Fragment() {
         if (!token.any { it.isLetter() }) return false
         if (!token.any { it.isDigit() }) return false
         return true
+    }
+
+    private fun queueBroadcast(text: String) {
+        val monitorViewModel = ViewModelProvider(requireActivity())[MonitorViewModel::class.java]
+        if (monitorViewModel.isRunning.value != true) {
+            Snackbar.make(requireView(), R.string.decodes_start_first, Snackbar.LENGTH_SHORT).show()
+            return
+        }
+        val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext())
+        if (prefs.getString("callsign", "")?.isNotBlank() != true) {
+            Snackbar.make(requireView(), R.string.error_callsign_required, Snackbar.LENGTH_LONG).show()
+            return
+        }
+        transmitViewModel.queueMessage(text, directed = null, priority = 1, clearComposed = false)
+        androidx.localbroadcastmanager.content.LocalBroadcastManager.getInstance(requireContext())
+            .sendBroadcast(android.content.Intent(com.js8call.example.MainActivity.ACTION_PROCESS_TX_QUEUE))
+        Snackbar.make(requireView(), getString(R.string.decodes_queued, text), Snackbar.LENGTH_SHORT).show()
     }
 
     private fun confirmClearDecodes() {

@@ -2706,6 +2706,7 @@ class JS8EngineService : Service() {
             
             if (ok) {
                 updateLastTxMessage(payload, "", submode, freq.toDouble())
+                broadcastTxSent(buildTxMessage(payload, ""), freq.toDouble())
                 broadcastTxState(TX_STATE_QUEUED)
                 startTxMonitor()
             } else {
@@ -2798,6 +2799,7 @@ class JS8EngineService : Service() {
         if (ok) {
             Log.i(TAG, "TX request accepted")
             updateLastTxMessage(payloadText, directed, submode, audioFrequencyHz)
+            broadcastTxSent(buildTxMessage(payloadText, directed), audioFrequencyHz)
             broadcastTxState(TX_STATE_QUEUED)
             startTxMonitor()
         } else {
@@ -2847,6 +2849,15 @@ class JS8EngineService : Service() {
     private fun broadcastTxState(state: String) {
         val intent = Intent(ACTION_TX_STATE).apply {
             putExtra(EXTRA_TX_STATE, state)
+        }
+        LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
+    }
+
+    private fun broadcastTxSent(text: String, frequencyHz: Double) {
+        if (text.isBlank()) return
+        val intent = Intent(ACTION_TX_SENT).apply {
+            putExtra(EXTRA_TX_SENT_TEXT, text)
+            putExtra(EXTRA_TX_SENT_FREQ, frequencyHz.toFloat())
         }
         LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
     }
@@ -3922,6 +3933,7 @@ class JS8EngineService : Service() {
 
         if (ok) {
             updateLastTxMessage(payload, "", submode, currentTxOffsetHz.toDouble())
+            broadcastTxSent(buildTxMessage(payload, ""), currentTxOffsetHz.toDouble())
             broadcastTxState(TX_STATE_QUEUED)
             startTxMonitor()
         }
@@ -3964,6 +3976,7 @@ class JS8EngineService : Service() {
         if (ok) {
             Log.i(TAG, "Autoreply queued: to=$directedCall text='$payloadText'")
             updateLastTxMessage(payloadText, directedCall, submode, currentTxOffsetHz.toDouble())
+            broadcastTxSent(buildTxMessage(payloadText, directedCall), currentTxOffsetHz.toDouble())
             broadcastTxState(TX_STATE_QUEUED)
             startTxMonitor()
         } else {
@@ -4210,6 +4223,7 @@ class JS8EngineService : Service() {
         const val ACTION_ERROR = "com.js8call.example.ACTION_ERROR"
         const val ACTION_TRANSMIT_MESSAGE = "com.js8call.example.ACTION_TRANSMIT_MESSAGE"
         const val ACTION_TX_STATE = "com.js8call.example.ACTION_TX_STATE"
+        const val ACTION_TX_SENT = "com.js8call.example.ACTION_TX_SENT"
         const val ACTION_RADIO_FREQUENCY = "com.js8call.example.ACTION_RADIO_FREQUENCY"
         const val ACTION_MESSAGE_RECEIVED = "com.js8call.example.ACTION_MESSAGE_RECEIVED"
         const val ACTION_QUEUE_TX = "com.js8call.example.ACTION_QUEUE_TX"
@@ -4257,6 +4271,8 @@ class JS8EngineService : Service() {
         const val EXTRA_TX_FORCE_IDENTIFY = "tx_force_identify"
         const val EXTRA_TX_FORCE_DATA = "tx_force_data"
         const val EXTRA_TX_STATE = "tx_state"
+        const val EXTRA_TX_SENT_TEXT = "tx_sent_text"
+        const val EXTRA_TX_SENT_FREQ = "tx_sent_freq"
         const val EXTRA_RADIO_FREQUENCY_HZ = "radio_frequency_hz"
         const val EXTRA_MESSAGE_FROM = "message_from"
         const val EXTRA_MESSAGE_TEXT = "message_text"

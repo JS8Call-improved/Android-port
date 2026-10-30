@@ -55,11 +55,11 @@ class DecodeViewModel(application: Application) : AndroidViewModel(application) 
      * Add a new decoded message.
      */
     fun addDecode(message: DecodedMessage) {
-        allDecodes.add(0, message) // Add to beginning
+        allDecodes.add(message)
 
         // Limit size
         if (allDecodes.size > maxDecodes) {
-            allDecodes.removeAt(allDecodes.size - 1)
+            allDecodes.removeAt(0)
         }
 
         applyFilter()
@@ -100,7 +100,8 @@ class DecodeViewModel(application: Application) : AndroidViewModel(application) 
                         quality = obj.optDouble("quality").toFloat(),
                         mode = obj.optInt("mode"),
                         driftMs = obj.optInt("driftMs"),
-                        timestamp = obj.optLong("timestamp", System.currentTimeMillis())
+                        timestamp = obj.optLong("timestamp", System.currentTimeMillis()),
+                        outgoing = obj.optBoolean("outgoing")
                     )
                 )
             }
@@ -111,7 +112,8 @@ class DecodeViewModel(application: Application) : AndroidViewModel(application) 
 
         if (loaded.isEmpty()) return
         allDecodes.clear()
-        allDecodes.addAll(loaded.take(maxDecodes))
+        // Files saved by older builds stored newest first.
+        allDecodes.addAll(loaded.sortedBy { it.timestamp }.takeLast(maxDecodes))
         applyFilter()
     }
 
@@ -201,14 +203,38 @@ class DecodeViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     /**
+     * Add a message this station transmitted.
+     */
+    fun addOutgoing(text: String, frequency: Float) {
+        if (text.isBlank()) return
+        val cal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"))
+        val utc = cal.get(java.util.Calendar.HOUR_OF_DAY) * 10000 +
+            cal.get(java.util.Calendar.MINUTE) * 100 +
+            cal.get(java.util.Calendar.SECOND)
+        addDecodeToDisplay(
+            DecodedMessage(
+                utc = utc,
+                snr = 0,
+                dt = 0f,
+                frequency = frequency,
+                text = text,
+                type = 3,
+                quality = 1f,
+                mode = 0,
+                outgoing = true
+            )
+        )
+    }
+
+    /**
      * Add a decoded message directly to the display list.
      */
     private fun addDecodeToDisplay(message: DecodedMessage) {
-        allDecodes.add(0, message) // Add to beginning
+        allDecodes.add(message)
 
         // Limit size
         if (allDecodes.size > maxDecodes) {
-            allDecodes.removeAt(allDecodes.size - 1)
+            allDecodes.removeAt(0)
         }
 
         applyFilter()
@@ -367,6 +393,7 @@ class DecodeViewModel(application: Application) : AndroidViewModel(application) 
             obj.put("mode", decode.mode)
             obj.put("driftMs", decode.driftMs)
             obj.put("timestamp", decode.timestamp)
+            obj.put("outgoing", decode.outgoing)
             arr.put(obj)
         }
 
@@ -381,7 +408,10 @@ class DecodeViewModel(application: Application) : AndroidViewModel(application) 
      * Sender callsigns from the in-memory decode list, newest first.
      */
     fun heardCallsigns(): List<String> {
-        return allDecodes.mapNotNull { senderCallsign(it.text) }.distinct()
+        return allDecodes.asReversed()
+            .filterNot { it.outgoing }
+            .mapNotNull { senderCallsign(it.text) }
+            .distinct()
     }
 
     private fun senderCallsign(text: String): String? {
