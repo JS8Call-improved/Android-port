@@ -545,24 +545,28 @@ class JS8EngineService : Service() {
                 Log.w(TAG, "Ignoring engine start while rig teardown is still active")
                 broadcastError("Rig control is still stopping. Please try again.")
                 broadcastEngineState(STATE_STOPPED)
+                stopSelf()
                 return
             }
             if (trusdxStartupWorkerActive) {
                 Log.w(TAG, "Ignoring engine start while TruSDX cleanup is still active")
                 broadcastError("TruSDX serial initialization is still stopping. Please try again.")
                 broadcastEngineState(STATE_STOPPED)
+                stopSelf()
                 return
             }
             if (qmxStartupWorkerActive) {
                 Log.w(TAG, "Ignoring engine start while QMX cleanup is still active")
                 broadcastError("QMX CAT initialization is still stopping. Please try again.")
                 broadcastEngineState(STATE_STOPPED)
+                stopSelf()
                 return
             }
             if (uvproWorkersActive.get() > 0) {
                 Log.w(TAG, "Ignoring engine start while UV-Pro cleanup is still active")
                 broadcastError("UV-Pro Bluetooth is still disconnecting. Please try again.")
                 broadcastEngineState(STATE_STOPPED)
+                stopSelf()
                 return
             }
 
@@ -1714,8 +1718,8 @@ class JS8EngineService : Service() {
                                 "btech_uvpro" -> shutdownUvPro?.setPtt(false) == true
                                 else -> false
                             }
-                        } catch (e: Exception) {
-                            Log.e(TAG, "PTT release failed during shutdown", e)
+                        } catch (t: Throwable) {
+                            Log.e(TAG, "PTT release failed during shutdown", t)
                             false
                         }
                         if (released) {
@@ -1756,8 +1760,8 @@ class JS8EngineService : Service() {
     private inline fun rigTeardownStep(name: String, step: () -> Unit) {
         try {
             step()
-        } catch (e: Exception) {
-            Log.e(TAG, "$name failed during shutdown", e)
+        } catch (t: Throwable) {
+            Log.e(TAG, "$name failed during shutdown", t)
         }
     }
 
