@@ -18,6 +18,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
@@ -141,6 +142,8 @@ class JS8EngineService : Service() {
     }
     private val txHandlerThread = HandlerThread("Js8Tx")
     private lateinit var txHandler: Handler
+    // Stop cancels only this, never a queued rig teardown
+    private val txWorkToken = Any()
     private lateinit var txMonitorHandler: Handler
     private var selectedAudioDeviceId: Int = -1  // -1 means use default
     private var selectedOutputDeviceId: Int = -1  // -1 means use default
@@ -345,7 +348,7 @@ class JS8EngineService : Service() {
             }
             ACTION_TRANSMIT_MESSAGE -> {
                 val txIntent = Intent(intent)
-                txHandler.post { handleTransmitMessage(txIntent) }
+                postTxWork { handleTransmitMessage(txIntent) }
             }
             ACTION_TIME_SYNC_ONCE -> {
                 Log.i(TAG, "One-shot time sync armed; waiting for next decode")
@@ -535,24 +538,35 @@ class JS8EngineService : Service() {
         val generation = if (resumeGeneration == null) {
             if (engineStartInProgress || engine != null) {
                 Log.w(TAG, "Ignoring duplicate engine start request")
+                broadcastEngineState(if (engineStartInProgress) STATE_STARTING else STATE_RUNNING)
+                return
+            }
+            if (rigTeardownPending) {
+                Log.w(TAG, "Ignoring engine start while rig teardown is still active")
+                broadcastError("Rig control is still stopping. Please try again.")
+                broadcastEngineState(STATE_STOPPED)
+                stopSelf()
                 return
             }
             if (trusdxStartupWorkerActive) {
                 Log.w(TAG, "Ignoring engine start while TruSDX cleanup is still active")
                 broadcastError("TruSDX serial initialization is still stopping. Please try again.")
                 broadcastEngineState(STATE_STOPPED)
+                stopSelf()
                 return
             }
             if (qmxStartupWorkerActive) {
                 Log.w(TAG, "Ignoring engine start while QMX cleanup is still active")
                 broadcastError("QMX CAT initialization is still stopping. Please try again.")
                 broadcastEngineState(STATE_STOPPED)
+                stopSelf()
                 return
             }
             if (uvproWorkersActive.get() > 0) {
                 Log.w(TAG, "Ignoring engine start while UV-Pro cleanup is still active")
                 broadcastError("UV-Pro Bluetooth is still disconnecting. Please try again.")
                 broadcastEngineState(STATE_STOPPED)
+                stopSelf()
                 return
             }
 
@@ -1630,7 +1644,7 @@ class JS8EngineService : Service() {
             stopTxMonitor()
             disableScoRouting()
 
-            txHandler.removeCallbacksAndMessages(null)
+            txHandler.removeCallbacksAndMessages(txWorkToken)
             synchronized(pttStateLock) {
                 rigPttDesired = false
                 rigPttDesiredGeneration = txPttGeneration
@@ -1684,41 +1698,48 @@ class JS8EngineService : Service() {
                 )
             }
 
+            if (shutdownMode != "none") rigTeardownPending = true
             txHandler.post {
-                if (shouldReleasePtt) {
-                    // Captured references, not setRigPtt: the fields already
-                    // hold the transports the next start will use.
-                    val released = when (shutdownMode) {
-                        "network" -> shutdownNetwork?.setPtt(false) == true
-                        "hamlib_usb" -> shutdownHamlib?.setPtt(false) == true
-                        "rts_ptt" -> when (shutdownTransport) {
-                            SerialTransport.USB -> shutdownUsb?.setRts(false) == true
-                            SerialTransport.BLUETOOTH -> shutdownBluetooth?.setRts(false) == true
-                            else -> false
-                        }
-                        "trusdx_serial" -> shutdownTruSdx?.setPtt(false) == true
-                        "qmx_serial" -> shutdownQmx?.setPtt(false) == true
-                        "btech_uvpro" -> shutdownUvPro?.setPtt(false) == true
-                        else -> false
-                    }
-                    if (released) {
-                        synchronized(pttStateLock) { rigPttAsserted = false }
-                    } else {
-                        Log.e(TAG, "Unable to confirm PTT release during shutdown")
-                    }
-                }
-                shutdownHamlib?.close()
-                shutdownTruSdx?.stop()
-                shutdownQmx?.stop()
                 try {
-                    shutdownUvPro?.stop()
+                    if (shouldReleasePtt) {
+                        // Captured references, not setRigPtt: the fields already
+                        // hold the transports the next start will use.
+                        val released = try {
+                            when (shutdownMode) {
+                                "network" -> shutdownNetwork?.setPtt(false) == true
+                                "hamlib_usb" -> shutdownHamlib?.setPtt(false) == true
+                                "rts_ptt" -> when (shutdownTransport) {
+                                    SerialTransport.USB -> shutdownUsb?.setRts(false) == true
+                                    SerialTransport.BLUETOOTH -> shutdownBluetooth?.setRts(false) == true
+                                    else -> false
+                                }
+                                "trusdx_serial" -> shutdownTruSdx?.setPtt(false) == true
+                                "qmx_serial" -> shutdownQmx?.setPtt(false) == true
+                                "btech_uvpro" -> shutdownUvPro?.setPtt(false) == true
+                                else -> false
+                            }
+                        } catch (t: Throwable) {
+                            Log.e(TAG, "PTT release failed during shutdown", t)
+                            false
+                        }
+                        if (released) {
+                            synchronized(pttStateLock) { rigPttAsserted = false }
+                        } else {
+                            Log.e(TAG, "Unable to confirm PTT release during shutdown")
+                        }
+                    }
+                    rigTeardownStep("Hamlib close") { shutdownHamlib?.close() }
+                    rigTeardownStep("TruSDX stop") { shutdownTruSdx?.stop() }
+                    rigTeardownStep("QMX stop") { shutdownQmx?.stop() }
+                    rigTeardownStep("UV-Pro stop") { shutdownUvPro?.stop() }
+                    rigTeardownStep("USB serial close") { shutdownUsb?.close() }
+                    rigTeardownStep("Bluetooth serial close") { shutdownBluetooth?.close() }
+                    rigTeardownStep("rigctld disconnect") { shutdownNetwork?.disconnect() }
+                    Log.i(TAG, "Rig control torn down")
                 } finally {
                     if (shutdownMode == "btech_uvpro") uvproWorkersActive.decrementAndGet()
+                    if (shutdownMode != "none") rigTeardownPending = false
                 }
-                shutdownUsb?.close()
-                shutdownBluetooth?.close()
-                shutdownNetwork?.disconnect()
-                Log.i(TAG, "Rig control torn down")
             }
 
             pskReporterClient?.stop(flush = true)
@@ -1733,6 +1754,14 @@ class JS8EngineService : Service() {
 
         } catch (e: Exception) {
             Log.e(TAG, "Error stopping engine", e)
+        }
+    }
+
+    private inline fun rigTeardownStep(name: String, step: () -> Unit) {
+        try {
+            step()
+        } catch (t: Throwable) {
+            Log.e(TAG, "$name failed during shutdown", t)
         }
     }
 
@@ -3007,7 +3036,11 @@ class JS8EngineService : Service() {
 
         if (openTransmitGate) engine?.setTransmitReady(true)
         completion?.invoke(true)
-        if (scheduleCommand) txHandler.post { runRigPttCommand() }
+        if (scheduleCommand) postTxWork { runRigPttCommand() }
+    }
+
+    private fun postTxWork(work: Runnable) {
+        txHandler.postAtTime(work, txWorkToken, SystemClock.uptimeMillis())
     }
 
     private fun runRigPttCommand() {
@@ -3078,7 +3111,7 @@ class JS8EngineService : Service() {
                 failTransmitForPtt(generation, "Failed to enable PTT")
             }
         }
-        if (scheduleNext) txHandler.post { runRigPttCommand() }
+        if (scheduleNext) postTxWork { runRigPttCommand() }
     }
 
     private fun failTransmitForPtt(generation: Int, message: String) {
@@ -3091,7 +3124,7 @@ class JS8EngineService : Service() {
             rigPttCompletion = null
             if (!rigPttCommandPending && rigPttAsserted) {
                 rigPttCommandPending = true
-                txHandler.post { runRigPttCommand() }
+                postTxWork { runRigPttCommand() }
             }
         }
 
@@ -4164,6 +4197,8 @@ class JS8EngineService : Service() {
         private val uvproWorkersActive = AtomicInteger(0)
 
         private const val TAG = "JS8EngineService"
+        // The teardown outlives the service instance that posted it
+        @Volatile private var rigTeardownPending = false
         private const val PREF_AUTOREPLY_ENABLED = "autoreply_enabled"
         private const val PREF_RELAY_ENABLED = "relay_enabled"
         private const val PREF_TX_SUBMODE = "tx_submode"
