@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/cmd_cq"
+        android:title="@string/tx_mode_cq" />
+    <item
+        android:id="@+id/cmd_hb"
+        android:title="@string/tx_mode_heartbeat" />
+</menu>

@@ -36,11 +36,6 @@
     </fragment>
 
     <fragment
-        android:id="@+id/navigation_transmit"
-        android:name="com.js8call.example.ui.TransmitFragment"
-        android:label="@string/nav_transmit" />
-
-    <fragment
         android:id="@+id/navigation_settings"
         android:name="com.js8call.example.ui.SettingsFragment"
         android:label="@string/nav_settings" />
