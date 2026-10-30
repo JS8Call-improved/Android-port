@@ -13,7 +13,6 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import com.google.android.material.navigation.NavigationBarView
 import com.google.android.material.snackbar.Snackbar
 import com.js8call.example.R
 
@@ -25,7 +24,6 @@ open class DecodeFragment : Fragment() {
     protected open val layoutRes: Int = R.layout.fragment_decodes
 
     private lateinit var viewModel: DecodeViewModel
-    private lateinit var transmitViewModel: TransmitViewModel
     private lateinit var adapter: DecodeListAdapter
 
     private lateinit var recyclerView: RecyclerView
@@ -63,7 +61,6 @@ open class DecodeFragment : Fragment() {
 
         // Initialize ViewModel (shared with MonitorFragment)
         viewModel = ViewModelProvider(requireActivity())[DecodeViewModel::class.java]
-        transmitViewModel = ViewModelProvider(requireActivity())[TransmitViewModel::class.java]
 
         // Find views
         recyclerView = view.findViewById(R.id.decodes_recycler_view)
@@ -182,13 +179,8 @@ open class DecodeFragment : Fragment() {
             Snackbar.make(requireView(), "No callsign found", Snackbar.LENGTH_SHORT).show()
             return
         }
-        transmitViewModel.setDirectedTo(callsign)
-        val bottomNav = activity?.findViewById<NavigationBarView>(R.id.bottom_navigation)
-        if (bottomNav != null) {
-            bottomNav.selectedItemId = R.id.navigation_transmit
-        } else {
-            findNavController().navigate(R.id.navigation_transmit)
-        }
+        val bundle = Bundle().apply { putString("callsign", callsign) }
+        findNavController().navigate(R.id.navigation_conversation, bundle)
     }
 
     private fun extractCallsign(text: String): String? {
@@ -210,23 +202,6 @@ open class DecodeFragment : Fragment() {
         if (!token.any { it.isLetter() }) return false
         if (!token.any { it.isDigit() }) return false
         return true
-    }
-
-    private fun queueBroadcast(text: String) {
-        val monitorViewModel = ViewModelProvider(requireActivity())[MonitorViewModel::class.java]
-        if (monitorViewModel.isRunning.value != true) {
-            Snackbar.make(requireView(), R.string.decodes_start_first, Snackbar.LENGTH_SHORT).show()
-            return
-        }
-        val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext())
-        if (prefs.getString("callsign", "")?.isNotBlank() != true) {
-            Snackbar.make(requireView(), R.string.error_callsign_required, Snackbar.LENGTH_LONG).show()
-            return
-        }
-        transmitViewModel.queueMessage(text, directed = null, priority = 1, clearComposed = false)
-        androidx.localbroadcastmanager.content.LocalBroadcastManager.getInstance(requireContext())
-            .sendBroadcast(android.content.Intent(com.js8call.example.MainActivity.ACTION_PROCESS_TX_QUEUE))
-        Snackbar.make(requireView(), getString(R.string.decodes_queued, text), Snackbar.LENGTH_SHORT).show()
     }
 
     fun confirmClearDecodes() {

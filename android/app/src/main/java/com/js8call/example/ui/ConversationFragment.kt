@@ -1,20 +1,15 @@
 package com.js8call.example.ui
 
-import android.content.Intent
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.view.inputmethod.EditorInfo
 import android.widget.LinearLayout
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModelProvider
-import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.RecyclerView
-import com.google.android.material.floatingactionbutton.FloatingActionButton
-import com.google.android.material.textfield.TextInputEditText
-import com.google.android.material.textfield.TextInputLayout
+import com.google.android.material.appbar.MaterialToolbar
 import com.js8call.example.R
 
 /**
@@ -28,9 +23,6 @@ class ConversationFragment : Fragment() {
 
     private lateinit var recyclerView: RecyclerView
     private lateinit var emptyState: LinearLayout
-    private lateinit var messageInputLayout: TextInputLayout
-    private lateinit var messageInput: TextInputEditText
-    private lateinit var sendButton: FloatingActionButton
 
     private var callsign: String = ""
 
@@ -50,20 +42,18 @@ class ConversationFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        val toolbar = view.findViewById<com.google.android.material.appbar.MaterialToolbar>(R.id.thread_toolbar)
-        toolbar.title = callsign
-        toolbar.setNavigationOnClickListener { findNavController().navigateUp() }
-
         // Initialize ViewModels
         viewModel = ViewModelProvider(requireActivity())[MessagesViewModel::class.java]
         transmitViewModel = ViewModelProvider(requireActivity())[TransmitViewModel::class.java]
 
+        val toolbar = view.findViewById<MaterialToolbar>(R.id.thread_toolbar)
+        toolbar.title = callsign
+        toolbar.setNavigationOnClickListener { findNavController().navigateUp() }
+        SpeedChip.bind(view.findViewById(R.id.speed_chip))
+
         // Find views
         recyclerView = view.findViewById(R.id.messages_recycler_view)
         emptyState = view.findViewById(R.id.empty_state)
-        messageInputLayout = view.findViewById(R.id.message_input_layout)
-        messageInput = view.findViewById(R.id.message_input)
-        sendButton = view.findViewById(R.id.send_button)
 
         // Set up RecyclerView
         adapter = MessageBubbleAdapter().apply {
@@ -81,20 +71,12 @@ class ConversationFragment : Fragment() {
             }
         })
 
-        // Set up send button
-        sendButton.setOnClickListener {
-            sendMessage()
-        }
-
-        // Set up keyboard send action
-        messageInput.setOnEditorActionListener { _, actionId, _ ->
-            if (actionId == EditorInfo.IME_ACTION_SEND) {
-                sendMessage()
-                true
-            } else {
-                false
-            }
-        }
+        ComposeBarController(
+            root = view,
+            commandMenuRes = R.menu.directed_command_menu,
+            onSend = { text -> sendMessage(text) },
+            onCommand = { text -> sendMessage(text) }
+        )
 
         // Observe messages for this conversation
         viewModel.getMessagesForConversation(callsign).observe(viewLifecycleOwner) { messages ->
@@ -125,25 +107,9 @@ class ConversationFragment : Fragment() {
         viewModel.markConversationAsRead(callsign)
     }
 
-    private fun sendMessage() {
-        val text = messageInput.text?.toString()?.trim() ?: return
-        if (text.isEmpty()) return
-
-        // Clear input
-        messageInput.text?.clear()
-
-        // Insert outgoing message to database
-        viewModel.insertOutgoingMessage(callsign, text).observe(viewLifecycleOwner) { messageId ->
-            // Queue the message for transmission via the TX queue
-            // Format: MSG text, directed to callsign
-            // The engine will prepend the callsign when selectedCall is set
-            val fullMessage = "MSG $text"
-            transmitViewModel.queueMessage(fullMessage, callsign, priority = 0, clearComposed = false, messageId = messageId)
-            
-            // Trigger queue processing
-            LocalBroadcastManager.getInstance(requireContext()).sendBroadcast(
-                Intent(com.js8call.example.MainActivity.ACTION_PROCESS_TX_QUEUE)
-            )
-        }
+    private fun sendMessage(text: String): Boolean {
+        if (!readyToSend()) return false
+        transmitViewModel.queueThreadMessage(callsign, text)
+        return true
     }
 }

@@ -60,7 +60,7 @@ class MainActivity : AppCompatActivity() {
                     val text = intent.getStringExtra(JS8EngineService.EXTRA_QUEUE_TX_TEXT) ?: return
                     val directed = intent.getStringExtra(JS8EngineService.EXTRA_QUEUE_TX_DIRECTED)
                     val priority = intent.getIntExtra(JS8EngineService.EXTRA_QUEUE_TX_PRIORITY, 0)
-                    transmitViewModel.queueMessage(text, directed, priority, clearComposed = false)
+                    transmitViewModel.queueMessage(text, directed, priority)
                     // Trigger queue processing
                     processNextTxIfIdle()
                 }
