@@ -104,19 +104,19 @@ class MessageBubbleAdapter : ListAdapter<MessageEntity, RecyclerView.ViewHolder>
             // Update status icon based on message status
             val (iconRes, tintColor) = when (message.status) {
                 MessageEntity.STATUS_PENDING -> {
-                    android.R.drawable.ic_menu_recent_history to R.color.message_pending
+                    R.drawable.ic_schedule to R.color.message_pending
                 }
                 MessageEntity.STATUS_SENT -> {
-                    android.R.drawable.ic_menu_send to R.color.message_sent
+                    R.drawable.ic_check to R.color.message_sent
                 }
                 MessageEntity.STATUS_ACKED -> {
-                    android.R.drawable.checkbox_on_background to R.color.message_acked
+                    R.drawable.ic_done_all to R.color.message_acked
                 }
                 MessageEntity.STATUS_FAILED -> {
-                    android.R.drawable.ic_delete to R.color.message_failed
+                    R.drawable.ic_error_outline to R.color.message_failed
                 }
                 else -> {
-                    android.R.drawable.ic_menu_send to R.color.message_sent
+                    R.drawable.ic_check to R.color.message_sent
                 }
             }
 

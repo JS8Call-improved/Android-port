@@ -58,6 +58,7 @@
     <string name="decodes_send_heartbeat">Send heartbeat</string>
     <string name="decodes_queued">Queued %1$s</string>
     <string name="decodes_start_first">Start monitoring first</string>
+    <string name="decodes_open_all_activity">Open All activity</string>
     <string name="decodes_outgoing_tag">TX</string>
     <string name="decodes_copy">Copy</string>
     <string name="decodes_reply">Reply</string>
@@ -245,6 +246,9 @@
     <!-- Messages screen -->
     <string name="messages_title">Messages</string>
     <string name="messages_empty">No conversations yet</string>
+    <string name="everything_title">All activity</string>
+    <string name="everything_subtitle">All activity on the band</string>
+    <string name="conversation_empty">No messages yet</string>
     <string name="messages_empty_hint">Direct messages (MSG) will appear here</string>
     <string name="messages_compose_hint">Type message...</string>
     <string name="messages_send">Send</string>

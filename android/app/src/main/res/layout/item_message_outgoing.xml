@@ -56,7 +56,7 @@
                 android:layout_width="14dp"
                 android:layout_height="14dp"
                 android:layout_marginStart="4dp"
-                android:src="@android:drawable/ic_menu_send"
+                android:src="@drawable/ic_send"
                 app:tint="@color/bubble_text_outgoing"
                 android:alpha="0.7"
                 tools:ignore="ContentDescription" />

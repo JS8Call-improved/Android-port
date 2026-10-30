@@ -10,6 +10,7 @@ import android.widget.LinearLayout
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModelProvider
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
+import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.android.material.textfield.TextInputEditText
@@ -49,8 +50,9 @@ class ConversationFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        // Set title to callsign
-        activity?.title = callsign
+        val toolbar = view.findViewById<com.google.android.material.appbar.MaterialToolbar>(R.id.thread_toolbar)
+        toolbar.title = callsign
+        toolbar.setNavigationOnClickListener { findNavController().navigateUp() }
 
         // Initialize ViewModels
         viewModel = ViewModelProvider(requireActivity())[MessagesViewModel::class.java]
