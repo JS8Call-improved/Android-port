@@ -1696,41 +1696,46 @@ class JS8EngineService : Service() {
 
             if (shutdownMode != "none") rigTeardownPending = true
             txHandler.post {
-                if (shouldReleasePtt) {
-                    // Captured references, not setRigPtt: the fields already
-                    // hold the transports the next start will use.
-                    val released = when (shutdownMode) {
-                        "network" -> shutdownNetwork?.setPtt(false) == true
-                        "hamlib_usb" -> shutdownHamlib?.setPtt(false) == true
-                        "rts_ptt" -> when (shutdownTransport) {
-                            SerialTransport.USB -> shutdownUsb?.setRts(false) == true
-                            SerialTransport.BLUETOOTH -> shutdownBluetooth?.setRts(false) == true
-                            else -> false
-                        }
-                        "trusdx_serial" -> shutdownTruSdx?.setPtt(false) == true
-                        "qmx_serial" -> shutdownQmx?.setPtt(false) == true
-                        "btech_uvpro" -> shutdownUvPro?.setPtt(false) == true
-                        else -> false
-                    }
-                    if (released) {
-                        synchronized(pttStateLock) { rigPttAsserted = false }
-                    } else {
-                        Log.e(TAG, "Unable to confirm PTT release during shutdown")
-                    }
-                }
-                shutdownHamlib?.close()
-                shutdownTruSdx?.stop()
-                shutdownQmx?.stop()
                 try {
-                    shutdownUvPro?.stop()
+                    if (shouldReleasePtt) {
+                        // Captured references, not setRigPtt: the fields already
+                        // hold the transports the next start will use.
+                        val released = try {
+                            when (shutdownMode) {
+                                "network" -> shutdownNetwork?.setPtt(false) == true
+                                "hamlib_usb" -> shutdownHamlib?.setPtt(false) == true
+                                "rts_ptt" -> when (shutdownTransport) {
+                                    SerialTransport.USB -> shutdownUsb?.setRts(false) == true
+                                    SerialTransport.BLUETOOTH -> shutdownBluetooth?.setRts(false) == true
+                                    else -> false
+                                }
+                                "trusdx_serial" -> shutdownTruSdx?.setPtt(false) == true
+                                "qmx_serial" -> shutdownQmx?.setPtt(false) == true
+                                "btech_uvpro" -> shutdownUvPro?.setPtt(false) == true
+                                else -> false
+                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "PTT release failed during shutdown", e)
+                            false
+                        }
+                        if (released) {
+                            synchronized(pttStateLock) { rigPttAsserted = false }
+                        } else {
+                            Log.e(TAG, "Unable to confirm PTT release during shutdown")
+                        }
+                    }
+                    rigTeardownStep("Hamlib close") { shutdownHamlib?.close() }
+                    rigTeardownStep("TruSDX stop") { shutdownTruSdx?.stop() }
+                    rigTeardownStep("QMX stop") { shutdownQmx?.stop() }
+                    rigTeardownStep("UV-Pro stop") { shutdownUvPro?.stop() }
+                    rigTeardownStep("USB serial close") { shutdownUsb?.close() }
+                    rigTeardownStep("Bluetooth serial close") { shutdownBluetooth?.close() }
+                    rigTeardownStep("rigctld disconnect") { shutdownNetwork?.disconnect() }
+                    Log.i(TAG, "Rig control torn down")
                 } finally {
                     if (shutdownMode == "btech_uvpro") uvproWorkersActive.decrementAndGet()
+                    if (shutdownMode != "none") rigTeardownPending = false
                 }
-                shutdownUsb?.close()
-                shutdownBluetooth?.close()
-                shutdownNetwork?.disconnect()
-                Log.i(TAG, "Rig control torn down")
-                if (shutdownMode != "none") rigTeardownPending = false
             }
 
             pskReporterClient?.stop(flush = true)
@@ -1745,6 +1750,14 @@ class JS8EngineService : Service() {
 
         } catch (e: Exception) {
             Log.e(TAG, "Error stopping engine", e)
+        }
+    }
+
+    private inline fun rigTeardownStep(name: String, step: () -> Unit) {
+        try {
+            step()
+        } catch (e: Exception) {
+            Log.e(TAG, "$name failed during shutdown", e)
         }
     }
 
