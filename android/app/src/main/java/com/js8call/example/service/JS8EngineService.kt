@@ -147,6 +147,8 @@ class JS8EngineService : Service() {
     private var currentTxOffsetHz: Float = 1500f
     private var txMonitorActive = false
     private var txMonitorWasAudioActive = false
+    // Drifted clock at the send's first audio; 0 until it goes on air
+    @Volatile private var txSentStartMs = 0L
     private val pttStateLock = Any()
     @Volatile private var txPttGeneration = 0
     @Volatile private var rigPttAsserted = false
@@ -206,6 +208,7 @@ class JS8EngineService : Service() {
                     requestRigPtt(false, generation) { released ->
                         if (!isCurrentTxGeneration(generation)) return@requestRigPtt
                         if (released) {
+                            broadcastTxSent()
                             broadcastTxState(TX_STATE_FINISHED)
                         } else {
                             broadcastError("Failed to release PTT after transmission")
@@ -214,6 +217,7 @@ class JS8EngineService : Service() {
                     }
                 } else {
                     if (isCurrentTxGeneration(generation)) {
+                        broadcastTxSent()
                         broadcastTxState(TX_STATE_FINISHED)
                     }
                 }
@@ -238,6 +242,9 @@ class JS8EngineService : Service() {
 
             if (audioActive && !txMonitorWasAudioActive) {
                 txMonitorWasAudioActive = true
+                if (txSentStartMs == 0L) {
+                    txSentStartMs = System.currentTimeMillis() + activeEngine.timeDriftMs()
+                }
                 logTxStarted()
                 broadcastTxState(TX_STATE_STARTED)
             } else if (!audioActive && txMonitorWasAudioActive) {
@@ -1800,11 +1807,14 @@ class JS8EngineService : Service() {
         val freq = intent.getFloatExtra(EXTRA_FREQ, 1500f)
         val type = intent.getIntExtra(EXTRA_TYPE, 3)
         val mode = intent.getIntExtra(EXTRA_MODE, 0)
-        val now = Calendar.getInstance(TimeZone.getTimeZone("UTC"))
-        val utc = now.get(Calendar.HOUR_OF_DAY) * 10000 +
-            now.get(Calendar.MINUTE) * 100 + now.get(Calendar.SECOND)
+        val utc = utcHhmmss(System.currentTimeMillis())
         Log.i(TAG, "Injected decode: '$text' snr=$snr freq=$freq type=$type mode=$mode")
         handleDecode(utc, snr, 0f, freq, text, type, 1f, mode, 0)
+    }
+
+    private fun utcHhmmss(millis: Long): Int {
+        val cal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { timeInMillis = millis }
+        return cal.get(Calendar.HOUR_OF_DAY) * 10000 + cal.get(Calendar.MINUTE) * 100 + cal.get(Calendar.SECOND)
     }
 
     private fun broadcastDecode(
@@ -2706,7 +2716,6 @@ class JS8EngineService : Service() {
             
             if (ok) {
                 updateLastTxMessage(payload, "", submode, freq.toDouble())
-                broadcastTxSent(buildTxMessage(payload, ""), freq.toDouble())
                 broadcastTxState(TX_STATE_QUEUED)
                 startTxMonitor()
             } else {
@@ -2728,9 +2737,6 @@ class JS8EngineService : Service() {
     }
 
     private fun handleTransmitMessage(intent: Intent) {
-        // Disable heartbeat on manual transmission
-        disableHeartbeat()
-
         val activeEngine = engine
         if (activeEngine == null) {
             broadcastError("Engine not running")
@@ -2742,6 +2748,8 @@ class JS8EngineService : Service() {
             broadcastError("Empty TX message")
             return
         }
+        // Manual sends stop the heartbeat schedule; heartbeats don't
+        if (!isHeartbeatTraffic(text)) disableHeartbeat()
 
         val prefs = PreferenceManager.getDefaultSharedPreferences(this)
         val callsign = getConfiguredCallsign()
@@ -2799,7 +2807,6 @@ class JS8EngineService : Service() {
         if (ok) {
             Log.i(TAG, "TX request accepted")
             updateLastTxMessage(payloadText, directed, submode, audioFrequencyHz)
-            broadcastTxSent(buildTxMessage(payloadText, directed), audioFrequencyHz)
             broadcastTxState(TX_STATE_QUEUED)
             startTxMonitor()
         } else {
@@ -2853,11 +2860,19 @@ class JS8EngineService : Service() {
         LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
     }
 
-    private fun broadcastTxSent(text: String, frequencyHz: Double) {
+    private fun broadcastTxSent() {
+        val startMs = txSentStartMs
+        if (startMs == 0L) return
+        txSentStartMs = 0L
+        // The bubble already says who sent it
+        val own = getConfiguredCallsign()?.let { "$it:" }
+        var text = lastTxMessage.trim()
+        if (own != null && text.startsWith(own, ignoreCase = true)) text = text.drop(own.length).trim()
         if (text.isBlank()) return
         val intent = Intent(ACTION_TX_SENT).apply {
-            putExtra(EXTRA_TX_SENT_TEXT, text)
-            putExtra(EXTRA_TX_SENT_FREQ, frequencyHz.toFloat())
+            putExtra(EXTRA_TX_SENT_TEXT, text.uppercase())
+            putExtra(EXTRA_TX_SENT_FREQ, lastTxFrequencyHz.toFloat())
+            putExtra(EXTRA_UTC, utcHhmmss(startMs))
         }
         LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
     }
@@ -2950,6 +2965,7 @@ class JS8EngineService : Service() {
         txMonitorHandler.removeCallbacks(txMonitorRunnable)
         txMonitorActive = true
         txMonitorWasAudioActive = false
+        txSentStartMs = 0L
         synchronized(pttStateLock) {
             txPttGeneration++
             rigPttDesired = rigPttAsserted
@@ -3933,7 +3949,6 @@ class JS8EngineService : Service() {
 
         if (ok) {
             updateLastTxMessage(payload, "", submode, currentTxOffsetHz.toDouble())
-            broadcastTxSent(buildTxMessage(payload, ""), currentTxOffsetHz.toDouble())
             broadcastTxState(TX_STATE_QUEUED)
             startTxMonitor()
         }
@@ -3976,7 +3991,6 @@ class JS8EngineService : Service() {
         if (ok) {
             Log.i(TAG, "Autoreply queued: to=$directedCall text='$payloadText'")
             updateLastTxMessage(payloadText, directedCall, submode, currentTxOffsetHz.toDouble())
-            broadcastTxSent(buildTxMessage(payloadText, directedCall), currentTxOffsetHz.toDouble())
             broadcastTxState(TX_STATE_QUEUED)
             startTxMonitor()
         } else {

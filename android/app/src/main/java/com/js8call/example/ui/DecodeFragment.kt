@@ -113,7 +113,8 @@ class DecodeFragment : Fragment() {
 
             // The new row only exists once the diff commits
             adapter.submitList(decodes) {
-                if (decodes.isNotEmpty() && followNewest) {
+                // Never pull the list out from under a drag or fling
+                if (decodes.isNotEmpty() && followNewest && !userScrolling) {
                     if (firstLoad) {
                         recyclerView.scrollToPosition(decodes.size - 1)
                     } else {
@@ -192,18 +193,9 @@ class DecodeFragment : Fragment() {
         val trimmed = text.trim()
         if (trimmed.isBlank()) return null
 
-        val tokens = trimmed.split(Regex("\\s+"), limit = 3)
-        var callsign = tokens[0].trimEnd(':').uppercase()
-        // Own auto-replies start with our callsign
-        if (callsign == ownCallsign() && tokens.size > 1) {
-            callsign = tokens[1].trimEnd(':').uppercase()
-        }
+        val firstToken = trimmed.split(Regex("\\s+"), limit = 2)[0]
+        val callsign = firstToken.trimEnd(':').uppercase()
         return if (isCallsignPrefix(callsign)) callsign else null
-    }
-
-    private fun ownCallsign(): String {
-        val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext())
-        return prefs.getString("callsign", "")?.trim()?.uppercase().orEmpty()
     }
 
     private fun isCallsignPrefix(token: String): Boolean {

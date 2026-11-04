@@ -55,14 +55,7 @@ class DecodeViewModel(application: Application) : AndroidViewModel(application) 
      * Add a new decoded message.
      */
     fun addDecode(message: DecodedMessage) {
-        allDecodes.add(message)
-
-        // Limit size
-        if (allDecodes.size > maxDecodes) {
-            allDecodes.removeAt(0)
-        }
-
-        applyFilter()
+        addDecodeToDisplay(message)
     }
 
     fun loadPersistedDecodesIfEnabled() {
@@ -205,12 +198,8 @@ class DecodeViewModel(application: Application) : AndroidViewModel(application) 
     /**
      * Add a message this station transmitted.
      */
-    fun addOutgoing(text: String, frequency: Float) {
+    fun addOutgoing(text: String, frequency: Float, utc: Int) {
         if (text.isBlank()) return
-        val cal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"))
-        val utc = cal.get(java.util.Calendar.HOUR_OF_DAY) * 10000 +
-            cal.get(java.util.Calendar.MINUTE) * 100 +
-            cal.get(java.util.Calendar.SECOND)
         addDecodeToDisplay(
             DecodedMessage(
                 utc = utc,
