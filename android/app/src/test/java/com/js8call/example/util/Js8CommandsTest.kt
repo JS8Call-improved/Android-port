@@ -76,16 +76,16 @@ class Js8CommandsTest {
     fun kotlinTableMatchesNativeVaricodeTable() {
         val source = findVaricodeSource()
         assertNotNull(
-            "Could not locate core/src/protocol/varicode.cpp from ${File("").absolutePath}",
+            "Could not locate core/src/protocol/varicode_tables.hpp from ${File("").absolutePath}",
             source
         )
 
         val body = source!!.readText()
-        val start = body.indexOf("kDirectedCmds")
-        assertTrue("kDirectedCmds not found in ${source.path}", start >= 0)
+        val start = body.indexOf("kDirectedCommands")
+        assertTrue("kDirectedCommands not found in ${source.path}", start >= 0)
         val open = body.indexOf('{', start)
         val close = body.indexOf("};", open)
-        assertTrue("kDirectedCmds block is malformed", open in 0 until close)
+        assertTrue("kDirectedCommands block is malformed", open in 0 until close)
 
         val entry = Regex("""\{\s*"([^"]*)"\s*,\s*(-?\d+)\s*\}""")
         val native = mutableMapOf<String, Int>()
@@ -107,7 +107,7 @@ class Js8CommandsTest {
     private fun findVaricodeSource(): File? {
         var dir: File? = File("").absoluteFile
         while (dir != null) {
-            val candidate = File(dir, "core/src/protocol/varicode.cpp")
+            val candidate = File(dir, "core/src/protocol/varicode_tables.hpp")
             if (candidate.isFile) return candidate
             dir = dir.parentFile
         }
