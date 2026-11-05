@@ -39,81 +39,10 @@ endif()
 # Find dependencies
 #------------------------------------------------------------------------------#
 
-# FFTW3 (required)
-# Option 1: Use prebuilt libraries (recommended)
-# Option 2: Build from source (see fftw3-android directory)
-if(ANDROID)
-  # Look for prebuilt FFTW3 in libs directory
-  set(FFTW3_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/libs/fftw3/${ANDROID_ABI}")
-  set(FFTW3F_LIBRARY "${FFTW3_ROOT}/lib/libfftw3f.a")
-  set(FFTW3_INCLUDE_DIR "${FFTW3_ROOT}/include")
-
-  message(STATUS "FFTW3_ROOT: ${FFTW3_ROOT}")
-  message(STATUS "FFTW3F_LIBRARY: ${FFTW3F_LIBRARY}")
-  message(STATUS "FFTW3_INCLUDE_DIR: ${FFTW3_INCLUDE_DIR}")
-
-  if(EXISTS "${FFTW3F_LIBRARY}" AND EXISTS "${FFTW3_INCLUDE_DIR}/fftw3.h")
-    message(STATUS "Found FFTW3: ${FFTW3F_LIBRARY}")
-    add_library(FFTW3::fftw3f STATIC IMPORTED)
-    set_target_properties(FFTW3::fftw3f PROPERTIES
-      IMPORTED_LOCATION "${FFTW3F_LIBRARY}"
-      INTERFACE_INCLUDE_DIRECTORIES "${FFTW3_INCLUDE_DIR}"
-    )
-    set(FFTW3_LIBRARIES FFTW3::fftw3f)
-    set(FFTW3_INCLUDE_DIRS "${FFTW3_INCLUDE_DIR}")
-  else()
-    message(FATAL_ERROR "FFTW3 not found at ${FFTW3_ROOT}. Please build or download prebuilt libraries to android/libs/fftw3/")
-  endif()
-else()
-  find_package(FFTW3 REQUIRED COMPONENTS single)
-endif()
-
 # Oboe (required for Android)
 if(ANDROID)
   find_package(oboe REQUIRED CONFIG)
   message(STATUS "Found Oboe: ${oboe_VERSION}")
-endif()
-
-# Boost (header-only parts)
-if(ANDROID)
-  # Header-only use: allow BOOST_INCLUDEDIR or BOOST_ROOT to locate headers.
-  set(_BOOST_LOCAL_INCLUDE "${CMAKE_CURRENT_SOURCE_DIR}/libs/boost")
-  if(NOT Boost_INCLUDE_DIRS AND EXISTS "${_BOOST_LOCAL_INCLUDE}/boost/version.hpp")
-    set(Boost_INCLUDE_DIRS "${_BOOST_LOCAL_INCLUDE}")
-  endif()
-
-  if(NOT Boost_INCLUDE_DIRS)
-    find_path(Boost_INCLUDE_DIRS
-      NAMES boost/version.hpp
-      HINTS
-        ${CMAKE_CURRENT_SOURCE_DIR}/libs/boost
-        ENV BOOST_INCLUDEDIR
-        ${BOOST_INCLUDEDIR}
-      NO_CMAKE_FIND_ROOT_PATH
-    )
-  endif()
-
-  if(NOT Boost_INCLUDE_DIRS)
-    find_path(Boost_INCLUDE_DIRS
-      NAMES boost/version.hpp
-      HINTS
-        ${CMAKE_CURRENT_SOURCE_DIR}/libs/boost
-        ENV BOOST_ROOT
-        ${BOOST_ROOT}
-      PATH_SUFFIXES include
-      NO_CMAKE_FIND_ROOT_PATH
-    )
-  endif()
-
-  if(NOT Boost_INCLUDE_DIRS)
-    message(FATAL_ERROR "Boost headers not found. Set BOOST_ROOT or BOOST_INCLUDEDIR.")
-  endif()
-
-  message(STATUS "Using Boost headers for Android from: ${Boost_INCLUDE_DIRS}")
-  unset(_BOOST_LOCAL_INCLUDE)
-else()
-  set(Boost_USE_STATIC_LIBS ON)
-  find_package(Boost 1.77 REQUIRED)
 endif()
 
 #------------------------------------------------------------------------------#
@@ -138,13 +67,6 @@ if(ANDROID)
   install(TARGETS js8core-jni
     LIBRARY DESTINATION ${CMAKE_CURRENT_SOURCE_DIR}/js8core-lib/src/main/jniLibs/${ANDROID_ABI}
   )
-
-  # Also install FFTW3 if it's a shared library
-  if(EXISTS "${FFTW3_ROOT}/lib/libfftw3f.so")
-    install(FILES "${FFTW3_ROOT}/lib/libfftw3f.so"
-      DESTINATION ${CMAKE_CURRENT_SOURCE_DIR}/js8core-lib/src/main/jniLibs/${ANDROID_ABI}
-    )
-  endif()
 endif()
 
 #------------------------------------------------------------------------------#
@@ -163,7 +85,6 @@ if(ANDROID)
   message(STATUS "  Android STL: ${ANDROID_STL}")
 endif()
 message(STATUS "  C++ Standard: ${CMAKE_CXX_STANDARD}")
-message(STATUS "  FFTW3: ${FFTW3F_LIBRARY}")
 if(ANDROID)
   message(STATUS "  Oboe: ${oboe_VERSION}")
 endif()

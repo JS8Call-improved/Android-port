@@ -3,6 +3,10 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+// js8core uses header-only Eigen. Point CMake at the copy vendored in this
+// repository instead of letting the NDK find-path pick up a host copy.
+val eigenIncludeDir = rootProject.projectDir.parentFile.resolve("vendor/Eigen")
+
 android {
     namespace = "com.js8call.core"
     compileSdk = 34
@@ -25,7 +29,8 @@ android {
                 )
                 arguments += listOf(
                     "-DANDROID_STL=c++_shared",
-                    "-DANDROID_PLATFORM=android-26"
+                    "-DANDROID_PLATFORM=android-26",
+                    "-DEIGEN3_INCLUDE_DIR=${eigenIncludeDir.absolutePath}"
                 )
             }
         }
@@ -136,14 +141,3 @@ dependencies {
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
 }
 
-// Task to copy FFTW3 libraries if they exist
-tasks.register<Copy>("copyFftw3Libs") {
-    from("libs/fftw3")
-    into("src/main/jniLibs")
-    include("**/*.so")
-}
-
-// Run copy task before build
-tasks.named("preBuild") {
-    dependsOn("copyFftw3Libs")
-}
