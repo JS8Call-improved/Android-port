@@ -5,7 +5,7 @@ plugins {
 
 // js8core uses header-only Eigen. Point CMake at the copy vendored in this
 // repository instead of letting the NDK find-path pick up a host copy.
-val eigenIncludeDir = rootProject.projectDir.parentFile.resolve("vendor/Eigen")
+val eigenIncludeDir = rootProject.projectDir.parentFile.resolve("vendor")
 
 android {
     namespace = "com.js8call.core"
@@ -20,6 +20,7 @@ android {
         // Native build configuration
         externalNativeBuild {
             cmake {
+                targets += listOf("js8core", "js8core-android", "js8core-jni")
                 cppFlags += listOf(
                     "-std=c++20",
                     "-fexceptions",
@@ -140,4 +141,3 @@ dependencies {
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
 }
-
