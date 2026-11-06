@@ -7,6 +7,8 @@ on:
       - 'android/**'
       - 'core/**'
       - 'adapters/android/**'
+      - 'scripts/**'
+      - 'tools/**'
       - '.github/workflows/android-build.yml'
   pull_request:
     branches: [ master, develop ]
@@ -14,6 +16,8 @@ on:
       - 'android/**'
       - 'core/**'
       - 'adapters/android/**'
+      - 'scripts/**'
+      - 'tools/**'
   workflow_dispatch:
     inputs:
       build_type:
@@ -27,12 +31,28 @@ on:
           - both
 
 env:
-  BOOST_VERSION: 1.83.0
-  BOOST_VERSION_UNDERSCORE: 1_83_0
   HAMLIB_VERSION: 1b2461aba99f0dde0531e1732c00e60aeee40657
   ANDROID_NDK_VERSION: 26.1.10909125
 
 jobs:
+  core-tests:
+    name: Core native tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++ libeigen3-dev
+
+      - name: Run js8core tests
+        run: ./scripts/test-core.sh
+
   build:
     name: Build Android
     runs-on: ubuntu-latest
@@ -99,27 +119,6 @@ jobs:
         export HAMLIB_VERSION=${HAMLIB_VERSION}
         ./android/hamlib/build-hamlib-android.sh
 
-    - name: Cache Boost headers
-      id: cache-boost
-      uses: actions/cache@v4
-      with:
-        path: .deps/boost
-        key: ${{ runner.os }}-boost-${{ env.BOOST_VERSION_UNDERSCORE }}
-
-    - name: Download Boost headers
-      if: steps.cache-boost.outputs.cache-hit != 'true'
-      run: |
-        mkdir -p .deps/boost
-        curl -L -o /tmp/boost.tar.gz \
-          https://archives.boost.io/release/${BOOST_VERSION}/source/boost_${BOOST_VERSION_UNDERSCORE}.tar.gz
-        tar -xzf /tmp/boost.tar.gz -C .deps/boost
-
-    - name: Set Boost include path
-      run: |
-        BOOST_DIR="${GITHUB_WORKSPACE}/.deps/boost/boost_${BOOST_VERSION_UNDERSCORE}"
-        echo "BOOST_ROOT=${BOOST_DIR}" >> "$GITHUB_ENV"
-        echo "BOOST_INCLUDEDIR=${BOOST_DIR}" >> "$GITHUB_ENV"
-
     - name: Cache Gradle dependencies
       uses: actions/cache@v4
       with:
@@ -129,20 +128,6 @@ jobs:
         key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
         restore-keys: |
           ${{ runner.os }}-gradle-
-
-    - name: Cache FFTW3 build
-      id: cache-fftw3
-      uses: actions/cache@v4
-      with:
-        path: android/libs/fftw3
-        key: ${{ runner.os }}-fftw3-3.3.10-ndk-${{ env.ANDROID_NDK_VERSION }}
-
-    - name: Build FFTW3
-      if: steps.cache-fftw3.outputs.cache-hit != 'true'
-      run: |
-        export ANDROID_NDK_ROOT=$ANDROID_NDK_ROOT
-        cd android
-        ./build-fftw3.sh
 
     - name: Grant execute permission for gradlew
       run: chmod +x android/gradlew
@@ -204,27 +189,6 @@ jobs:
 #    steps:
 #    - name: Checkout code
 #      uses: actions/checkout@v4
-#
-#    - name: Cache Boost headers
-#      id: cache-boost
-#      uses: actions/cache@v4
-#      with:
-#        path: .deps/boost
-#        key: ${{ runner.os }}-boost-${{ env.BOOST_VERSION_UNDERSCORE }}
-#
-#    - name: Download Boost headers
-#      if: steps.cache-boost.outputs.cache-hit != 'true'
-#      run: |
-#        mkdir -p .deps/boost
-#        curl -L -o /tmp/boost.tar.gz \
-#          https://archives.boost.io/release/${BOOST_VERSION}/source/boost_${BOOST_VERSION_UNDERSCORE}.tar.gz
-#        tar -xzf /tmp/boost.tar.gz -C .deps/boost
-#
-#    - name: Set Boost include path
-#      run: |
-#        BOOST_DIR="${GITHUB_WORKSPACE}/.deps/boost/boost_${BOOST_VERSION_UNDERSCORE}"
-#        echo "BOOST_ROOT=${BOOST_DIR}" >> "$GITHUB_ENV"
-#        echo "BOOST_INCLUDEDIR=${BOOST_DIR}" >> "$GITHUB_ENV"
 #
 #    - name: Set up JDK 17
 #      uses: actions/setup-java@v4

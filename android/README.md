@@ -8,16 +8,9 @@ This directory contains the Android Gradle project for JS8Android.
 - Android SDK + NDK (26.1.10909125 recommended)
 - Java 17
 
-## Build FFTW3 (required)
-
-From the repo root:
-
-```bash
-cd android
-./build-fftw3.sh
-```
-
-This writes prebuilt FFTW3 libraries under `android/libs/fftw3/`.
+The cleanroom js8core uses vendored header-only Eigen and pocketfft, so the
+Android native build no longer needs FFTW3 or Boost. Eigen is picked up from
+`vendor/Eigen` by the Gradle build.
 
 ## Build Hamlib (required for USB rig control)
 

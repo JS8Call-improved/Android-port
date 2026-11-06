@@ -20,3 +20,6 @@ CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake
 Makefile
+
+# Local backup of the pre-cleanroom core
+core.__old_backup__/
