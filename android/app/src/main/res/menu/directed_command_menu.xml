@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/cmd_snr"
+        android:title="@string/cmd_snr" />
+    <item
+        android:id="@+id/cmd_grid"
+        android:title="@string/cmd_grid" />
+    <item
+        android:id="@+id/cmd_info"
+        android:title="@string/cmd_info" />
+    <item
+        android:id="@+id/cmd_status"
+        android:title="@string/cmd_status" />
+    <item
+        android:id="@+id/cmd_hearing"
+        android:title="@string/cmd_hearing" />
+    <item
+        android:id="@+id/cmd_agn"
+        android:title="@string/cmd_agn" />
+</menu>

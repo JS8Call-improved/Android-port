@@ -70,18 +70,6 @@ class MessagesViewModel(application: Application) : AndroidViewModel(application
     }
 
     /**
-     * Insert an outgoing message (when user sends).
-     */
-    fun insertOutgoingMessage(to: String, text: String): LiveData<Long> {
-        val result = MutableLiveData<Long>()
-        viewModelScope.launch {
-            val id = repository.insertOutgoingMessage(to, text, MessageEntity.STATUS_PENDING)
-            result.postValue(id)
-        }
-        return result
-    }
-
-    /**
      * Update message status (e.g., when TX completes or ACK received).
      */
     fun updateMessageStatus(messageId: Long, status: Int) {
