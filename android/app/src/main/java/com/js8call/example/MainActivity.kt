@@ -82,6 +82,12 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                 }
+                JS8EngineService.ACTION_TX_SENT -> {
+                    val text = intent.getStringExtra(JS8EngineService.EXTRA_TX_SENT_TEXT) ?: return
+                    val freq = intent.getFloatExtra(JS8EngineService.EXTRA_TX_SENT_FREQ, 0f)
+                    val utc = intent.getIntExtra(JS8EngineService.EXTRA_UTC, 0)
+                    decodeViewModel.addOutgoing(text, freq, utc)
+                }
                 ACTION_PROCESS_TX_QUEUE -> {
                     android.util.Log.d("MainActivity", "Received ACTION_PROCESS_TX_QUEUE")
                     processNextTxIfIdle()
@@ -219,6 +225,7 @@ class MainActivity : AppCompatActivity() {
             addAction(JS8EngineService.ACTION_DECODE)
             addAction(JS8EngineService.ACTION_QUEUE_TX)
             addAction(JS8EngineService.ACTION_TX_STATE)
+            addAction(JS8EngineService.ACTION_TX_SENT)
             addAction(ACTION_PROCESS_TX_QUEUE)
         }
         LocalBroadcastManager.getInstance(this)
