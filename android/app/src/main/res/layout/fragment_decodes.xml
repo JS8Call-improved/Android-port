@@ -50,6 +50,15 @@
                 app:iconTint="?attr/colorOnSurfaceVariant" />
 
             <com.google.android.material.button.MaterialButton
+                android:id="@+id/open_all_activity_button"
+                style="@style/Widget.Material3.Button.IconButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:contentDescription="@string/decodes_open_all_activity"
+                app:icon="@drawable/ic_open_in_new"
+                app:iconTint="?attr/colorOnSurfaceVariant" />
+
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/clear_button"
                 style="@style/Widget.Material3.Button.IconButton"
                 android:layout_width="wrap_content"

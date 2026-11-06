@@ -6,6 +6,16 @@
     android:layout_height="match_parent"
     android:background="?attr/colorSurface">
 
+    <com.google.android.material.appbar.MaterialToolbar
+        android:id="@+id/thread_toolbar"
+        android:layout_width="0dp"
+        android:layout_height="?attr/actionBarSize"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:navigationIcon="?attr/homeAsUpIndicator"
+        tools:title="KN4CRD" />
+
     <!-- Messages RecyclerView -->
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/messages_recycler_view"
@@ -17,7 +27,7 @@
         app:layout_constraintBottom_toTopOf="@id/compose_container"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/thread_toolbar"
         app:stackFromEnd="true"
         tools:listitem="@layout/item_message_incoming" />
 
@@ -31,20 +41,20 @@
         android:padding="32dp"
         android:visibility="gone"
         app:layout_constraintBottom_toTopOf="@id/compose_container"
-        app:layout_constraintTop_toTopOf="parent">
+        app:layout_constraintTop_toBottomOf="@id/thread_toolbar">
 
         <ImageView
             android:layout_width="64dp"
             android:layout_height="64dp"
             android:alpha="0.5"
-            android:src="@android:drawable/ic_dialog_email"
+            android:src="@drawable/ic_chat_bubble_outline"
             app:tint="?attr/colorOnSurfaceVariant" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="@string/messages_empty"
+            android:text="@string/conversation_empty"
             android:textAppearance="?attr/textAppearanceBodyLarge"
             android:textColor="?attr/colorOnSurfaceVariant" />
 

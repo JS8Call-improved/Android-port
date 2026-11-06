@@ -20,7 +20,9 @@ import com.js8call.example.R
 /**
  * Fragment showing list of decoded messages.
  */
-class DecodeFragment : Fragment() {
+open class DecodeFragment : Fragment() {
+
+    protected open val layoutRes: Int = R.layout.fragment_decodes
 
     private lateinit var viewModel: DecodeViewModel
     private lateinit var transmitViewModel: TransmitViewModel
@@ -28,7 +30,6 @@ class DecodeFragment : Fragment() {
 
     private lateinit var recyclerView: RecyclerView
     private lateinit var emptyText: TextView
-    private lateinit var clearButton: View
 
     private var myGroups: Set<String> = emptySet()
     private var followNewest = true
@@ -39,7 +40,7 @@ class DecodeFragment : Fragment() {
         container: ViewGroup?,
         savedInstanceState: Bundle?
     ): View? {
-        return inflater.inflate(R.layout.fragment_decodes, container, false)
+        return inflater.inflate(layoutRes, container, false)
     }
 
     override fun onStart() {
@@ -67,7 +68,6 @@ class DecodeFragment : Fragment() {
         // Find views
         recyclerView = view.findViewById(R.id.decodes_recycler_view)
         emptyText = view.findViewById(R.id.empty_text)
-        clearButton = view.findViewById(R.id.clear_button)
 
         // Set up RecyclerView
         adapter = DecodeListAdapter().apply {
@@ -94,16 +94,18 @@ class DecodeFragment : Fragment() {
             }
         })
 
-        // Set up clear button
-        clearButton.setOnClickListener {
+        // Header buttons are absent in the bare layout
+        view.findViewById<View>(R.id.clear_button)?.setOnClickListener {
             confirmClearDecodes()
         }
-
-        view.findViewById<View>(R.id.cq_button).setOnClickListener {
+        view.findViewById<View>(R.id.cq_button)?.setOnClickListener {
             queueBroadcast("CQ CQ CQ")
         }
-        view.findViewById<View>(R.id.heartbeat_button).setOnClickListener {
+        view.findViewById<View>(R.id.heartbeat_button)?.setOnClickListener {
             queueBroadcast("HB")
+        }
+        view.findViewById<View>(R.id.open_all_activity_button)?.setOnClickListener {
+            findNavController().navigate(R.id.navigation_everything)
         }
 
         // Observe decodes
@@ -227,7 +229,7 @@ class DecodeFragment : Fragment() {
         Snackbar.make(requireView(), getString(R.string.decodes_queued, text), Snackbar.LENGTH_SHORT).show()
     }
 
-    private fun confirmClearDecodes() {
+    fun confirmClearDecodes() {
         MaterialAlertDialogBuilder(requireContext())
             .setTitle("Clear All Decodes?")
             .setMessage("This will remove all decoded messages from the list.")

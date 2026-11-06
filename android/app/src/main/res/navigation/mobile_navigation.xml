@@ -16,7 +16,15 @@
         <action
             android:id="@+id/action_messages_to_conversation"
             app:destination="@id/navigation_conversation" />
+        <action
+            android:id="@+id/action_messages_to_everything"
+            app:destination="@id/navigation_everything" />
     </fragment>
+
+    <fragment
+        android:id="@+id/navigation_everything"
+        android:name="com.js8call.example.ui.EverythingFragment"
+        android:label="@string/everything_title" />
 
     <fragment
         android:id="@+id/navigation_conversation"

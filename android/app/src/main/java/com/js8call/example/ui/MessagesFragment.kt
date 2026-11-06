@@ -20,6 +20,7 @@ import com.js8call.example.R
 class MessagesFragment : Fragment() {
 
     private lateinit var viewModel: MessagesViewModel
+    private lateinit var decodeViewModel: DecodeViewModel
     private lateinit var adapter: ConversationListAdapter
 
     private lateinit var recyclerView: RecyclerView
@@ -39,11 +40,21 @@ class MessagesFragment : Fragment() {
 
         // Initialize ViewModel (shared with ConversationFragment)
         viewModel = ViewModelProvider(requireActivity())[MessagesViewModel::class.java]
+        decodeViewModel = ViewModelProvider(requireActivity())[DecodeViewModel::class.java]
 
         // Find views
         recyclerView = view.findViewById(R.id.conversations_recycler_view)
         emptyState = view.findViewById(R.id.empty_state)
         newMessageFab = view.findViewById(R.id.new_message_fab)
+
+        view.findViewById<View>(R.id.everything_card).setOnClickListener {
+            findNavController().navigate(R.id.action_messages_to_everything)
+        }
+        val everythingPreview = view.findViewById<android.widget.TextView>(R.id.everything_preview)
+        decodeViewModel.decodes.observe(viewLifecycleOwner) { decodes ->
+            everythingPreview.text = decodes.lastOrNull()?.text
+                ?: getString(R.string.everything_subtitle)
+        }
 
         // Set up RecyclerView
         adapter = ConversationListAdapter().apply {

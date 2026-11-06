@@ -8,6 +8,7 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.view.MenuItem
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -15,7 +16,9 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModelProvider
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
+import androidx.navigation.NavController
 import androidx.navigation.fragment.NavHostFragment
+import androidx.navigation.ui.NavigationUI
 import androidx.navigation.ui.setupWithNavController
 import androidx.preference.PreferenceManager
 import com.google.android.material.navigation.NavigationBarView
@@ -185,12 +188,18 @@ class MainActivity : AppCompatActivity() {
         val navController = navHostFragment.navController
 
         bottomNav.setupWithNavController(navController)
-        navController.addOnDestinationChangedListener { _, destination, _ ->
+        navController.addOnDestinationChangedListener { controller, destination, _ ->
             onMonitorTab = destination.id == R.id.navigation_monitor
-            if (destination.id == R.id.navigation_conversation) {
+            val inMessagesTab = runCatching { controller.getBackStackEntry(R.id.navigation_messages) }.isSuccess
+            if ((destination.id == R.id.navigation_conversation ||
+                    destination.id == R.id.navigation_everything) && inMessagesTab
+            ) {
                 bottomNav.menu.findItem(R.id.navigation_messages).isChecked = true
             }
         }
+        // A tab is checked only while its own screen shows, so one tap can arrive as either event
+        bottomNav.setOnItemSelectedListener { item -> onNavItemTapped(navController, item) }
+        bottomNav.setOnItemReselectedListener { item -> onNavItemTapped(navController, item) }
 
         decodeViewModel = ViewModelProvider(this)[DecodeViewModel::class.java]
         monitorViewModel = ViewModelProvider(this)[MonitorViewModel::class.java]
@@ -257,6 +266,23 @@ class MainActivity : AppCompatActivity() {
             stopEngineService()
         }
         super.onStop()
+    }
+
+    /**
+     * Pop back to a tab when only its own screens sit above it. NavigationUI leaves the
+     * current screen showing when that tab is the start destination.
+     */
+    private fun onNavItemTapped(navController: NavController, item: MenuItem): Boolean {
+        val start = navController.graph.startDestinationId
+        val onStack = { id: Int -> runCatching { navController.getBackStackEntry(id) }.isSuccess }
+        val tabs = (0 until bottomNav.menu.size()).map { bottomNav.menu.getItem(it).itemId }
+        val otherTabOpen = tabs.any { it != item.itemId && it != start && onStack(it) }
+        if (onStack(item.itemId) && !otherTabOpen) {
+            navController.popBackStack(item.itemId, false)
+            return true
+        }
+        // A restored tab can open on a screen above its root, which NavigationUI reports as a miss
+        return NavigationUI.onNavDestinationSelected(item, navController) || onStack(item.itemId)
     }
 
     /**
