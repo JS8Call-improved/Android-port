@@ -112,6 +112,11 @@ class TransmitViewModel(application: Application) : AndroidViewModel(application
         _queue.value = txQueue.map { QueueItem(it, it === activeMessage) }
     }
 
+    // A heartbeat the service started on its own can be on the air
+    private fun settleUnlessOnAir() {
+        if (_txState.value == TransmitState.TRANSMITTING) publishQueue() else settleState()
+    }
+
     private fun settleState() {
         _txState.value = if (txQueue.isEmpty()) TransmitState.IDLE else TransmitState.QUEUED
         publishQueue()
@@ -121,8 +126,7 @@ class TransmitViewModel(application: Application) : AndroidViewModel(application
     fun cancel(message: TransmitMessage) {
         if (message === activeMessage || !txQueue.removeAll { it === message }) return
         message.messageId?.let { deleteBubble(it) }
-        // A heartbeat the service started on its own can be on the air
-        if (activeMessage == null && _txState.value != TransmitState.TRANSMITTING) settleState() else publishQueue()
+        if (activeMessage == null) settleUnlessOnAir() else publishQueue()
     }
 
     fun cancelAll() {
@@ -203,6 +207,11 @@ class TransmitViewModel(application: Application) : AndroidViewModel(application
         }
         settleState()
         return true
+    }
+
+    fun handedBack() {
+        activeMessage = null
+        settleUnlessOnAir()
     }
 
     /** TX broadcasts stop reaching us; a send in flight may go out unseen. */

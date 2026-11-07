@@ -210,13 +210,9 @@ class JS8EngineService : Service() {
                 if (isRigControlConnected()) {
                     requestRigPtt(false, generation) { released ->
                         if (!isCurrentTxGeneration(generation)) return@requestRigPtt
-                        if (released) {
-                            broadcastTxSent()
-                            broadcastTxState(TX_STATE_FINISHED)
-                        } else {
-                            broadcastError("Failed to release PTT after transmission")
-                            broadcastTxState(TX_STATE_FAILED)
-                        }
+                        if (!released) broadcastError("Failed to release PTT after transmission")
+                        broadcastTxSent()
+                        broadcastTxState(TX_STATE_FINISHED)
                     }
                 } else {
                     if (isCurrentTxGeneration(generation)) {
@@ -353,9 +349,17 @@ class JS8EngineService : Service() {
                 Log.i(TAG, "Setting TX offset to $offsetHz Hz")
                 currentTxOffsetHz = offsetHz
             }
-            ACTION_TRANSMIT_MESSAGE -> {
-                val txIntent = Intent(intent)
-                postTxWork { handleTransmitMessage(txIntent) }
+            ACTION_TRANSMIT_MESSAGE -> when {
+                engine != null -> {
+                    val txIntent = Intent(intent)
+                    postTxWork { handleTransmitMessage(txIntent) }
+                }
+                engineStartInProgress -> handBack("until the engine is running")
+                else -> {
+                    // The UI missed a stop
+                    broadcastEngineState(STATE_STOPPED)
+                    stopSelfResult(startId)
+                }
             }
             ACTION_TIME_SYNC_ONCE -> {
                 Log.i(TAG, "One-shot time sync armed; waiting for next decode")
@@ -1792,10 +1796,16 @@ class JS8EngineService : Service() {
     private val rigStatusHandler = Handler(Looper.getMainLooper())
     private val rigStatusRunnable = object : Runnable {
         override fun run() {
-            broadcastRigStatus(isRigControlConnected())
+            val connected = isRigControlConnected()
+            broadcastRigStatus(connected)
+            if (connected && txHeldForRig) {
+                txHeldForRig = false
+                broadcastProcessTxQueue()
+            }
             rigStatusHandler.postDelayed(this, RIG_STATUS_POLL_INTERVAL_MS)
         }
     }
+    @Volatile private var txHeldForRig = false
 
     private fun startRigStatusPolling() {
         rigStatusHandler.removeCallbacks(rigStatusRunnable)
@@ -2766,11 +2776,9 @@ class JS8EngineService : Service() {
     }
 
     private fun handleTransmitMessage(intent: Intent) {
-        val activeEngine = engine
-        if (activeEngine == null) {
-            broadcastError("Engine not running")
-            return
-        }
+        val activeEngine = engine ?: return handBack("because monitoring stopped")
+        // A heartbeat or relay the service started can be waiting for its slot
+        if (activeEngine.isTransmitting()) return handBack("until the current transmission ends")
 
         val text = intent.getStringExtra(EXTRA_TX_TEXT)?.trim().orEmpty()
         if (text.isEmpty()) {
@@ -2778,14 +2786,18 @@ class JS8EngineService : Service() {
             broadcastTxState(TX_STATE_FAILED, refused = true)
             return
         }
-        // Manual sends stop the heartbeat schedule; heartbeats don't
-        if (!isHeartbeatTraffic(text)) disableHeartbeat()
 
         val prefs = PreferenceManager.getDefaultSharedPreferences(this)
         val callsign = getConfiguredCallsign()
         if (callsign == null) {
             warnMissingCallsign()
             broadcastTxState(TX_STATE_FAILED)
+            return
+        }
+        if (isRigPttRequired() && !isRigControlConnected()) {
+            handBack("until the rig link is up")
+            // Set after the hand-back so the poller's kick lands behind it
+            txHeldForRig = true
             return
         }
         val grid = prefs.getString("grid", "")?.trim().orEmpty().uppercase()
@@ -2816,27 +2828,35 @@ class JS8EngineService : Service() {
         if (!modeSet) {
             Log.w(TAG, "Failed to set transmit mode (rig control might not be connected)")
         }
+        // A heartbeat or relay can queue while the rig mode is being set
+        if (activeEngine.isTransmitting()) return handBack("until the current transmission ends")
 
         Log.i(
             TAG,
             "TX request: text='$payloadText', directed='${directed}', submode=$submode, freq=$audioFrequencyHz, delay=$txDelaySec, identify=$effectiveForceIdentify"
         )
 
-        prepareEngineForTransmit(activeEngine)
-        val ok = activeEngine.transmitMessage(
-            text = payloadText,
-            myCall = callsign,
-            myGrid = grid,
-            selectedCall = directed,
-            submode = submode,
-            audioFrequencyHz = audioFrequencyHz,
-            txDelaySec = txDelaySec,
-            forceIdentify = effectiveForceIdentify,
-            forceData = forceData
-        )
+        val ok = try {
+            prepareEngineForTransmit(activeEngine)
+            activeEngine.transmitMessage(
+                text = payloadText,
+                myCall = callsign,
+                myGrid = grid,
+                selectedCall = directed,
+                submode = submode,
+                audioFrequencyHz = audioFrequencyHz,
+                txDelaySec = txDelaySec,
+                forceIdentify = effectiveForceIdentify,
+                forceData = forceData
+            )
+        } catch (e: IllegalStateException) {
+            // A stop can close the engine while the rig mode is being set
+            return handBack("because the engine closed")
+        }
 
         if (ok) {
             Log.i(TAG, "TX request accepted")
+            if (!isHeartbeatTraffic(text)) disableHeartbeat()
             updateLastTxMessage(payloadText, directed, submode, audioFrequencyHz)
             broadcastTxState(TX_STATE_QUEUED)
             startTxMonitor()
@@ -2846,6 +2866,11 @@ class JS8EngineService : Service() {
             // The engine also turns sends down while it stops or starts
             broadcastTxState(TX_STATE_FAILED, refused = !TxMessageClassifier.isEncodable(text))
         }
+    }
+
+    private fun handBack(reason: String) {
+        Log.i(TAG, "TX request handed back $reason")
+        broadcastTxState(TX_STATE_HANDED_BACK)
     }
 
     private fun setTransmitMode(): Boolean {
@@ -4350,6 +4375,7 @@ class JS8EngineService : Service() {
         const val TX_STATE_STARTED = "started"
         const val TX_STATE_FINISHED = "finished"
         const val TX_STATE_FAILED = "failed"
+        const val TX_STATE_HANDED_BACK = "handed_back"
 
         const val DEFAULT_AUDIO_FREQUENCY_HZ = 1500.0
         const val TRUSDX_RX_SAMPLE_RATE_HZ = 7812
