@@ -97,7 +97,6 @@ class MonitorFragment : Fragment() {
         waterfallView.bindRenderer(viewModel.getWaterfallRenderer())
         waterfallView.onOffsetChanged = { offsetHz ->
             viewModel.setTxOffset(offsetHz)
-            transmitViewModel.setTxOffset(offsetHz)
             waterfallView.txOffsetHz = offsetHz
 
             // Broadcast offset to service for autoreplies

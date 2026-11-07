@@ -17,6 +17,25 @@ class TransmitViewModelTest {
         assertEquals("@GROUP" to "HELLO", outgoingSavedMessage("MSG HELLO", "@GROUP"))
         assertEquals("W1AW" to "HELLO", outgoingSavedMessage("W1AW MSG HELLO", "K1ABC"))
         assertEquals("K1ABC/P" to "HELLO", outgoingSavedMessage("K1ABC/P MSG HELLO", null))
+        assertEquals("@DX/NA" to "HELLO", outgoingSavedMessage("@DX/NA MSG HELLO", null))
+    }
+
+    @Test
+    fun threadTextAddressesOnce() {
+        assertEquals("W1AW SNR?", threadText("W1AW", "SNR?"))
+        assertEquals("W1AW K1ABC SAYS HI", threadText("W1AW", "K1ABC SAYS HI"))
+        assertEquals("W1AW SNR?", threadText("W1AW", "w1aw snr?"))
+        assertEquals("W1AW SNR?", threadText("W1AW", "snr?"))
+        assertEquals("`RAW TEXT", threadText("W1AW", "`RAW TEXT"))
+    }
+
+    @Test
+    fun threadBubbleShowsTheTextWithoutTheThreadCall() {
+        assertEquals("SNR?", threadBubbleText("W1AW", threadText("W1AW", "SNR?")))
+        assertEquals("SNR?", threadBubbleText("W1AW", threadText("W1AW", "w1aw snr?")))
+        assertEquals("K1ABC SAYS HI", threadBubbleText("W1AW", threadText("W1AW", "K1ABC SAYS HI")))
+        assertEquals("HELLO", threadBubbleText("W1AW", threadText("W1AW", "MSG HELLO")))
+        assertEquals("`RAW TEXT", threadBubbleText("W1AW", threadText("W1AW", "`RAW TEXT")))
     }
 
     @Test

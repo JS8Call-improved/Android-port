@@ -37,8 +37,7 @@ class EverythingFragment : Fragment() {
         ComposeBarController(
             root = view,
             commandMenuRes = R.menu.broadcast_command_menu,
-            onSend = { text -> queueBroadcast(text) },
-            onCommand = { text -> queueBroadcast(text) }
+            onSend = { text -> queueBroadcast(text) }
         )
     }
 }

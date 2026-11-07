@@ -9,6 +9,9 @@ object TxMessageClassifier {
         return isCqMessage(text) || isHeartbeatMessage(text)
     }
 
+    /** True when the engine can encode every character, which takes printable ASCII. */
+    fun isEncodable(text: String): Boolean = text.all { it in ' '..'~' }
+
     fun isHeartbeatMessage(text: String): Boolean {
         val trimmed = text.trim()
         return hasTokenPrefix(trimmed, "HB") ||

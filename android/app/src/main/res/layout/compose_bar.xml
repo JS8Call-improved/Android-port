@@ -30,6 +30,7 @@
         android:imeOptions="actionSend"
         android:importantForAutofill="no"
         android:inputType="textShortMessage|textCapCharacters"
+        android:maxLength="240"
         android:maxLines="4"
         android:minHeight="48dp"
         android:paddingHorizontal="16dp"

@@ -6,6 +6,16 @@ import org.junit.Test
 
 class TxMessageClassifierTest {
     @Test
+    fun encodesPrintableAsciiOnly() {
+        assertTrue(TxMessageClassifier.isEncodable("K1ABC SNR? 73 ~`{}|\\"))
+        assertTrue(TxMessageClassifier.isEncodable("lowercase too"))
+        assertFalse(TxMessageClassifier.isEncodable("HELLO \uD83D\uDE00"))
+        assertFalse(TxMessageClassifier.isEncodable("CAF\u00C9"))
+        assertFalse(TxMessageClassifier.isEncodable("IT\u2019S"))
+        assertFalse(TxMessageClassifier.isEncodable("TAB\tHERE"))
+    }
+
+    @Test
     fun detectsHeartbeatFormsExactly() {
         assertTrue(TxMessageClassifier.isHeartbeatMessage("HB"))
         assertTrue(TxMessageClassifier.isHeartbeatMessage("HB FN31"))

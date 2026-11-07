@@ -11,7 +11,6 @@ import androidx.core.widget.doAfterTextChanged
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModelProvider
 import androidx.navigation.fragment.findNavController
-import androidx.preference.PreferenceManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.floatingactionbutton.FloatingActionButton
@@ -19,7 +18,7 @@ import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.textfield.MaterialAutoCompleteTextView
 import com.google.android.material.textfield.TextInputLayout
 import com.js8call.example.R
-import com.js8call.example.util.CallsignValidator
+import java.util.Locale
 
 /**
  * Fragment showing the list of conversations (Messages tab).
@@ -117,25 +116,14 @@ class MessagesFragment : Fragment() {
             .setNegativeButton(android.R.string.cancel, null)
             .show()
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-            val callsign = input.text?.toString()?.trim()?.uppercase().orEmpty()
-            val error = addressError(callsign)
+            val callsign = input.text?.toString()?.trim()?.uppercase(Locale.ROOT).orEmpty()
+            val error = threadAddressError(callsign, heard = callsign in suggestions)
             if (error != null) {
                 inputLayout.error = getString(error)
                 return@setOnClickListener
             }
             dialog.dismiss()
             navigateToConversation(callsign)
-        }
-    }
-
-    private fun addressError(callsign: String): Int? {
-        val ownCallsign = PreferenceManager.getDefaultSharedPreferences(requireContext())
-            .getString("callsign", "").orEmpty()
-        return when {
-            CallsignValidator.matches(callsign, ownCallsign) -> R.string.messages_new_own
-            CallsignValidator.isAmateurCallsign(callsign) -> null
-            Regex("@[A-Z0-9]+").matches(callsign) -> null
-            else -> R.string.messages_new_invalid
         }
     }
 

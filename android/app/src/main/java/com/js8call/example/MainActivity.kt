@@ -14,6 +14,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.os.bundleOf
 import androidx.lifecycle.ViewModelProvider
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import androidx.navigation.NavController
@@ -33,6 +34,7 @@ import com.js8call.example.ui.TransmitViewModel
 class MainActivity : AppCompatActivity() {
 
     private lateinit var bottomNav: NavigationBarView
+    private lateinit var navController: NavController
     private var onMonitorTab = true
     private lateinit var decodeViewModel: DecodeViewModel
     private lateinit var monitorViewModel: MonitorViewModel
@@ -185,7 +187,7 @@ class MainActivity : AppCompatActivity() {
         bottomNav = findViewById(R.id.bottom_navigation)
         val navHostFragment = supportFragmentManager
             .findFragmentById(R.id.nav_host_fragment) as NavHostFragment
-        val navController = navHostFragment.navController
+        navController = navHostFragment.navController
 
         bottomNav.setupWithNavController(navController)
         navController.addOnDestinationChangedListener { controller, destination, _ ->
@@ -285,6 +287,15 @@ class MainActivity : AppCompatActivity() {
         return NavigationUI.onNavDestinationSelected(item, navController) || onStack(item.itemId)
     }
 
+    /** Opens [callsign]'s thread on the Messages tab. */
+    fun openThread(callsign: String) {
+        if (bottomNav.selectedItemId != R.id.navigation_messages) {
+            bottomNav.selectedItemId = R.id.navigation_messages
+            navController.popBackStack(R.id.navigation_messages, false)
+        }
+        navController.navigate(R.id.navigation_conversation, bundleOf("callsign" to callsign))
+    }
+
     /**
      * Process the next message in the TX queue if not currently transmitting.
      */
@@ -316,7 +327,7 @@ class MainActivity : AppCompatActivity() {
             action = JS8EngineService.ACTION_TRANSMIT_MESSAGE
             putExtra(JS8EngineService.EXTRA_TX_TEXT, nextMessage.text)
             nextMessage.directed?.let { putExtra(JS8EngineService.EXTRA_TX_DIRECTED, it) }
-            putExtra(JS8EngineService.EXTRA_TX_FREQ_HZ, transmitViewModel.getTxOffset().toDouble())
+            putExtra(JS8EngineService.EXTRA_TX_FREQ_HZ, monitorViewModel.getTxOffset().toDouble())
         }
         startService(txIntent)
     }

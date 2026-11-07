@@ -74,8 +74,7 @@ class ConversationFragment : Fragment() {
         ComposeBarController(
             root = view,
             commandMenuRes = R.menu.directed_command_menu,
-            onSend = { text -> sendMessage(text) },
-            onCommand = { text -> sendMessage(text) }
+            onSend = { text -> sendMessage(text) }
         )
 
         // Observe messages for this conversation

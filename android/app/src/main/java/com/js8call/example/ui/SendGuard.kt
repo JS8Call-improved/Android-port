@@ -5,16 +5,12 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.preference.PreferenceManager
 import com.google.android.material.snackbar.Snackbar
 import com.js8call.example.R
+import com.js8call.example.util.CallsignValidator
 
 /**
- * False, with a snackbar, when a send would fail: monitoring off or no callsign set.
+ * False, with a snackbar, when no callsign is set.
  */
 internal fun Fragment.readyToSend(): Boolean {
-    val monitorViewModel = ViewModelProvider(requireActivity())[MonitorViewModel::class.java]
-    if (monitorViewModel.isRunning.value != true) {
-        Snackbar.make(requireView(), R.string.decodes_start_first, Snackbar.LENGTH_SHORT).show()
-        return false
-    }
     val prefs = PreferenceManager.getDefaultSharedPreferences(requireContext())
     if (prefs.getString("callsign", "")?.isNotBlank() != true) {
         Snackbar.make(requireView(), R.string.error_callsign_required, Snackbar.LENGTH_LONG).show()
@@ -27,6 +23,19 @@ internal fun Fragment.readyToSend(): Boolean {
 internal fun Fragment.queueBroadcast(text: String): Boolean {
     if (!readyToSend()) return false
     ViewModelProvider(requireActivity())[TransmitViewModel::class.java].queueManualMessage(text)
-    Snackbar.make(requireView(), getString(R.string.decodes_queued, text), Snackbar.LENGTH_SHORT).show()
+    val running = ViewModelProvider(requireActivity())[MonitorViewModel::class.java].isRunning.value == true
+    val queued = if (running) R.string.decodes_queued else R.string.decodes_queued_offline
+    Snackbar.make(requireView(), getString(queued, text), Snackbar.LENGTH_SHORT).show()
     return true
+}
+
+/** Why [address] can't have a thread, or null when it can. A [heard] station skips the shape check. */
+internal fun Fragment.threadAddressError(address: String, heard: Boolean = false): Int? {
+    val ownCallsign = PreferenceManager.getDefaultSharedPreferences(requireContext())
+        .getString("callsign", "").orEmpty()
+    return when {
+        CallsignValidator.matches(address, ownCallsign) -> R.string.messages_new_own
+        heard || CallsignValidator.isAmateurCallsign(address) || CallsignValidator.isGroup(address) -> null
+        else -> R.string.messages_new_invalid
+    }
 }

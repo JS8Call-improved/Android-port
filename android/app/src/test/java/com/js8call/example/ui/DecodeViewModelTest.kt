@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.arch.core.executor.testing.InstantTaskExecutorRule
 import com.js8call.example.model.DecodedMessage
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -61,5 +62,13 @@ class DecodeViewModelTest {
         viewModel.addDecode(decode("K1ABC: W1AW HI"))
 
         assertEquals(listOf("K1ABC", "W1AW"), viewModel.heardCallsigns())
+    }
+
+    @Test
+    fun senderNeedsTheColon() {
+        val viewModel = DecodeViewModel(Application())
+        assertEquals("GB13COL", viewModel.senderCallsign("GB13COL: N5EKS SNR?"))
+        assertNull(viewModel.senderCallsign("EM10AB HERE"))
+        assertNull(viewModel.senderCallsign("RST599 TNX"))
     }
 }

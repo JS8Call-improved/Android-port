@@ -14,11 +14,38 @@ class CallsignValidatorTest {
     }
 
     @Test
+    fun acceptsLetterDigitPrefixes() {
+        assertTrue(CallsignValidator.isAmateurCallsign("A61AB"))
+        assertTrue(CallsignValidator.isAmateurCallsign("E51ABC"))
+        assertTrue(CallsignValidator.isAmateurCallsign("V73XX"))
+        assertFalse(CallsignValidator.isAmateurCallsign("5NN"))
+    }
+
+    @Test
     fun rejectsCallsignLikeFreeText() {
         assertFalse(CallsignValidator.isAmateurCallsign("TEST123"))
         assertFalse(CallsignValidator.isAmateurCallsign("HELLO"))
         assertFalse(CallsignValidator.isAmateurCallsign("@ALLCALL"))
         assertFalse(CallsignValidator.isAmateurCallsign("K1ABC!"))
+    }
+
+    @Test
+    fun acceptsGroupsIncludingSlashGroups() {
+        assertTrue(CallsignValidator.isGroup("@ALLCALL"))
+        assertTrue(CallsignValidator.isGroup("@DX/NA"))
+        assertTrue(CallsignValidator.isGroup("@RESERVE/4"))
+        assertTrue(CallsignValidator.isGroup("@QSOPARTY"))
+        assertTrue(CallsignValidator.isGroup("@dx/eu"))
+    }
+
+    @Test
+    fun rejectsMalformedGroups() {
+        assertFalse(CallsignValidator.isGroup("@"))
+        assertFalse(CallsignValidator.isGroup("@DX/"))
+        assertFalse(CallsignValidator.isGroup("@/NA"))
+        assertFalse(CallsignValidator.isGroup("@TOOLONGNAME"))
+        assertFalse(CallsignValidator.isGroup("DX/NA"))
+        assertFalse(CallsignValidator.isGroup("@DX NA"))
     }
 
     @Test

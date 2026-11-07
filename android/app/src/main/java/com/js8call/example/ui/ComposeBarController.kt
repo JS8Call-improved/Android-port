@@ -7,7 +7,9 @@ import android.widget.EditText
 import android.widget.PopupMenu
 import androidx.annotation.MenuRes
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.snackbar.Snackbar
 import com.js8call.example.R
+import com.js8call.example.util.TxMessageClassifier
 
 /**
  * Wires up the shared compose bar: command menu, text field, and send arrow.
@@ -17,8 +19,7 @@ import com.js8call.example.R
 class ComposeBarController(
     root: View,
     @MenuRes private val commandMenuRes: Int,
-    private val onSend: (String) -> Boolean,
-    private val onCommand: (String) -> Unit
+    private val onSend: (String) -> Boolean
 ) {
 
     private val commandButton: MaterialButton = root.findViewById(R.id.command_button)
@@ -26,11 +27,15 @@ class ComposeBarController(
     private val sendButton: View = root.findViewById(R.id.send_button)
 
     init {
+        // A single-line input type stops wrapping; it stays so Enter sends instead of adding a line
+        input.setHorizontallyScrolling(false)
+        input.maxLines = 4
         commandButton.setOnClickListener { showCommandMenu() }
         sendButton.setOnClickListener { send() }
         input.setOnEditorActionListener { _, actionId, event ->
             // Hardware Enter arrives as IME_NULL, once for down and once for up.
-            val enterKey = actionId == EditorInfo.IME_NULL && event?.keyCode == KeyEvent.KEYCODE_ENTER
+            val enterKey = actionId == EditorInfo.IME_NULL &&
+                (event?.keyCode == KeyEvent.KEYCODE_ENTER || event?.keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER)
             if (actionId == EditorInfo.IME_ACTION_SEND || enterKey && event?.action == KeyEvent.ACTION_DOWN) {
                 send()
             }
@@ -41,6 +46,10 @@ class ComposeBarController(
     private fun send() {
         val text = input.text?.toString()?.trim().orEmpty()
         if (text.isEmpty()) return
+        if (!TxMessageClassifier.isEncodable(text)) {
+            Snackbar.make(input, R.string.compose_not_encodable, Snackbar.LENGTH_LONG).show()
+            return
+        }
         if (onSend(text)) input.text?.clear()
     }
 
@@ -59,7 +68,7 @@ class ComposeBarController(
                 R.id.cmd_agn -> "AGN?"
                 else -> return@setOnMenuItemClickListener false
             }
-            onCommand(command)
+            onSend(command)
             true
         }
         popup.show()
