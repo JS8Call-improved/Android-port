@@ -2,8 +2,11 @@ package com.js8call.example.ui
 
 import android.app.Application
 import androidx.arch.core.executor.testing.InstantTaskExecutorRule
+import com.js8call.example.model.TransmitState
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
@@ -37,6 +40,113 @@ class TransmitViewModelTest {
         assertEquals("HELLO", threadBubbleText("W1AW", threadText("W1AW", "MSG HELLO")))
         assertEquals("`RAW TEXT", threadBubbleText("W1AW", threadText("W1AW", "`RAW TEXT")))
     }
+
+    @Test
+    fun sendCutOffOnTheAirLeavesTheQueue() {
+        val viewModel = TransmitViewModel(Application())
+        viewModel.queueMessage("FIRST", "K1ABC")
+        viewModel.queueMessage("SECOND", "W1AW")
+        viewModel.beginTransmission(viewModel.getNextMessage()!!)
+        viewModel.startTransmitting()
+        assertTrue(viewModel.transmissionFailed())
+        assertEquals(listOf("SECOND"), queuedTexts(viewModel))
+    }
+
+    @Test
+    fun sendFailedBeforeTheAirWaitsAtTheHead() {
+        val viewModel = TransmitViewModel(Application())
+        viewModel.queueMessage("FIRST", "K1ABC")
+        viewModel.queueMessage("SECOND", "W1AW")
+        viewModel.beginTransmission(viewModel.getNextMessage()!!)
+        assertFalse(viewModel.transmissionFailed())
+        assertFalse(viewModel.hasActiveTransmission())
+        assertEquals(listOf("FIRST", "SECOND"), queuedTexts(viewModel))
+        assertEquals(TransmitState.QUEUED, viewModel.txState.value)
+    }
+
+    @Test
+    fun refusedSendFailsAndTheQueueMovesOn() {
+        val viewModel = TransmitViewModel(Application())
+        viewModel.queueMessage("FIRST", "K1ABC")
+        viewModel.queueMessage("SECOND", "W1AW")
+        viewModel.beginTransmission(viewModel.getNextMessage()!!)
+        assertTrue(viewModel.transmissionFailed(refused = true))
+        assertEquals(listOf("SECOND"), queuedTexts(viewModel))
+    }
+
+    @Test
+    fun failedWithNoSendOfOursMovesOn() {
+        val viewModel = TransmitViewModel(Application())
+        viewModel.queueMessage("FIRST", "K1ABC")
+        assertTrue(viewModel.transmissionFailed())
+        assertEquals(listOf("FIRST"), queuedTexts(viewModel))
+    }
+
+    @Test
+    fun cancelSkipsTheSendWithTheEngine() {
+        val viewModel = TransmitViewModel(Application())
+        viewModel.queueMessage("FIRST", "K1ABC")
+        viewModel.queueMessage("SECOND", "W1AW")
+        val active = viewModel.getNextMessage()!!
+        viewModel.beginTransmission(active)
+        viewModel.cancel(active)
+        viewModel.cancelAll()
+        assertEquals(listOf("FIRST"), queuedTexts(viewModel))
+        assertTrue(viewModel.queue.value!!.single().sending)
+    }
+
+    @Test
+    fun stopRequeuesASendThatNeverWentOut() {
+        val viewModel = TransmitViewModel(Application())
+        viewModel.queueMessage("FIRST", "K1ABC")
+        viewModel.beginTransmission(viewModel.getNextMessage()!!)
+        viewModel.engineStopped()
+        assertFalse(viewModel.hasActiveTransmission())
+        assertEquals("FIRST", viewModel.getNextMessage()?.text)
+    }
+
+    @Test
+    fun stopFailsASendAlreadyOnTheAir() {
+        val viewModel = TransmitViewModel(Application())
+        viewModel.queueMessage("FIRST", "K1ABC")
+        viewModel.beginTransmission(viewModel.getNextMessage()!!)
+        viewModel.startTransmitting()
+        viewModel.engineStopped()
+        assertFalse(viewModel.hasActiveTransmission())
+        assertNull(viewModel.getNextMessage())
+    }
+
+    @Test
+    fun stopFailsASendThatMayHaveGoneOutUnseen() {
+        val viewModel = TransmitViewModel(Application())
+        viewModel.queueMessage("FIRST", "K1ABC")
+        viewModel.beginTransmission(viewModel.getNextMessage()!!)
+        viewModel.stopListening()
+        viewModel.engineStopped()
+        assertNull(viewModel.getNextMessage())
+    }
+
+    @Test
+    fun serviceSendStaysTransmittingThroughQueueAndCancel() {
+        val viewModel = TransmitViewModel(Application())
+        viewModel.startTransmitting()
+        viewModel.queueMessage("FIRST", "K1ABC")
+        viewModel.queueMessage("SECOND", "W1AW")
+        assertEquals(TransmitState.TRANSMITTING, viewModel.txState.value)
+        viewModel.cancel(viewModel.getNextMessage()!!)
+        assertEquals(TransmitState.TRANSMITTING, viewModel.txState.value)
+    }
+
+    @Test
+    fun stopClearsTransmittingWithNoSendOfOurs() {
+        val viewModel = TransmitViewModel(Application())
+        viewModel.startTransmitting()
+        viewModel.engineStopped()
+        assertEquals(TransmitState.IDLE, viewModel.txState.value)
+    }
+
+    private fun queuedTexts(viewModel: TransmitViewModel) =
+        viewModel.queue.value.orEmpty().map { it.message.text }
 
     @Test
     fun ignoresOtherTrafficAndRelayCommands() {

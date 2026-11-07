@@ -6,22 +6,28 @@ import android.view.inputmethod.EditorInfo
 import android.widget.EditText
 import android.widget.PopupMenu
 import androidx.annotation.MenuRes
+import androidx.core.view.isVisible
+import androidx.fragment.app.Fragment
+import androidx.lifecycle.ViewModelProvider
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.chip.Chip
 import com.google.android.material.snackbar.Snackbar
 import com.js8call.example.R
 import com.js8call.example.util.TxMessageClassifier
 
 /**
- * Wires up the shared compose bar: command menu, text field, and send arrow.
+ * Wires up the shared compose bar: queue chip, command menu, text field, and send arrow.
  *
  * The send callback returns false to refuse, which keeps the typed text.
  */
 class ComposeBarController(
+    private val fragment: Fragment,
     root: View,
     @MenuRes private val commandMenuRes: Int,
     private val onSend: (String) -> Boolean
 ) {
 
+    private val queueChip: Chip = root.findViewById(R.id.queue_chip)
     private val commandButton: MaterialButton = root.findViewById(R.id.command_button)
     private val input: EditText = root.findViewById(R.id.compose_input)
     private val sendButton: View = root.findViewById(R.id.send_button)
@@ -40,6 +46,18 @@ class ComposeBarController(
                 send()
             }
             actionId == EditorInfo.IME_ACTION_SEND || enterKey
+        }
+
+        ViewModelProvider(fragment.requireActivity())[TransmitViewModel::class.java]
+            .queue.observe(fragment.viewLifecycleOwner) { queue ->
+                queueChip.isVisible = queue.isNotEmpty()
+                queueChip.text = fragment.getString(R.string.queue_count, queue.size)
+            }
+        queueChip.setOnClickListener {
+            val fragments = fragment.childFragmentManager
+            if (fragments.findFragmentByTag(QueueSheet.TAG) == null) {
+                QueueSheet().showNow(fragments, QueueSheet.TAG)
+            }
         }
     }
 

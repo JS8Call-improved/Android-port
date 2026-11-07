@@ -254,6 +254,20 @@
     <string name="messages_sent">Sent</string>
     <string name="messages_acked">Acknowledged</string>
     <string name="messages_failed">Failed to send</string>
+    <string name="messages_retry">Retry</string>
+    <string name="messages_cancel_send">Cancel send</string>
+    <string name="messages_delete">Delete</string>
+    <string name="messages_already_sending">Already sending</string>
+    <string name="queue_count">%d queued</string>
+    <string name="queue_title">Queue</string>
+    <string name="queue_cancel_all">Cancel all</string>
+    <string name="queue_cancel">Cancel</string>
+    <string name="queue_waiting">Sends when monitoring starts</string>
+    <string name="queue_empty">Nothing queued</string>
+    <string name="queue_sending">Sending now</string>
+    <string name="queue_to">To %s</string>
+    <string name="queue_broadcast">Broadcast</string>
+    <string name="queue_auto_reply">Auto reply</string>
     <string name="messages_today">Today</string>
     <string name="messages_yesterday">Yesterday</string>
 

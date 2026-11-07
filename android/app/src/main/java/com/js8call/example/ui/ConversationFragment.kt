@@ -5,12 +5,15 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
+import android.widget.PopupMenu
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModelProvider
 import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.appbar.MaterialToolbar
+import com.google.android.material.snackbar.Snackbar
 import com.js8call.example.R
+import com.js8call.example.data.MessageEntity
 
 /**
  * Fragment showing a single conversation with chat bubbles.
@@ -61,6 +64,7 @@ class ConversationFragment : Fragment() {
                 // Could show options to copy/delete
                 true
             }
+            onUnsentClick = { message, bubble -> showUnsentOptions(message, bubble) }
         }
         recyclerView.adapter = adapter
 
@@ -72,6 +76,7 @@ class ConversationFragment : Fragment() {
         })
 
         ComposeBarController(
+            fragment = this,
             root = view,
             commandMenuRes = R.menu.directed_command_menu,
             onSend = { text -> sendMessage(text) }
@@ -110,5 +115,23 @@ class ConversationFragment : Fragment() {
         if (!readyToSend()) return false
         transmitViewModel.queueThreadMessage(callsign, text)
         return true
+    }
+
+    private fun showUnsentOptions(message: MessageEntity, bubble: View) {
+        val popup = PopupMenu(requireContext(), bubble)
+        popup.menuInflater.inflate(R.menu.outgoing_message_menu, popup.menu)
+        popup.menu.findItem(R.id.action_retry).isVisible =
+            message.isFailed() && transmitViewModel.canRetry(message.id)
+        popup.menu.findItem(R.id.action_cancel_send).isVisible = message.isPending()
+        popup.menu.findItem(R.id.action_delete).isVisible = message.isFailed()
+        popup.setOnMenuItemClickListener { item ->
+            if (item.itemId == R.id.action_retry) {
+                transmitViewModel.retry(message.id)
+            } else if (!transmitViewModel.discard(message.id)) {
+                Snackbar.make(requireView(), R.string.messages_already_sending, Snackbar.LENGTH_SHORT).show()
+            }
+            true
+        }
+        popup.show()
     }
 }

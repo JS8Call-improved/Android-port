@@ -69,15 +69,13 @@ class MainActivity : AppCompatActivity() {
                 JS8EngineService.ACTION_TX_STATE -> {
                     val state = intent.getStringExtra(JS8EngineService.EXTRA_TX_STATE)
                     when (state) {
-                        JS8EngineService.TX_STATE_FINISHED, JS8EngineService.TX_STATE_FAILED -> {
-                            // Update ViewModel state first
-                            if (state == JS8EngineService.TX_STATE_FINISHED) {
-                                transmitViewModel.transmissionComplete()
-                            } else {
-                                transmitViewModel.transmissionFailed()
-                            }
-                            // Process next item in queue after TX completes
+                        JS8EngineService.TX_STATE_FINISHED -> {
+                            transmitViewModel.transmissionComplete()
                             processNextTxIfIdle()
+                        }
+                        JS8EngineService.TX_STATE_FAILED -> {
+                            val refused = intent.getBooleanExtra(JS8EngineService.EXTRA_TX_REFUSED, false)
+                            if (transmitViewModel.transmissionFailed(refused)) processNextTxIfIdle()
                         }
                         JS8EngineService.TX_STATE_QUEUED -> {
                             transmitViewModel.setQueued()
@@ -115,6 +113,8 @@ class MainActivity : AppCompatActivity() {
                     monitorViewModel.updateState(state)
                     if (state == EngineState.RUNNING) {
                         processNextTxIfIdle()
+                    } else if (state == EngineState.STOPPED || state == EngineState.ERROR) {
+                        transmitViewModel.engineStopped()
                     }
                 }
                 JS8EngineService.ACTION_SPECTRUM -> {
@@ -263,6 +263,8 @@ class MainActivity : AppCompatActivity() {
             .unregisterReceiver(decodeReceiver)
         LocalBroadcastManager.getInstance(this)
             .unregisterReceiver(monitorReceiver)
+        // A rotation is too short to miss a whole send
+        if (!isChangingConfigurations) transmitViewModel.stopListening()
         decodeViewModel.persistDecodesOnStop()
         if (isFinishing && !isChangingConfigurations) {
             stopEngineService()

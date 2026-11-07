@@ -28,6 +28,9 @@ class MessageBubbleAdapter : ListAdapter<MessageEntity, RecyclerView.ViewHolder>
 
     var onMessageLongClick: ((MessageEntity) -> Boolean)? = null
 
+    /** Tap on a pending or failed send. */
+    var onUnsentClick: ((MessageEntity, View) -> Unit)? = null
+
     override fun getItemViewType(position: Int): Int {
         return if (getItem(position).isIncoming()) VIEW_TYPE_INCOMING else VIEW_TYPE_OUTGOING
     }
@@ -51,7 +54,15 @@ class MessageBubbleAdapter : ListAdapter<MessageEntity, RecyclerView.ViewHolder>
         val message = getItem(position)
         when (holder) {
             is IncomingMessageViewHolder -> holder.bind(message)
-            is OutgoingMessageViewHolder -> holder.bind(message)
+            is OutgoingMessageViewHolder -> {
+                holder.bind(message)
+                if (message.isPending() || message.isFailed()) {
+                    holder.bubble.setOnClickListener { onUnsentClick?.invoke(message, it) }
+                } else {
+                    holder.bubble.setOnClickListener(null)
+                    holder.bubble.isClickable = false
+                }
+            }
         }
 
         holder.itemView.setOnLongClickListener {
@@ -91,7 +102,9 @@ class MessageBubbleAdapter : ListAdapter<MessageEntity, RecyclerView.ViewHolder>
     }
 
     class OutgoingMessageViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
+        val bubble: View = itemView.findViewById(R.id.bubble_container)
         private val messageText: TextView = itemView.findViewById(R.id.message_text)
+        private val statusText: TextView = itemView.findViewById(R.id.status_text)
         private val timestampText: TextView = itemView.findViewById(R.id.timestamp_text)
         private val statusIcon: ImageView = itemView.findViewById(R.id.status_icon)
 
@@ -99,6 +112,7 @@ class MessageBubbleAdapter : ListAdapter<MessageEntity, RecyclerView.ViewHolder>
 
         fun bind(message: MessageEntity) {
             messageText.text = message.text
+            statusText.visibility = if (message.isFailed()) View.VISIBLE else View.GONE
             timestampText.text = timeFormat.format(Date(message.timestamp))
 
             // Update status icon based on message status
