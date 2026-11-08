@@ -1408,6 +1408,8 @@ class JS8EngineService : Service() {
 
             if (!preopenOk) {
                 mainHandler.post {
+                    // Stopped since this thread started
+                    if (bridge !== usbSerialBridge) return@post
                     hamlibRigConnected = false
                     rigCtlErrorShown = true
                     Log.w(TAG, "Hamlib USB pre-open failed for device=$deviceId port=$portIndex")
@@ -1427,6 +1429,7 @@ class JS8EngineService : Service() {
                 params.stopBits,
                 params.parity
             ) == true
+            if (!ok && hamlib?.isShutDown() == true) return@Thread
 
             mainHandler.post {
                 hamlibRigConnected = ok
@@ -1483,6 +1486,8 @@ class JS8EngineService : Service() {
             if (!preopenOk) {
                 val detail = bridge?.getLastError().orEmpty()
                 mainHandler.post {
+                    // Stopped since this thread started
+                    if (bridge !== bluetoothSerialBridge) return@post
                     hamlibRigConnected = false
                     rigCtlErrorShown = true
                     if (detail.isNotBlank()) {
@@ -1507,6 +1512,7 @@ class JS8EngineService : Service() {
                 params.stopBits,
                 params.parity
             ) == true
+            if (!ok && hamlib?.isShutDown() == true) return@Thread
 
             mainHandler.post {
                 hamlibRigConnected = ok
@@ -1735,15 +1741,15 @@ class JS8EngineService : Service() {
                             Log.e(TAG, "Unable to confirm PTT release during shutdown")
                         }
                     }
-                    rigTeardownStep("Hamlib close") { shutdownHamlib?.close() }
+                    rigTeardownStep("Hamlib close") { shutdownHamlib?.shutdown() }
                     rigTeardownStep("TruSDX stop") { shutdownTruSdx?.stop() }
                     rigTeardownStep("QMX stop") { shutdownQmx?.stop() }
                     rigTeardownStep("UV-Pro stop") { shutdownUvPro?.stop() }
                     // Not before the release: hamlib sends it through these
                     rigTeardownStep("USB serial unregister") { shutdownUsb?.unregisterNative() }
                     rigTeardownStep("Bluetooth serial unregister") { shutdownBluetooth?.unregisterNative() }
-                    rigTeardownStep("USB serial close") { shutdownUsb?.close() }
-                    rigTeardownStep("Bluetooth serial close") { shutdownBluetooth?.close() }
+                    rigTeardownStep("USB serial close") { shutdownUsb?.shutdown() }
+                    rigTeardownStep("Bluetooth serial close") { shutdownBluetooth?.shutdown() }
                     rigTeardownStep("rigctld disconnect") { shutdownNetwork?.disconnect() }
                     Log.i(TAG, "Rig control torn down")
                 } finally {
