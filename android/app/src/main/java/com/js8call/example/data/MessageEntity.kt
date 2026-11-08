@@ -40,7 +40,7 @@ data class MessageEntity(
     /** Frequency offset in Hz (incoming only) */
     val frequency: Float? = null,
 
-    /** Message status: 0=pending, 1=sent, 2=acked, 3=failed */
+    /** Message status: 0=pending, 1=sent, 2=acked, 3=failed, 4=incomplete (incoming) */
     val status: Int = STATUS_SENT,
 
     /** Whether the message has been read */
@@ -57,6 +57,7 @@ data class MessageEntity(
         const val STATUS_SENT = 1
         const val STATUS_ACKED = 2
         const val STATUS_FAILED = 3
+        const val STATUS_INCOMPLETE = 4
     }
 
     fun isIncoming() = direction == DIRECTION_INCOMING
@@ -64,6 +65,7 @@ data class MessageEntity(
     fun isPending() = status == STATUS_PENDING
     fun isAcked() = status == STATUS_ACKED
     fun isFailed() = status == STATUS_FAILED
+    fun isIncomplete() = status == STATUS_INCOMPLETE
 }
 
 /**

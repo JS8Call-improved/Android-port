@@ -46,8 +46,11 @@ import com.js8call.example.util.Js8Commands
 import com.js8call.example.util.TxMessageClassifier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.util.Calendar
 import java.util.Locale
 import java.util.TimeZone
@@ -70,6 +73,19 @@ internal fun findClosestMsgBufferKey(
         ?.first
 }
 
+internal fun replyHeaderText(command: String, payload: String): String? {
+    val upper = command.trim().uppercase(Locale.ROOT)
+    val id = Js8Commands.COMMANDS[upper]
+    if (id == -1 || (id?.let { Js8Commands.CHECKSUMMED[it] } ?: 0) > 0) return null
+    // Every station that heard our heartbeat answers it
+    if (upper == "HEARTBEAT SNR") return null
+    return listOf(upper, payload.trim()).filter { it.isNotEmpty() }.joinToString(" ")
+}
+
+// Data frames split mid-word, but the header frame ends on one
+internal fun assembleReplyText(header: String, parts: List<String>): String =
+    listOf(header, assembleMsgPayload(parts).trim()).filter { it.isNotEmpty() }.joinToString(" ")
+
 /**
  * Foreground service for running the JS8 engine in the background.
  *
@@ -78,7 +94,10 @@ internal fun findClosestMsgBufferKey(
  */
 class JS8EngineService : Service() {
 
-    private val messageScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val messageScope = CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(1))
+    // Must stay serial: one sender's notifications share an ID
+    private val persistLock = Mutex()
     private val messageRepository by lazy { MessageRepository.getInstance(applicationContext) }
     private var engine: JS8Engine? = null
     private var audioHelper: JS8AudioHelper? = null
@@ -648,6 +667,8 @@ class JS8EngineService : Service() {
                     Log.d(TAG, "Decode finished: count=$count")
                     mainHandler.post {
                         broadcastDecodeFinished(count)
+                        // The only timeout check when no frames arrive
+                        cleanupMsgBuffers(System.currentTimeMillis())
                     }
                 }
 
@@ -1776,6 +1797,15 @@ class JS8EngineService : Service() {
 
         } catch (e: Exception) {
             Log.e(TAG, "Error stopping engine", e)
+        } finally {
+            // Must run after the decodes this session already queued
+            mainHandler.post {
+                try {
+                    flushMsgBuffers()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Message flush failed during stop", e)
+                }
+            }
         }
     }
 
@@ -1843,8 +1873,8 @@ class JS8EngineService : Service() {
         updateHeardCallsign(text)
         broadcastDecode(utc, snr, dt, freq, text, type, quality, mode, driftMs)
         handleRelayFrame(text, snr, mode, freq, type)
-        maybeHandleIncomingMessage(text, snr, freq, type, mode)
-        maybeHandleAutoReply(text, snr, mode)
+        val autoAnswered = maybeHandleAutoReply(text, snr, mode)
+        maybeHandleIncomingMessage(text, snr, freq, type, mode, autoAnswered)
     }
 
     private fun injectDecode(intent: Intent) {
@@ -2955,27 +2985,39 @@ class JS8EngineService : Service() {
         snr: Int,
         freq: Float,
         relayPath: String?,
-        conversationId: String = from
+        conversationId: String = from,
+        notify: Boolean = true,
+        incomplete: Boolean = false,
+        timestamp: Long = System.currentTimeMillis()
     ) {
         messageScope.launch {
-            try {
-                messageRepository.insertIncomingMessage(conversationId, from, text, snr, freq, relayPath)
-            } catch (t: Throwable) {
-                Log.e(TAG, "Failed to persist incoming MSG from $from", t)
-                return@launch
-            }
-
-            mainHandler.post {
-                val intent = Intent(ACTION_MESSAGE_RECEIVED).apply {
-                    putExtra(EXTRA_MESSAGE_FROM, from)
-                    putExtra(EXTRA_MESSAGE_TEXT, text)
-                    putExtra(EXTRA_MESSAGE_SNR, snr)
-                    putExtra(EXTRA_MESSAGE_FREQ, freq)
-                    putExtra(EXTRA_MESSAGE_CONVERSATION_ID, conversationId)
-                    relayPath?.let { putExtra(EXTRA_MESSAGE_RELAY_PATH, it) }
+            persistLock.withLock {
+                try {
+                    messageRepository.insertIncomingMessage(
+                        conversationId, from, text, snr, freq, relayPath, incomplete, timestamp, read = !notify
+                    )
+                } catch (t: Throwable) {
+                    Log.e(TAG, "Failed to persist incoming MSG from $from", t)
+                    return@withLock
                 }
-                LocalBroadcastManager.getInstance(this@JS8EngineService).sendBroadcast(intent)
-                showMessageNotification(from, text)
+
+                mainHandler.post {
+                    val intent = Intent(ACTION_MESSAGE_RECEIVED).apply {
+                        putExtra(EXTRA_MESSAGE_FROM, from)
+                        putExtra(EXTRA_MESSAGE_TEXT, text)
+                        putExtra(EXTRA_MESSAGE_SNR, snr)
+                        putExtra(EXTRA_MESSAGE_FREQ, freq)
+                        putExtra(EXTRA_MESSAGE_CONVERSATION_ID, conversationId)
+                        relayPath?.let { putExtra(EXTRA_MESSAGE_RELAY_PATH, it) }
+                    }
+                    LocalBroadcastManager.getInstance(this@JS8EngineService).sendBroadcast(intent)
+                    if (notify) {
+                        showMessageNotification(
+                            from,
+                            if (incomplete) getString(R.string.notification_message_incomplete, text) else text
+                        )
+                    }
+                }
             }
         }
     }
@@ -2984,14 +3026,15 @@ class JS8EngineService : Service() {
      * Broadcast a request to queue a TX message.
      * The UI layer (TransmitViewModel) will handle adding it to the TX queue.
      */
-    private fun broadcastQueueTx(text: String, directed: String?, priority: Int = 0) {
+    private fun broadcastQueueTx(text: String, directed: String?, priority: Int = 0): Boolean {
         val intent = Intent(ACTION_QUEUE_TX).apply {
             putExtra(EXTRA_QUEUE_TX_TEXT, text)
             directed?.let { putExtra(EXTRA_QUEUE_TX_DIRECTED, it) }
             putExtra(EXTRA_QUEUE_TX_PRIORITY, priority)
         }
-        LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
-        Log.d(TAG, "Broadcast queue TX: text='$text' directed=$directed priority=$priority")
+        val delivered = LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
+        Log.d(TAG, "Broadcast queue TX: text='$text' directed=$directed priority=$priority delivered=$delivered")
+        return delivered
     }
 
     private fun showMessageNotification(from: String, text: String) {
@@ -3221,7 +3264,9 @@ class JS8EngineService : Service() {
      *   FROM: TO MSG            (multi-frame: command frame)
      *   payload...              (multi-frame: data frames follow)
      */
-    private fun maybeHandleIncomingMessage(text: String, snr: Int, freq: Float, type: Int, submode: Int) {
+    private fun maybeHandleIncomingMessage(
+        text: String, snr: Int, freq: Float, type: Int, submode: Int, autoAnswered: Boolean
+    ) {
         val callsign = getConfiguredCallsign()
         Log.d(TAG, "maybeHandleIncomingMessage: text='$text' type=$type callsign=$callsign")
         if (callsign == null) {
@@ -3231,10 +3276,12 @@ class JS8EngineService : Service() {
         
         val now = System.currentTimeMillis()
         cleanupMsgBuffers(now)
-        
+        // A buffer whose last frame was missed would take the next station's data frames
+        if (isFirstFrame(type)) dropMsgBuffer(freq, submode)
+
         // Try parsing as a directed command (MSG header frame)
         val directed = parseDirectedCommand(text)
-        
+
         if (directed != null && (directed.command.uppercase() == Js8Commands.CMD_MSG || directed.command.uppercase() == Js8Commands.CMD_MSG_TO)) {
             // This is a MSG command frame
             val isForMe = isSelfCallsign(callsign, directed.to)
@@ -3269,7 +3316,7 @@ class JS8EngineService : Service() {
             }
             
             // Buffer the MSG command and wait for data frames
-            val key = findMatchingMsgBufferKey(freq) ?: Math.round(freq)
+            val key = submode to Math.round(freq)
             val buffer = MsgBuffer(
                 from = directed.from.trim().uppercase(),
                 to = directed.to.trim().uppercase(),
@@ -3280,9 +3327,7 @@ class JS8EngineService : Service() {
                 timeoutMs = 4 * framePeriodMs(submode),
                 parts = if (initialPayload.isNotBlank()) mutableListOf(initialPayload) else mutableListOf()
             )
-            synchronized(msgLock) {
-                msgBuffers[key] = buffer
-            }
+            putMsgBuffer(key, buffer)
             Log.d(TAG, "maybeHandleIncomingMessage: buffered MSG command, waiting for data frames")
             
             // If last frame with no payload, it's an empty MSG (shouldn't happen normally)
@@ -3294,14 +3339,15 @@ class JS8EngineService : Service() {
             }
             return
         }
-        
+
         // Not a directed command - check if it's a data frame for a buffered MSG
         if (!DecodedMessage.isDataFrame(type)) {
+            if (directed != null) threadDirectedReply(directed, callsign, snr, freq, type, submode, now, autoAnswered)
             return
         }
         
         val result = synchronized(msgLock) {
-            val key = findMatchingMsgBufferKey(freq) ?: return@synchronized null
+            val key = findMatchingMsgBufferKey(freq, submode) ?: return@synchronized null
             val buffer = msgBuffers[key] ?: return@synchronized null
             buffer.parts.add(text)
             buffer.lastUpdated = now
@@ -3326,27 +3372,108 @@ class JS8EngineService : Service() {
         val frequency: Float,
         var lastUpdated: Long,
         val timeoutMs: Long,
+        /** Null for a MSG */
+        val replyHeader: String? = null,
+        /** False when autoreply answered the header frame */
+        val notify: Boolean = true,
         val parts: MutableList<String> = mutableListOf()
     )
-    
-    private val msgBuffers = mutableMapOf<Int, MsgBuffer>()
+
+    // Another submode can share the rounded tone
+    private val msgBuffers = mutableMapOf<Pair<Int, Int>, MsgBuffer>()
     private val msgLock = Any()
-    
-    private fun cleanupMsgBuffers(now: Long) {
-        synchronized(msgLock) {
-            msgBuffers.entries.removeIf { (_, buffer) ->
-                now - buffer.lastUpdated > buffer.timeoutMs
-            }
+
+    private fun putMsgBuffer(key: Pair<Int, Int>, buffer: MsgBuffer) {
+        val replaced = synchronized(msgLock) { msgBuffers.put(key, buffer) }
+        replaced?.let { deliverReply(it, incomplete = true) }
+    }
+
+    private fun dropMsgBuffer(freq: Float, submode: Int) {
+        val dropped = synchronized(msgLock) {
+            findMatchingMsgBufferKey(freq, submode)?.let { msgBuffers.remove(it) }
         }
+        dropped?.let { deliverReply(it, incomplete = true) }
+    }
+
+    private fun threadDirectedReply(
+        directed: DirectedCommand,
+        callsign: String,
+        snr: Int,
+        freq: Float,
+        type: Int,
+        submode: Int,
+        now: Long,
+        autoAnswered: Boolean
+    ) {
+        val from = directed.from.trim().uppercase()
+        // <....> stands in for a compound callsign sent in an earlier frame
+        if (from.isBlank() || from.startsWith("<") || isSelfCallsign(callsign, from)) return
+        val isForMyGroup = isSubscribedGroup(directed.to)
+        if (!isForMyGroup && !isSelfCallsign(callsign, directed.to)) return
+        val header = replyHeaderText(directed.command, directed.payload) ?: return
+
+        if (isLastFrame(type)) {
+            if (header.isEmpty()) return
+            val conversationId = if (isForMyGroup) directed.to else from
+            Log.i(TAG, "Reply received (single frame): from=$from to=${directed.to} text='$header'")
+            persistIncomingMessage(from, header, snr, freq, null, conversationId, notify = !autoAnswered)
+            return
+        }
+
+        val key = submode to Math.round(freq)
+        putMsgBuffer(key, MsgBuffer(
+            from = from,
+            to = directed.to.trim().uppercase(),
+            snr = snr,
+            frequency = freq,
+            lastUpdated = now,
+            timeoutMs = 4 * framePeriodMs(submode),
+            replyHeader = header,
+            notify = !autoAnswered
+        ))
     }
     
-    private fun findMatchingMsgBufferKey(freq: Float): Int? {
+    private fun cleanupMsgBuffers(now: Long) {
+        val expired = synchronized(msgLock) {
+            val stale = msgBuffers.filterValues { now - it.lastUpdated > it.timeoutMs }
+            stale.keys.forEach { msgBuffers.remove(it) }
+            stale.values.toList()
+        }
+        expired.forEach { deliverReply(it, incomplete = true) }
+    }
+
+    private fun flushMsgBuffers() {
+        val pending = synchronized(msgLock) {
+            msgBuffers.values.toList().also { msgBuffers.clear() }
+        }
+        pending.forEach { deliverReply(it, incomplete = true) }
+    }
+
+    private fun deliverReply(buffer: MsgBuffer, incomplete: Boolean) {
+        val header = buffer.replyHeader ?: return
+        val text = assembleReplyText(header, buffer.parts)
+        if (text.isEmpty()) return
+        val conversationId = if (isSubscribedGroup(buffer.to)) buffer.to else buffer.from
+        Log.i(TAG, "Reply received (multi-frame, incomplete=$incomplete): from=${buffer.from} to=${buffer.to} text='$text'")
+        // Must sort before the next transmission on its tone
+        persistIncomingMessage(
+            buffer.from, text, buffer.snr, buffer.frequency, null, conversationId,
+            notify = buffer.notify, incomplete = incomplete, timestamp = buffer.lastUpdated
+        )
+    }
+    
+    private fun findMatchingMsgBufferKey(freq: Float, submode: Int): Pair<Int, Int>? {
         synchronized(msgLock) {
-            return findClosestMsgBufferKey(msgBuffers.keys, freq)
+            val tones = msgBuffers.keys.filter { it.first == submode }.map { it.second }
+            return findClosestMsgBufferKey(tones, freq)?.let { submode to it }
         }
     }
     
     private fun processMsgBuffer(buffer: MsgBuffer, myCallsign: String) {
+        if (buffer.replyHeader != null) {
+            deliverReply(buffer, incomplete = false)
+            return
+        }
         // Data frames split at arbitrary byte boundaries, not word boundaries.
         val fullText = assembleMsgPayload(buffer.parts).trim()
         // Remove end-of-message marker if present
@@ -3383,47 +3510,47 @@ class JS8EngineService : Service() {
         return groups.contains(target.uppercase())
     }
 
-    private fun maybeHandleAutoReply(text: String, snr: Int, mode: Int) {
-        if (!isAutoreplyEnabled()) return
+    /** True when it queued a reply */
+    private fun maybeHandleAutoReply(text: String, snr: Int, mode: Int): Boolean {
+        if (!isAutoreplyEnabled()) return false
         val prefs = PreferenceManager.getDefaultSharedPreferences(this)
         val callsign = getConfiguredCallsign()
         if (callsign == null) {
             warnMissingCallsign()
-            return
+            return false
         }
-        if (isTransmitActive()) return
+        if (isTransmitActive()) return false
 
         val heartbeat = parseHeartbeat(text)
         if (heartbeat != null) {
-            if (isSelfCallsign(callsign, heartbeat.from)) return
+            if (isSelfCallsign(callsign, heartbeat.from)) return false
             val snrText = formatSNR(snr)
-            if (snrText.isEmpty()) return
+            if (snrText.isEmpty()) return false
             val target = heartbeat.from.trim().uppercase()
             val payload = "$callsign: $target HEARTBEAT SNR $snrText"
             Log.i(TAG, "Auto HB ACK: from=$target snr=$snrText text='$payload'")
-            broadcastQueueTx(payload, null, priority = 1)
-            return
+            return broadcastQueueTx(payload, null, priority = 1)
         }
 
-        val directed = parseDirectedCommand(text) ?: return
-        if (!shouldReplyToDirected(callsign, directed)) return
+        val directed = parseDirectedCommand(text) ?: return false
+        if (!shouldReplyToDirected(callsign, directed)) return false
         val cmdUpper = directed.command.uppercase()
-        when {
+        return when {
             cmdUpper == "SNR?" || cmdUpper == "?" -> {
                 val snrText = formatSNR(snr)
-                if (snrText.isEmpty()) return
+                if (snrText.isEmpty()) return false
                 Log.i(TAG, "Auto SNR reply: from=${directed.from} snr=$snrText")
                 broadcastQueueTx("$callsign: ${directed.from} SNR $snrText", null, priority = 1)
             }
             cmdUpper == "INFO?" -> {
                 val info = prefs.getString(PREF_MY_INFO, "")?.trim().orEmpty()
-                if (info.isBlank()) return
+                if (info.isBlank()) return false
                 Log.i(TAG, "Auto INFO reply: from=${directed.from}")
                 broadcastQueueTx("$callsign: ${directed.from} INFO $info", null, priority = 1)
             }
             cmdUpper == "STATUS?" -> {
                 val status = prefs.getString(PREF_MY_STATUS, "")?.trim().orEmpty()
-                if (status.isBlank()) return
+                if (status.isBlank()) return false
                 Log.i(TAG, "Auto STATUS reply: from=${directed.from}")
                 broadcastQueueTx("$callsign: ${directed.from} STATUS $status", null, priority = 1)
             }
@@ -3432,24 +3559,24 @@ class JS8EngineService : Service() {
                     exclude = setOf(directed.from.trim().uppercase(), callsign),
                     limit = HEARD_LIMIT
                 )
-                if (heard.isEmpty()) return
+                if (heard.isEmpty()) return false
                 Log.i(TAG, "Auto HEARING reply: from=${directed.from}, count=${heard.size}")
                 broadcastQueueTx("$callsign: ${directed.from} HEARING ${heard.joinToString(" ")}", null, priority = 1)
             }
             cmdUpper == "GRID?" -> {
                 val grid = prefs.getString("grid", "")?.trim().orEmpty().uppercase()
-                if (grid.isBlank()) return
+                if (grid.isBlank()) return false
                 Log.i(TAG, "Auto GRID reply: from=${directed.from}")
                 broadcastQueueTx("$callsign: ${directed.from} GRID $grid", null, priority = 1)
             }
             cmdUpper == "AGN?" -> {
                 val message = lastTxMessage.trimEnd()
-                if (message.isBlank()) return
+                if (message.isBlank()) return false
                 Log.i(TAG, "Auto AGN reply: from=${directed.from}")
                 broadcastQueueTx(message, null, priority = 1)
             }
             // MSG auto-ACK is handled in maybeHandleIncomingMessage after full message is received
-            else -> return
+            else -> false
         }
     }
 
@@ -3554,7 +3681,10 @@ class JS8EngineService : Service() {
             command = ">"
             payload = tokens.drop(index + 1).joinToString(" ")
         } else {
-            if (index + 1 >= tokens.size) return null
+            if (index + 1 >= tokens.size) {
+                // Free text: its words follow in data frames
+                return if (from.isBlank()) null else DirectedCommand(from, to, "", "")
+            }
             val remainder = tokens.drop(index + 1).joinToString(" ")
             val match = Js8Commands.matchAt(remainder)
             if (match != null) {
@@ -3745,6 +3875,8 @@ class JS8EngineService : Service() {
         return target.contains("@")
     }
 
+
+    private fun isFirstFrame(type: Int): Boolean = (type and 0x1) != 0
 
     private fun isLastFrame(type: Int): Boolean = (type and 0x2) != 0
 

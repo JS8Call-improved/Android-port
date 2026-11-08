@@ -75,12 +75,14 @@ class MessageBubbleAdapter : ListAdapter<MessageEntity, RecyclerView.ViewHolder>
         private val messageText: TextView = itemView.findViewById(R.id.message_text)
         private val timestampText: TextView = itemView.findViewById(R.id.timestamp_text)
         private val snrText: TextView = itemView.findViewById(R.id.snr_text)
+        private val incompleteText: TextView = itemView.findViewById(R.id.incomplete_text)
 
         private val timeFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
 
         fun bind(message: MessageEntity) {
             messageText.text = message.text
             timestampText.text = timeFormat.format(Date(message.timestamp))
+            incompleteText.visibility = if (message.isIncomplete()) View.VISIBLE else View.GONE
 
             // Show sender callsign for group conversations
             val sender = message.senderCallsign
