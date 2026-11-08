@@ -74,6 +74,16 @@ struct JS8Engine_Native {
   };
   std::vector<CompoundCall> compound_calls;
 
+  struct SeenFrame {
+    int slot = 0;
+    std::int64_t drift = 0;
+    int mode = 0;
+    int type = 0;
+    std::string data;
+    float frequency = 0;
+  };
+  std::vector<SeenFrame> seen_frames;
+
   bool tx_boost_enabled = false;
   std::mutex tx_boost_mutex;
 
@@ -429,6 +439,38 @@ static std::string render_decoded_text(JS8Engine_Native* native,
   return frame;
 }
 
+static int period_seconds(int event_mode) {
+  switch (event_mode) {
+    case 1: return 10;
+    case 2: return 6;
+    case 4: return 30;
+    case 8: return 4;
+    default: return 15;
+  }
+}
+
+static int slot_of(int utc, int mode) {
+  // Plain rounding splits Turbo retries across two periods
+  int const period = period_seconds(mode);
+  int const seconds = utc / 10000 * 3600 + utc / 100 % 100 * 60 + utc % 100;
+  return (seconds - period / 3 + 86400) % 86400 / period;
+}
+
+static bool is_repeat(JS8Engine_Native* native, js8core::events::Decoded const& decoded) {
+  auto& seen = native->seen_frames;
+  std::erase_if(seen, [&](auto const& f) { return f.slot != slot_of(decoded.utc, f.mode); });
+  for (auto const& f : seen) {
+    // A clock change can give the next period the slot of the last one
+    if (f.drift == decoded.capture_drift_ms && f.mode == decoded.mode && f.type == decoded.type &&
+        f.data == decoded.data && std::abs(f.frequency - decoded.frequency) <= 10.0f) {
+      return true;
+    }
+  }
+  seen.push_back({slot_of(decoded.utc, decoded.mode), decoded.capture_drift_ms, decoded.mode,
+                  decoded.type, decoded.data, decoded.frequency});
+  return false;
+}
+
 // Event callback that marshals C++ events to Java
 static void event_callback(JS8Engine_Native* native, js8core::events::Variant const& event) {
   if (!native || !native->callback_handler) return;
@@ -437,6 +479,16 @@ static void event_callback(JS8Engine_Native* native, js8core::events::Variant co
   if (!env) return;
 
   std::lock_guard<std::mutex> lock(native->callback_mutex);
+
+  if (auto* decoded = std::get_if<js8core::events::Decoded>(&event)) {
+    // Before the render, which uses up compound callsign entries
+    if (is_repeat(native, *decoded)) {
+      __android_log_print(ANDROID_LOG_DEBUG, "JS8Engine_Native",
+                          "Repeated decode dropped: raw='%s', snr=%d, mode=%d",
+                          decoded->data.c_str(), decoded->snr, decoded->mode);
+      return;
+    }
+  }
 
   // Get callback handler class
   jclass handler_class = env->GetObjectClass(native->callback_handler);
