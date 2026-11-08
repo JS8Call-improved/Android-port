@@ -2694,7 +2694,8 @@ class JS8EngineService : Service() {
     }
 
     private fun sendHeartbeat() {
-        if (isTransmitActive()) {
+        // isTransmitActive() lags a send the engine just accepted
+        if (isTransmitActive() || engine?.isTransmitting() == true) {
             Log.i(TAG, "Skipping heartbeat due to active transmission, rescheduling")
             scheduleHeartbeat(false)
             return
