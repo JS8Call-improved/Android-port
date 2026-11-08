@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/action_retry"
+        android:title="@string/messages_retry" />
+    <item
+        android:id="@+id/action_cancel_send"
+        android:title="@string/messages_cancel_send" />
+    <item
+        android:id="@+id/action_delete"
+        android:title="@string/messages_delete" />
+</menu>

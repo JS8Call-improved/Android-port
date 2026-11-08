@@ -35,6 +35,7 @@ class EverythingFragment : Fragment() {
         SpeedChip.bind(view.findViewById(R.id.speed_chip))
 
         ComposeBarController(
+            fragment = this,
             root = view,
             commandMenuRes = R.menu.broadcast_command_menu,
             onSend = { text -> queueBroadcast(text) }

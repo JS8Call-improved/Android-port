@@ -2775,6 +2775,7 @@ class JS8EngineService : Service() {
         val text = intent.getStringExtra(EXTRA_TX_TEXT)?.trim().orEmpty()
         if (text.isEmpty()) {
             broadcastError("Empty TX message")
+            broadcastTxState(TX_STATE_FAILED, refused = true)
             return
         }
         // Manual sends stop the heartbeat schedule; heartbeats don't
@@ -2784,6 +2785,7 @@ class JS8EngineService : Service() {
         val callsign = getConfiguredCallsign()
         if (callsign == null) {
             warnMissingCallsign()
+            broadcastTxState(TX_STATE_FAILED)
             return
         }
         val grid = prefs.getString("grid", "")?.trim().orEmpty().uppercase()
@@ -2841,7 +2843,8 @@ class JS8EngineService : Service() {
         } else {
             Log.e(TAG, "TX request rejected")
             broadcastError("Failed to start transmit")
-            broadcastTxState(TX_STATE_FAILED)
+            // The engine also turns sends down while it stops or starts
+            broadcastTxState(TX_STATE_FAILED, refused = !TxMessageClassifier.isEncodable(text))
         }
     }
 
@@ -2882,9 +2885,11 @@ class JS8EngineService : Service() {
         }
     }
 
-    private fun broadcastTxState(state: String) {
+    /** A [refused] send counts as failed even though it never reached the air. */
+    private fun broadcastTxState(state: String, refused: Boolean = false) {
         val intent = Intent(ACTION_TX_STATE).apply {
             putExtra(EXTRA_TX_STATE, state)
+            putExtra(EXTRA_TX_REFUSED, refused)
         }
         LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
     }
@@ -4320,6 +4325,7 @@ class JS8EngineService : Service() {
         const val EXTRA_TX_FORCE_IDENTIFY = "tx_force_identify"
         const val EXTRA_TX_FORCE_DATA = "tx_force_data"
         const val EXTRA_TX_STATE = "tx_state"
+        const val EXTRA_TX_REFUSED = "tx_refused"
         const val EXTRA_TX_SENT_TEXT = "tx_sent_text"
         const val EXTRA_TX_SENT_FREQ = "tx_sent_freq"
         const val EXTRA_RADIO_FREQUENCY_HZ = "radio_frequency_hz"

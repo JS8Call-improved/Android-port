@@ -1,49 +1,68 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/compose_container"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:background="?attr/colorSurface"
-    android:gravity="bottom"
-    android:orientation="horizontal"
+    android:orientation="vertical"
     android:paddingHorizontal="8dp"
     android:paddingVertical="8dp">
 
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/command_button"
-        style="@style/Widget.Material3.Button.IconButton"
-        android:layout_width="48dp"
-        android:layout_height="48dp"
-        android:contentDescription="@string/compose_commands"
-        app:icon="@drawable/ic_bolt"
-        app:iconTint="?attr/colorOnSurfaceVariant" />
-
-    <EditText
-        android:id="@+id/compose_input"
-        android:layout_width="0dp"
+    <com.google.android.material.chip.Chip
+        android:id="@+id/queue_chip"
+        style="@style/Widget.Material3.Chip.Assist"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginHorizontal="4dp"
-        android:layout_weight="1"
-        android:background="@drawable/compose_input_background"
-        android:hint="@string/messages_compose_hint"
-        android:imeOptions="actionSend"
-        android:importantForAutofill="no"
-        android:inputType="textShortMessage|textCapCharacters"
-        android:maxLength="240"
-        android:maxLines="4"
-        android:minHeight="48dp"
-        android:paddingHorizontal="16dp"
-        android:paddingVertical="12dp"
-        android:textAppearance="?attr/textAppearanceBodyLarge"
-        android:textColorHint="?attr/colorOnSurfaceVariant" />
+        android:layout_marginStart="4dp"
+        android:visibility="gone"
+        app:chipIcon="@drawable/ic_schedule"
+        tools:text="2 queued"
+        tools:visibility="visible" />
 
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/send_button"
-        style="@style/Widget.Material3.Button.IconButton.Filled"
-        android:layout_width="48dp"
-        android:layout_height="48dp"
-        android:contentDescription="@string/messages_send"
-        app:icon="@drawable/ic_send" />
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="bottom"
+        android:orientation="horizontal">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/command_button"
+            style="@style/Widget.Material3.Button.IconButton"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:contentDescription="@string/compose_commands"
+            app:icon="@drawable/ic_bolt"
+            app:iconTint="?attr/colorOnSurfaceVariant" />
+
+        <EditText
+            android:id="@+id/compose_input"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginHorizontal="4dp"
+            android:layout_weight="1"
+            android:background="@drawable/compose_input_background"
+            android:hint="@string/messages_compose_hint"
+            android:imeOptions="actionSend"
+            android:importantForAutofill="no"
+            android:inputType="textShortMessage|textCapCharacters"
+            android:maxLength="240"
+            android:maxLines="4"
+            android:minHeight="48dp"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="12dp"
+            android:textAppearance="?attr/textAppearanceBodyLarge"
+            android:textColorHint="?attr/colorOnSurfaceVariant" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/send_button"
+            style="@style/Widget.Material3.Button.IconButton.Filled"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:contentDescription="@string/messages_send"
+            app:icon="@drawable/ic_send" />
+
+    </LinearLayout>
 
 </LinearLayout>

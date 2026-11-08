@@ -26,11 +26,20 @@ import java.util.Locale
  */
 class TransmitViewModel(application: Application) : AndroidViewModel(application) {
 
+    /** A queue entry as the queue sheet shows it. */
+    data class QueueItem(val message: TransmitMessage, val sending: Boolean)
+
     private val _txState = MutableLiveData<TransmitState>(TransmitState.IDLE)
     val txState: LiveData<TransmitState> = _txState
 
+    private val _queue = MutableLiveData<List<QueueItem>>(emptyList())
+    val queue: LiveData<List<QueueItem>> = _queue
+
     private val txQueue = mutableListOf<TransmitMessage>()
     private var activeMessage: TransmitMessage? = null
+    private var activeOnAir = false
+    // Failed thread sends by message id, kept for Retry
+    private val failedMessages = mutableMapOf<Long, TransmitMessage>()
     private val sendOrder = Mutex()
     private val repository by lazy { MessageRepository.getInstance(getApplication()) }
 
@@ -40,17 +49,21 @@ class TransmitViewModel(application: Application) : AndroidViewModel(application
     fun queueMessage(text: String, directed: String? = null, priority: Int = 0, messageId: Long? = null) {
         if (text.isBlank()) return
 
-        val message = TransmitMessage(
-            text = text.trim(),
-            directed = directed?.takeIf { it.isNotBlank() },
-            priority = priority,
-            messageId = messageId
+        enqueue(
+            TransmitMessage(
+                text = text.trim(),
+                directed = directed?.takeIf { it.isNotBlank() },
+                priority = priority,
+                messageId = messageId
+            )
         )
+    }
 
+    private fun enqueue(message: TransmitMessage) {
         txQueue.add(message)
         txQueue.sortByDescending { it.priority }
-
-        if (activeMessage == null) _txState.value = TransmitState.QUEUED
+        if (_txState.value == TransmitState.IDLE) _txState.value = TransmitState.QUEUED
+        publishQueue()
     }
 
     /** Queue a typed broadcast, recording direct MSG commands. */
@@ -95,8 +108,59 @@ class TransmitViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    private fun publishQueue() {
+        _queue.value = txQueue.map { QueueItem(it, it === activeMessage) }
+    }
+
+    private fun settleState() {
+        _txState.value = if (txQueue.isEmpty()) TransmitState.IDLE else TransmitState.QUEUED
+        publishQueue()
+    }
+
+    /** Drops a waiting send and its bubble. The one handed to the engine stays. */
+    fun cancel(message: TransmitMessage) {
+        if (message === activeMessage || !txQueue.removeAll { it === message }) return
+        message.messageId?.let { deleteBubble(it) }
+        // A heartbeat the service started on its own can be on the air
+        if (activeMessage == null && _txState.value != TransmitState.TRANSMITTING) settleState() else publishQueue()
+    }
+
+    fun cancelAll() {
+        txQueue.filter { it !== activeMessage }.forEach { cancel(it) }
+    }
+
+    /** Drops a thread send by message id; false when it is already with the engine. */
+    fun discard(messageId: Long): Boolean {
+        if (activeMessage?.messageId == messageId) return false
+        failedMessages.remove(messageId)
+        val queued = txQueue.firstOrNull { it.messageId == messageId }
+        if (queued != null) cancel(queued) else deleteBubble(messageId)
+        return true
+    }
+
+    private fun deleteBubble(messageId: Long) {
+        viewModelScope.launch { repository.deleteMessage(messageId) }
+    }
+
+    fun canRetry(messageId: Long): Boolean = messageId in failedMessages
+
+    fun retry(messageId: Long) {
+        if (messageId !in failedMessages) return
+        viewModelScope.launch {
+            sendOrder.withLock {
+                repository.updateMessageStatus(messageId, MessageEntity.STATUS_PENDING)
+                // Deleted or already retried while the status was saving
+                val message = failedMessages.remove(messageId) ?: return@withLock
+                enqueue(message.copy(timestamp = System.currentTimeMillis()))
+            }
+            processQueue()
+        }
+    }
+
     fun beginTransmission(message: TransmitMessage) {
         activeMessage = message
+        activeOnAir = false
+        publishQueue()
     }
 
     fun hasActiveTransmission(): Boolean = activeMessage != null
@@ -105,6 +169,7 @@ class TransmitViewModel(application: Application) : AndroidViewModel(application
      * Start transmitting (called when engine starts TX).
      */
     fun startTransmitting() {
+        if (activeMessage != null) activeOnAir = true
         _txState.value = TransmitState.TRANSMITTING
     }
 
@@ -119,23 +184,35 @@ class TransmitViewModel(application: Application) : AndroidViewModel(application
         val completed = activeMessage
         updateStatus(completed, MessageEntity.STATUS_SENT)
         activeMessage = null
-        if (completed != null) txQueue.remove(completed)
-
-        _txState.value = if (txQueue.isEmpty()) {
-            TransmitState.IDLE
-        } else {
-            TransmitState.QUEUED
-        }
+        if (completed != null) txQueue.removeAll { it === completed }
+        settleState()
     }
 
-    fun transmissionFailed() {
-        updateStatus(activeMessage, MessageEntity.STATUS_FAILED)
+    /** Drops a send cut off on the air or [refused]. Any other stays at the head and returns false. */
+    fun transmissionFailed(refused: Boolean = false): Boolean {
+        val failed = activeMessage
         activeMessage = null
-        _txState.value = if (txQueue.isEmpty()) {
-            TransmitState.IDLE
-        } else {
-            TransmitState.QUEUED
+        if (failed != null && !activeOnAir && !refused) {
+            settleState()
+            return false
         }
+        updateStatus(failed, MessageEntity.STATUS_FAILED)
+        if (failed != null) {
+            txQueue.removeAll { it === failed }
+            failed.messageId?.let { failedMessages[it] = failed }
+        }
+        settleState()
+        return true
+    }
+
+    /** TX broadcasts stop reaching us; a send in flight may go out unseen. */
+    fun stopListening() {
+        if (activeMessage != null) activeOnAir = true
+    }
+
+    /** Monitoring stopped. A send that never reached the air waits for the next start. */
+    fun engineStopped() {
+        transmissionFailed()
     }
 
     /**
