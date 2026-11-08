@@ -22,7 +22,7 @@ internal class TestEngine(private val submode: Int = SUBMODE_NORMAL) : AutoClose
 
     private val engine = JS8Engine.create(
         sampleRateHz = SAMPLE_RATE,
-        submodes = rxMask(submode),
+        submodes = rxMaskOf(submode),
         enableTxAudioTap = true,
         callbackHandler = object : JS8Engine.CallbackHandler {
             override fun onDecoded(
@@ -130,6 +130,7 @@ internal class TestEngine(private val submode: Int = SUBMODE_NORMAL) : AutoClose
         const val TAG = "TestEngine"
         const val SUBMODE_NORMAL = 0
         const val SUBMODE_TURBO = 2
+        const val SUBMODE_SLOW = 4
         const val MINUTE_MS = 60_000L
         const val CHUNK = 4_096
         const val POLL_MS = 50L
@@ -138,15 +139,10 @@ internal class TestEngine(private val submode: Int = SUBMODE_NORMAL) : AutoClose
         const val TX_TIMEOUT_MS = 45_000L
         const val DECODE_TIMEOUT_MS = 30_000L
 
-        fun rxMask(submode: Int): Int = when (submode) {
-            SUBMODE_NORMAL -> 1 shl 0
-            SUBMODE_TURBO -> 1 shl 2
-            else -> error("unsupported test submode $submode")
-        }
-
         fun periodMs(submode: Int): Long = when (submode) {
             SUBMODE_NORMAL -> 15_000L
             SUBMODE_TURBO -> 6_000L
+            SUBMODE_SLOW -> 30_000L
             else -> error("unsupported test submode $submode")
         }
     }

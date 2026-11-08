@@ -406,3 +406,15 @@ class JS8Engine private constructor(
         fun onTxAudio(samples: ShortArray, sampleRateHz: Int) {}
     }
 }
+
+/** Turns SUBMODE_ values into the mask that [JS8Engine.create] and [JS8Engine.setSubmodes] take. */
+fun rxMaskOf(submode: Int, vararg more: Int): Int = intArrayOf(submode, *more).fold(0) { mask, value ->
+    mask or when (value) {
+        0 -> 1 shl 0
+        1 -> 1 shl 1
+        2 -> 1 shl 2
+        4 -> 1 shl 3
+        8 -> 1 shl 4
+        else -> throw IllegalArgumentException("unknown submode $value")
+    }
+}
