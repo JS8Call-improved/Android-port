@@ -3,13 +3,21 @@ package com.js8call.example.util
 import java.util.Locale
 
 object CallsignValidator {
-    private val baseCallsign = Regex("(?:[A-Z]{1,3}\\d[A-Z]{1,4}|\\d[A-Z]{1,3}\\d[A-Z]{1,4})")
+    private val baseCallsign = Regex("(?:[A-Z]{1,3}\\d[A-Z]{1,4}|\\d[A-Z]{1,3}\\d[A-Z]{1,4}|[A-Z]\\d\\d[A-Z]{1,4})")
+    private val groupShape = Regex("@[A-Z0-9](?:[A-Z0-9/]*[A-Z0-9])?")
+    private val callsignChars = Regex("[A-Z0-9/]+")
 
     fun isAmateurCallsign(value: String): Boolean {
         val token = value.trim().uppercase(Locale.US)
-        if (token.length !in 3..12 || !token.matches(Regex("[A-Z0-9/]+"))) return false
+        if (token.length !in 3..12 || !token.matches(callsignChars)) return false
 
         return token.split('/').any { baseCallsign.matches(it) }
+    }
+
+    /** An @group the engine can encode, like @ALLCALL or @DX/NA. */
+    fun isGroup(value: String): Boolean {
+        val token = value.trim().uppercase(Locale.US)
+        return groupShape.matches(token) && token.count { it != '/' } <= 9
     }
 
     fun matches(value: String, other: String): Boolean {

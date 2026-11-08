@@ -1,47 +1,43 @@
 package com.js8call.example.ui
 
 import android.app.Application
+import android.content.Intent
+import android.database.sqlite.SQLiteException
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.viewModelScope
+import androidx.localbroadcastmanager.content.LocalBroadcastManager
+import com.js8call.example.MainActivity
 import com.js8call.example.data.MessageEntity
 import com.js8call.example.data.MessageRepository
 import com.js8call.example.model.TransmitMessage
 import com.js8call.example.model.TransmitState
+import com.js8call.example.util.CallsignValidator
 import com.js8call.example.util.Js8Commands
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import java.util.Locale
 
 /**
- * ViewModel for the Transmit screen.
- * Manages message composition and TX queue.
+ * ViewModel for the TX queue and transmit state.
  */
 class TransmitViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _txState = MutableLiveData<TransmitState>(TransmitState.IDLE)
     val txState: LiveData<TransmitState> = _txState
 
-    private val _queue = MutableLiveData<List<TransmitMessage>>(emptyList())
-    val queue: LiveData<List<TransmitMessage>> = _queue
-
-    private val _composedMessage = MutableLiveData<String>("")
-    val composedMessage: LiveData<String> = _composedMessage
-
-    private val _directedTo = MutableLiveData<String>("")
-    val directedTo: LiveData<String> = _directedTo
-
-    private val _txOffsetHz = MutableLiveData<Float>(1500f)
-    val txOffsetHz: LiveData<Float> = _txOffsetHz
-
     private val txQueue = mutableListOf<TransmitMessage>()
     private var activeMessage: TransmitMessage? = null
+    private val sendOrder = Mutex()
     private val repository by lazy { MessageRepository.getInstance(getApplication()) }
 
     /**
      * Queue a message for transmission.
-     * @param clearComposed If true, clears the composed message field (for user-initiated sends)
      */
-    fun queueMessage(text: String, directed: String? = null, priority: Int = 0, clearComposed: Boolean = true, messageId: Long? = null) {
+    fun queueMessage(text: String, directed: String? = null, priority: Int = 0, messageId: Long? = null) {
         if (text.isBlank()) return
 
         val message = TransmitMessage(
@@ -54,29 +50,43 @@ class TransmitViewModel(application: Application) : AndroidViewModel(application
         txQueue.add(message)
         txQueue.sortByDescending { it.priority }
 
-        _queue.value = txQueue.toList()
         if (activeMessage == null) _txState.value = TransmitState.QUEUED
+    }
 
-        // User sends start a new composition; automated queue entries do not.
-        if (clearComposed) {
-            _composedMessage.value = ""
-            _directedTo.value = ""
+    /** Queue a typed broadcast, recording direct MSG commands. */
+    fun queueManualMessage(text: String) {
+        val upper = text.trim().uppercase(Locale.ROOT)
+        saveAndQueue(upper, null, outgoingSavedMessage(upper, null))
+    }
+
+    /** Queue a send typed in [callsign]'s thread, saving it there first. */
+    fun queueThreadMessage(callsign: String, text: String) {
+        val addressed = threadText(callsign, text)
+        saveAndQueue(addressed, callsign, callsign to threadBubbleText(callsign, addressed))
+    }
+
+    // One at a time, so a send waiting on its insert is not overtaken
+    private fun saveAndQueue(text: String, directed: String?, saved: Pair<String, String>?) {
+        viewModelScope.launch {
+            sendOrder.withLock {
+                val id = saved?.let { (to, body) -> insertOutgoing(to, body) }
+                queueMessage(text, directed, messageId = id)
+            }
+            processQueue()
         }
     }
 
-    /** Queue a manual Transmit-screen message, recording direct MSG commands. */
-    fun queueManualMessage(text: String, directed: String?, onQueued: () -> Unit) {
-        val saved = outgoingSavedMessage(text, directed)
-        if (saved == null) {
-            queueMessage(text, directed)
-            onQueued()
-            return
-        }
-        viewModelScope.launch {
-            val id = repository.insertOutgoingMessage(saved.first, saved.second)
-            queueMessage(text, directed, messageId = id)
-            onQueued()
-        }
+    private suspend fun insertOutgoing(to: String, body: String): Long? = try {
+        repository.insertOutgoingMessage(to, body)
+    } catch (e: SQLiteException) {
+        // Still send it; it just won't show in the thread
+        Log.e(TAG, "Couldn't save outgoing message", e)
+        null
+    }
+
+    private fun processQueue() {
+        LocalBroadcastManager.getInstance(getApplication())
+            .sendBroadcast(Intent(MainActivity.ACTION_PROCESS_TX_QUEUE))
     }
 
     private fun updateStatus(message: TransmitMessage?, status: Int) {
@@ -90,71 +100,6 @@ class TransmitViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun hasActiveTransmission(): Boolean = activeMessage != null
-
-    /**
-     * Set composed message text.
-     */
-    fun setComposedMessage(text: String) {
-        _composedMessage.value = text
-    }
-
-    /**
-     * Set directed callsign.
-     */
-    fun setDirectedTo(callsign: String) {
-        _directedTo.value = callsign.uppercase()
-    }
-
-    /**
-     * Set the TX offset frequency in Hz.
-     */
-    fun setTxOffset(offsetHz: Float) {
-        _txOffsetHz.value = offsetHz
-    }
-
-    /**
-     * Get the current TX offset frequency in Hz.
-     */
-    fun getTxOffset(): Float {
-        return _txOffsetHz.value ?: 1500f
-    }
-
-    /**
-     * Send CQ.
-     */
-    fun sendCQ() {
-        queueMessage("CQ CQ CQ", priority = 1)
-    }
-
-    /**
-     * Send SNR report to specific station.
-     */
-    fun sendSnrReport(callsign: String, snr: Int) {
-        queueMessage("$callsign SNR $snr", directed = callsign, priority = 2)
-    }
-
-    /**
-     * Remove message from queue.
-     */
-    fun removeFromQueue(message: TransmitMessage) {
-        txQueue.remove(message)
-        if (message !== activeMessage) updateStatus(message, MessageEntity.STATUS_FAILED)
-        _queue.value = txQueue.toList()
-
-        if (txQueue.isEmpty()) {
-            _txState.value = TransmitState.IDLE
-        }
-    }
-
-    /**
-     * Clear TX queue.
-     */
-    fun clearQueue() {
-        txQueue.filter { it !== activeMessage }.forEach { updateStatus(it, MessageEntity.STATUS_FAILED) }
-        txQueue.clear()
-        _queue.value = emptyList()
-        _txState.value = TransmitState.IDLE
-    }
 
     /**
      * Start transmitting (called when engine starts TX).
@@ -174,10 +119,7 @@ class TransmitViewModel(application: Application) : AndroidViewModel(application
         val completed = activeMessage
         updateStatus(completed, MessageEntity.STATUS_SENT)
         activeMessage = null
-        if (completed != null) {
-            txQueue.remove(completed)
-            _queue.value = txQueue.toList()
-        }
+        if (completed != null) txQueue.remove(completed)
 
         _txState.value = if (txQueue.isEmpty()) {
             TransmitState.IDLE
@@ -202,7 +144,32 @@ class TransmitViewModel(application: Application) : AndroidViewModel(application
     fun getNextMessage(): TransmitMessage? {
         return txQueue.firstOrNull()
     }
+
+    companion object {
+        private const val TAG = "TransmitViewModel"
+    }
 }
+
+/** What goes on the air for [text] typed in [callsign]'s thread. */
+internal fun threadText(callsign: String, text: String): String {
+    // The engine matches the selected call case-sensitively
+    val trimmed = text.trim().uppercase(Locale.ROOT)
+    // Raw text and text already addressed to the station get no prefix
+    if (trimmed.startsWith("`")) return trimmed
+    if (trimmed.substringBefore(' ') == callsign.uppercase(Locale.ROOT)) return trimmed
+    // The engine drops the selected call before CQ, HB or another callsign.
+    return "$callsign $trimmed"
+}
+
+/** What [callsign]'s thread shows for [addressed], the text [threadText] sends. */
+internal fun threadBubbleText(callsign: String, addressed: String): String {
+    outgoingSavedMessage(addressed, callsign)?.let { return it.second }
+    val prefix = "$callsign "
+    return if (addressed.startsWith(prefix, ignoreCase = true)) addressed.drop(prefix.length) else addressed
+}
+
+private val whitespace = Regex("\\s+")
+private val callsignAddress = Regex("[A-Z0-9/]*[0-9][A-Z0-9/]*", RegexOption.IGNORE_CASE)
 
 /** Returns the destination and body for a direct saved MSG, if recognizable. */
 internal fun outgoingSavedMessage(text: String, directed: String?): Pair<String, String>? {
@@ -214,9 +181,13 @@ internal fun outgoingSavedMessage(text: String, directed: String?): Pair<String,
         return target to directCommand.payload
     }
     // Explicitly addressed messages take precedence over the selected destination.
-    val parts = trimmed.split(Regex("\\s+"), limit = 2)
-    if (parts.size != 2 || !Regex("^(?:@[A-Z0-9]+|[A-Z0-9/]*[0-9][A-Z0-9/]*)$", RegexOption.IGNORE_CASE).matches(parts[0])) return null
+    val parts = trimmed.split(whitespace, limit = 2)
+    if (parts.size != 2) return null
+    val address = parts[0]
+    if (!CallsignValidator.isGroup(address) &&
+        !callsignAddress.matches(address)
+    ) return null
     val command = Js8Commands.matchAt(parts[1]) ?: return null
     if (command.command != Js8Commands.CMD_MSG || command.payload.isBlank()) return null
-    return parts[0] to command.payload
+    return address to command.payload
 }

@@ -5,7 +5,6 @@
     <!-- Bottom navigation -->
     <string name="nav_monitor">Monitor</string>
     <string name="nav_messages">Messages</string>
-    <string name="nav_transmit">Transmit</string>
     <string name="nav_settings">Settings</string>
 
     <!-- Monitor screen -->
@@ -57,7 +56,7 @@
     <string name="decodes_send_cq">Send CQ</string>
     <string name="decodes_send_heartbeat">Send heartbeat</string>
     <string name="decodes_queued">Queued %1$s</string>
-    <string name="decodes_start_first">Start monitoring first</string>
+    <string name="decodes_queued_offline">Queued %1$s for when monitoring starts</string>
     <string name="decodes_open_all_activity">Open All activity</string>
     <string name="decodes_outgoing_tag">TX</string>
     <string name="decodes_copy">Copy</string>
@@ -71,30 +70,13 @@
     <string name="decode_dt">DT</string>
     <string name="decode_text">Message</string>
 
-    <!-- Transmit screen -->
-    <string name="tx_compose_hint">Type message here…</string>
-    <string name="tx_send">Send</string>
-    <string name="tx_cq">CQ</string>
-    <string name="tx_directed_hint">Directed Callsign</string>
-    <string name="tx_snr_report">SNR</string>
-    <string name="tx_queue">Queue</string>
-    <string name="tx_queue_empty">Transmit queue empty</string>
-    <string name="tx_queue_to">To %1$s</string>
-    <string name="tx_queue_broadcast">Broadcast</string>
-    <string name="tx_mode">Mode</string>
+    <!-- Transmit -->
     <string name="tx_mode_cq">CQ</string>
     <string name="tx_mode_heartbeat">Heartbeat</string>
-    <string name="tx_mode_free_text">Free Text</string>
-    <string name="tx_mode_hb_ack">HB+ACK</string>
-    <string name="tx_speed">Speed</string>
     <string name="tx_speed_slow">Slow</string>
     <string name="tx_speed_normal">Normal</string>
     <string name="tx_speed_fast">Fast</string>
     <string name="tx_speed_turbo">Turbo</string>
-    <string name="tx_power">Power</string>
-    <string name="tx_status_idle">Ready to transmit</string>
-    <string name="tx_status_queued">Message queued</string>
-    <string name="tx_status_transmitting">Transmitting…</string>
 
     <!-- Settings -->
     <string name="settings_title">Settings</string>
@@ -249,7 +231,18 @@
     <string name="everything_title">All activity</string>
     <string name="everything_subtitle">All activity on the band</string>
     <string name="conversation_empty">No messages yet</string>
-    <string name="messages_empty_hint">Direct messages (MSG) will appear here</string>
+    <string name="messages_empty_hint">Start one with the + button</string>
+    <string name="messages_new_hint">Callsign</string>
+    <string name="messages_new_invalid">Enter a callsign or @GROUP</string>
+    <string name="messages_new_own">That\'s your own callsign</string>
+    <string name="compose_commands">Commands</string>
+    <string name="compose_not_encodable">JS8 can\'t send emoji or accented letters</string>
+    <string name="cmd_snr">SNR? · Signal report</string>
+    <string name="cmd_grid">GRID? · Grid square</string>
+    <string name="cmd_info">INFO? · Station info</string>
+    <string name="cmd_status">STATUS? · Station status</string>
+    <string name="cmd_hearing">HEARING? · Stations heard</string>
+    <string name="cmd_agn">AGN? · Repeat last message</string>
     <string name="messages_compose_hint">Type message...</string>
     <string name="messages_send">Send</string>
     <string name="messages_new">New Message</string>

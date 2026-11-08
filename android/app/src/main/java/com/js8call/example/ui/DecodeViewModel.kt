@@ -291,7 +291,7 @@ class DecodeViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun isCompoundDeHelperFrame(text: String): Boolean {
-        val parts = text.trim().split(Regex("\\s+"))
+        val parts = text.trim().split(whitespaceRegex)
         if (parts.size != 2) return false
         val call = parts[0].uppercase()
         val grid = parts[1].uppercase()
@@ -307,7 +307,7 @@ class DecodeViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun isDirectedCompoundHeader(text: String): Boolean {
-        val tokens = text.trim().split(Regex("\\s+"))
+        val tokens = text.trim().split(whitespaceRegex)
         if (tokens.isEmpty()) return false
         if (!isCallsignLike(tokens[0])) return false
         if (tokens.size == 1) return true
@@ -403,8 +403,9 @@ class DecodeViewModel(application: Application) : AndroidViewModel(application) 
             .distinct()
     }
 
-    private fun senderCallsign(text: String): String? {
-        val firstToken = text.trim().split(Regex("\\s+"), limit = 2).firstOrNull() ?: return null
+    fun senderCallsign(text: String): String? {
+        val firstToken = text.trim().split(whitespaceRegex, limit = 2).firstOrNull() ?: return null
+        if (!firstToken.endsWith(':')) return null
         val callsign = firstToken.trimEnd(':').uppercase()
         return callsign.takeIf { isCallsignLike(it) }
     }
@@ -450,6 +451,7 @@ class DecodeViewModel(application: Application) : AndroidViewModel(application) 
         private const val PERSISTED_DECODE_FILE = "decoded_messages.json"
         private val gridRegex = Regex("^[A-R]{2}[0-9]{2}([A-X]{2})?$")
         private val callsignRegex = Regex("^[A-Z0-9/]+$")
+        private val whitespaceRegex = Regex("\\s+")
         private val directedCommandTailRegex = Regex(
             "^(?:AGN\\?|QSL\\?|HW CPY\\?|MSG TO:|SNR\\?|INFO\\?|GRID\\?|STATUS\\?|QUERY MSGS\\?|HEARING\\?|STATUS|HEARING|QUERY CALL|QUERY MSGS|QUERY|CMD|MSG|NACK|ACK|73|YES|NO|HEARTBEAT SNR|SNR|QSL|RR|SK|FB|INFO|GRID|DIT DIT|>|\\?)(?:\\s+[+-]?\\d{1,3})?$"
         )

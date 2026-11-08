@@ -32,5 +32,12 @@ class EverythingFragment : Fragment() {
             (childFragmentManager.findFragmentById(R.id.decode_pane) as? DecodeFragment)
                 ?.confirmClearDecodes()
         }
+        SpeedChip.bind(view.findViewById(R.id.speed_chip))
+
+        ComposeBarController(
+            root = view,
+            commandMenuRes = R.menu.broadcast_command_menu,
+            onSend = { text -> queueBroadcast(text) }
+        )
     }
 }

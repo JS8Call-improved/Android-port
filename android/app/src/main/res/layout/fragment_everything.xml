@@ -13,16 +13,32 @@
         app:navigationIcon="?attr/homeAsUpIndicator"
         app:title="@string/everything_title">
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/clear_button"
-            style="@style/Widget.Material3.Button.IconButton"
+        <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="end"
             android:layout_marginEnd="8dp"
-            android:contentDescription="@string/decodes_clear"
-            app:icon="@drawable/ic_delete"
-            app:iconTint="?attr/colorOnSurfaceVariant" />
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/clear_button"
+                style="@style/Widget.Material3.Button.IconButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:contentDescription="@string/decodes_clear"
+                app:icon="@drawable/ic_delete"
+                app:iconTint="?attr/colorOnSurfaceVariant" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/speed_chip"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                app:icon="@drawable/ic_arrow_drop_down"
+                app:iconGravity="end" />
+
+        </LinearLayout>
 
     </com.google.android.material.appbar.MaterialToolbar>
 
@@ -32,5 +48,7 @@
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1" />
+
+    <include layout="@layout/compose_bar" />
 
 </LinearLayout>

@@ -4,7 +4,10 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ArrayAdapter
 import android.widget.LinearLayout
+import androidx.appcompat.app.AlertDialog
+import androidx.core.widget.doAfterTextChanged
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModelProvider
 import androidx.navigation.fragment.findNavController
@@ -12,7 +15,10 @@ import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.android.material.snackbar.Snackbar
+import com.google.android.material.textfield.MaterialAutoCompleteTextView
+import com.google.android.material.textfield.TextInputLayout
 import com.js8call.example.R
+import java.util.Locale
 
 /**
  * Fragment showing the list of conversations (Messages tab).
@@ -26,6 +32,8 @@ class MessagesFragment : Fragment() {
     private lateinit var recyclerView: RecyclerView
     private lateinit var emptyState: LinearLayout
     private lateinit var newMessageFab: FloatingActionButton
+
+    private var conversationCallsigns: List<String> = emptyList()
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -68,16 +76,14 @@ class MessagesFragment : Fragment() {
         }
         recyclerView.adapter = adapter
 
-        // Set up FAB (navigate to Transmit tab to compose new message)
         newMessageFab.setOnClickListener {
-            // Navigate to Transmit tab for new message
-            val bottomNav = activity?.findViewById<com.google.android.material.navigation.NavigationBarView>(R.id.bottom_navigation)
-            bottomNav?.selectedItemId = R.id.navigation_transmit
+            showNewMessageDialog()
         }
 
         // Observe conversations
         viewModel.conversations.observe(viewLifecycleOwner) { conversations ->
             adapter.submitList(conversations)
+            conversationCallsigns = conversations.map { it.callsign }
 
             // Show/hide empty state
             if (conversations.isEmpty()) {
@@ -87,6 +93,37 @@ class MessagesFragment : Fragment() {
                 emptyState.visibility = View.GONE
                 recyclerView.visibility = View.VISIBLE
             }
+        }
+    }
+
+    private fun showNewMessageDialog() {
+        val dialogView = layoutInflater.inflate(R.layout.dialog_new_message, null)
+        val inputLayout = dialogView.findViewById<TextInputLayout>(R.id.callsign_input_layout)
+        val input = dialogView.findViewById<MaterialAutoCompleteTextView>(R.id.callsign_input)
+
+        // Conversation history plus stations heard this session
+        val suggestions = (conversationCallsigns + decodeViewModel.heardCallsigns()).distinct()
+        input.setAdapter(
+            ArrayAdapter(requireContext(), android.R.layout.simple_list_item_1, suggestions)
+        )
+        input.threshold = 1
+        input.doAfterTextChanged { inputLayout.error = null }
+
+        val dialog = MaterialAlertDialogBuilder(requireContext())
+            .setTitle(R.string.messages_new)
+            .setView(dialogView)
+            .setPositiveButton(android.R.string.ok, null)
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            val callsign = input.text?.toString()?.trim()?.uppercase(Locale.ROOT).orEmpty()
+            val error = threadAddressError(callsign, heard = callsign in suggestions)
+            if (error != null) {
+                inputLayout.error = getString(error)
+                return@setOnClickListener
+            }
+            dialog.dismiss()
+            navigateToConversation(callsign)
         }
     }
 

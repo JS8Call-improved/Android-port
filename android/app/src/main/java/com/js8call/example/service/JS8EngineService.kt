@@ -4228,7 +4228,7 @@ class JS8EngineService : Service() {
         @Volatile private var rigTeardownPending = false
         private const val PREF_AUTOREPLY_ENABLED = "autoreply_enabled"
         private const val PREF_RELAY_ENABLED = "relay_enabled"
-        private const val PREF_TX_SUBMODE = "tx_submode"
+        const val PREF_TX_SUBMODE = "tx_submode"
         private const val PREF_MY_INFO = "my_info"
         private const val PREF_MY_STATUS = "my_status"
         private const val PREF_PSK_REPORTER = "psk_reporter"
@@ -4240,10 +4240,10 @@ class JS8EngineService : Service() {
         private const val RELAY_BUFFER_TIMEOUT_MS = 90_000L
         private const val RELAY_FREQUENCY_TOLERANCE_HZ = 10.0f
         private const val RELAY_EOM_MARKER = "\u2662"
-        private const val SUBMODE_NORMAL = 0
-        private const val SUBMODE_FAST = 1
-        private const val SUBMODE_TURBO = 2
-        private const val SUBMODE_SLOW = 4
+        const val SUBMODE_NORMAL = 0
+        const val SUBMODE_FAST = 1
+        const val SUBMODE_TURBO = 2
+        const val SUBMODE_SLOW = 4
         private const val RX_SUBMODES_BASE = SUBMODE_NORMAL or SUBMODE_FAST or SUBMODE_SLOW
 
         // Heartbeat sub-band, matching the desktop app
