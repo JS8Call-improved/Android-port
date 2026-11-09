@@ -144,6 +144,7 @@ class JS8EngineService : Service() {
     private lateinit var txHandler: Handler
     // Stop cancels only this, never a queued rig teardown
     private val txWorkToken = Any()
+    private val txSubmitLock = Any()
     private lateinit var txMonitorHandler: Handler
     private var selectedAudioDeviceId: Int = -1  // -1 means use default
     private var selectedOutputDeviceId: Int = -1  // -1 means use default
@@ -2694,8 +2695,7 @@ class JS8EngineService : Service() {
     }
 
     private fun sendHeartbeat() {
-        // isTransmitActive() lags a send the engine just accepted
-        if (isTransmitActive() || engine?.isTransmitting() == true) {
+        if (isTransmitActive()) {
             Log.i(TAG, "Skipping heartbeat due to active transmission, rescheduling")
             scheduleHeartbeat(false)
             return
@@ -2741,25 +2741,28 @@ class JS8EngineService : Service() {
         val activeEngine = engine
         if (activeEngine != null) {
             val submode = getPreferredTxSubmode()
-            prepareEngineForTransmit(activeEngine)
-             val ok = activeEngine.transmitMessage(
-                text = payload,
-                myCall = callsign,
-                myGrid = grid,
-                selectedCall = "", // Broadcast-ish
-                submode = submode,
-                audioFrequencyHz = freq.toDouble(),
-                txDelaySec = 0.0,
-                forceIdentify = true, // Force ID to ensure callsign is sent
-                forceData = false
-            )
-            
-            if (ok) {
-                updateLastTxMessage(payload, "", submode, freq.toDouble())
-                broadcastTxState(TX_STATE_QUEUED)
-                startTxMonitor()
-            } else {
-                Log.e(TAG, "Failed to send heartbeat")
+            val ok = transmitIfIdle(activeEngine) {
+                activeEngine.transmitMessage(
+                    text = payload,
+                    myCall = callsign,
+                    myGrid = grid,
+                    selectedCall = "", // Broadcast-ish
+                    submode = submode,
+                    audioFrequencyHz = freq.toDouble(),
+                    txDelaySec = 0.0,
+                    forceIdentify = true, // Force ID to ensure callsign is sent
+                    forceData = false
+                )
+            }
+
+            when (ok) {
+                true -> {
+                    updateLastTxMessage(payload, "", submode, freq.toDouble())
+                    broadcastTxState(TX_STATE_QUEUED)
+                    startTxMonitor()
+                }
+                false -> Log.e(TAG, "Failed to send heartbeat")
+                null -> Log.i(TAG, "Skipping heartbeat due to active transmission, rescheduling")
             }
         }
 
@@ -2829,8 +2832,6 @@ class JS8EngineService : Service() {
         if (!modeSet) {
             Log.w(TAG, "Failed to set transmit mode (rig control might not be connected)")
         }
-        // A heartbeat or relay can queue while the rig mode is being set
-        if (activeEngine.isTransmitting()) return handBack("until the current transmission ends")
 
         Log.i(
             TAG,
@@ -2838,18 +2839,19 @@ class JS8EngineService : Service() {
         )
 
         val ok = try {
-            prepareEngineForTransmit(activeEngine)
-            activeEngine.transmitMessage(
-                text = payloadText,
-                myCall = callsign,
-                myGrid = grid,
-                selectedCall = directed,
-                submode = submode,
-                audioFrequencyHz = audioFrequencyHz,
-                txDelaySec = txDelaySec,
-                forceIdentify = effectiveForceIdentify,
-                forceData = forceData
-            )
+            transmitIfIdle(activeEngine) {
+                activeEngine.transmitMessage(
+                    text = payloadText,
+                    myCall = callsign,
+                    myGrid = grid,
+                    selectedCall = directed,
+                    submode = submode,
+                    audioFrequencyHz = audioFrequencyHz,
+                    txDelaySec = txDelaySec,
+                    forceIdentify = effectiveForceIdentify,
+                    forceData = forceData
+                )
+            } ?: return handBack("until the current transmission ends")
         } catch (e: IllegalStateException) {
             // A stop can close the engine while the rig mode is being set
             return handBack("because the engine closed")
@@ -3998,18 +4000,19 @@ class JS8EngineService : Service() {
         val payload = text.trim()
         if (payload.isEmpty()) return false
 
-        prepareEngineForTransmit(activeEngine)
-        val ok = activeEngine.transmitMessage(
-            text = payload,
-            myCall = callsign,
-            myGrid = grid,
-            selectedCall = "",
-            submode = submode,
-            audioFrequencyHz = currentTxOffsetHz.toDouble(),
-            txDelaySec = 0.0,
-            forceIdentify = callsign.isNotBlank(),
-            forceData = false
-        )
+        val ok = transmitIfIdle(activeEngine) {
+            activeEngine.transmitMessage(
+                text = payload,
+                myCall = callsign,
+                myGrid = grid,
+                selectedCall = "",
+                submode = submode,
+                audioFrequencyHz = currentTxOffsetHz.toDouble(),
+                txDelaySec = 0.0,
+                forceIdentify = callsign.isNotBlank(),
+                forceData = false
+            )
+        } ?: return false
 
         if (ok) {
             updateLastTxMessage(payload, "", submode, currentTxOffsetHz.toDouble())
@@ -4017,51 +4020,6 @@ class JS8EngineService : Service() {
             startTxMonitor()
         }
         return ok
-    }
-
-    private fun sendAutoReply(
-        text: String,
-        directed: String?,
-        submode: Int,
-        requireDirected: Boolean = true,
-        forceData: Boolean = false
-    ) {
-        val activeEngine = engine ?: return
-        val prefs = PreferenceManager.getDefaultSharedPreferences(this)
-        val callsign = getConfiguredCallsign()
-        if (callsign == null) {
-            warnMissingCallsign()
-            return
-        }
-        val grid = prefs.getString("grid", "")?.trim().orEmpty().uppercase()
-
-        val payloadText = text.trim()
-        val directedCall = directed?.trim().orEmpty().uppercase()
-        if (requireDirected && directedCall.isBlank()) return
-
-        prepareEngineForTransmit(activeEngine)
-        val ok = activeEngine.transmitMessage(
-            text = payloadText,
-            myCall = callsign,
-            myGrid = grid,
-            selectedCall = directedCall,
-            submode = submode,
-            audioFrequencyHz = currentTxOffsetHz.toDouble(),
-            txDelaySec = 0.0,
-            forceIdentify = callsign.isNotBlank(),
-            forceData = forceData
-        )
-
-        if (ok) {
-            Log.i(TAG, "Autoreply queued: to=$directedCall text='$payloadText'")
-            updateLastTxMessage(payloadText, directedCall, submode, currentTxOffsetHz.toDouble())
-            broadcastTxState(TX_STATE_QUEUED)
-            startTxMonitor()
-        } else {
-            Log.e(TAG, "Autoreply rejected")
-            broadcastError("Failed to start transmit")
-            broadcastTxState(TX_STATE_FAILED)
-        }
     }
 
     private fun updateHeardCallsign(text: String) {
@@ -4162,6 +4120,17 @@ class JS8EngineService : Service() {
     }
 
     private fun isRigPttRequired(): Boolean = rigControlMode != "none"
+
+    // transmitMessage() replaces a send the engine already queued
+    private fun transmitIfIdle(activeEngine: JS8Engine, submit: () -> Boolean): Boolean? =
+        synchronized(txSubmitLock) {
+            if (activeEngine.isTransmitting()) {
+                null
+            } else {
+                prepareEngineForTransmit(activeEngine)
+                submit()
+            }
+        }
 
     private fun prepareEngineForTransmit(activeEngine: JS8Engine) {
         val prefs = PreferenceManager.getDefaultSharedPreferences(this)
