@@ -1,5 +1,6 @@
 package com.js8call.core
 
+import android.os.SystemClock
 import android.util.Log
 import org.junit.Assert.assertTrue
 import java.util.concurrent.CopyOnWriteArrayList
@@ -18,7 +19,8 @@ internal class TestEngine(private val submode: Int = SUBMODE_NORMAL) : AutoClose
     private val decodes = CopyOnWriteArrayList<Decode>()
     private val tapped = ArrayList<ShortArray>()
     private var tapRate = SAMPLE_RATE
-    @Volatile private var finished = false
+    /** Counted before the JNI drops repeats. */
+    val framesPerJob = CopyOnWriteArrayList<Int>()
 
     private val engine = JS8Engine.create(
         sampleRateHz = SAMPLE_RATE,
@@ -33,7 +35,7 @@ internal class TestEngine(private val submode: Int = SUBMODE_NORMAL) : AutoClose
             }
 
             override fun onDecodeFinished(count: Int) {
-                finished = true
+                framesPerJob.add(count)
             }
 
             override fun onTxAudio(samples: ShortArray, sampleRateHz: Int) {
@@ -61,8 +63,8 @@ internal class TestEngine(private val submode: Int = SUBMODE_NORMAL) : AutoClose
 
     override fun close() = engine.close()
 
-    /** Feeds the whole clip and waits for the decode pass over it to finish. */
-    fun decode(samples: ShortArray): List<Decode> {
+    /** Feeds the whole clip and returns its decodes. Turbo retries only run with [realTime]. */
+    fun decode(samples: ShortArray, realTime: Boolean = false): List<Decode> {
         // Shift the clock to the top of a minute; the first submit re-aligns
         // the ring to it before writing.
         val now = System.currentTimeMillis()
@@ -71,12 +73,22 @@ internal class TestEngine(private val submode: Int = SUBMODE_NORMAL) : AutoClose
         // A buffer at a time, as a device would deliver it. The scheduler
         // places the decode window from where a write ends, so one write
         // spanning the whole period would put the window in the next one.
+        val startedAt = SystemClock.elapsedRealtime()
         for (start in samples.indices step CHUNK) {
             engine.submitAudio(samples.copyOfRange(start, minOf(start + CHUNK, samples.size)))
+            val dueAt = startedAt + (start + CHUNK) * 1000L / SAMPLE_RATE
+            if (realTime) Thread.sleep(maxOf(0L, dueAt - SystemClock.elapsedRealtime()))
         }
 
-        assertTrue("decode pass never finished", waitUntil(DECODE_TIMEOUT_MS) { finished })
-        Thread.sleep(SETTLE_MS) // decodes from that pass still arriving
+        assertTrue("decode pass never finished", waitUntil(DECODE_TIMEOUT_MS) { framesPerJob.isNotEmpty() })
+        if (realTime) {
+            do {
+                val jobs = framesPerJob.size
+                Thread.sleep(REAL_TIME_SETTLE_MS)
+            } while (framesPerJob.size != jobs)
+        } else {
+            Thread.sleep(SETTLE_MS) // decodes from that pass still arriving
+        }
         return decodes.toList()
     }
 
@@ -85,7 +97,11 @@ internal class TestEngine(private val submode: Int = SUBMODE_NORMAL) : AutoClose
      * to defer to the next boundary on its own, and returns what came off the
      * TX tap: at the engine rate, leading silence trimmed.
      */
-    fun transmitFromMidPeriod(text: String, forceData: Boolean = false): ShortArray {
+    fun transmitFromMidPeriod(
+        text: String,
+        forceData: Boolean = false,
+        audioFrequencyHz: Double = 1500.0
+    ): ShortArray {
         engine.setTransmitReady(true)
         val periodMs = periodMs(submode)
         val askAtMs = periodMs - 2_000L
@@ -96,7 +112,7 @@ internal class TestEngine(private val submode: Int = SUBMODE_NORMAL) : AutoClose
             myCall = "N5EKS",
             myGrid = "EM12",
             submode = submode,
-            audioFrequencyHz = 1500.0,
+            audioFrequencyHz = audioFrequencyHz,
             txDelaySec = 0.0,
             forceData = forceData
         )
@@ -135,6 +151,7 @@ internal class TestEngine(private val submode: Int = SUBMODE_NORMAL) : AutoClose
         const val CHUNK = 4_096
         const val POLL_MS = 50L
         const val SETTLE_MS = 500L
+        const val REAL_TIME_SETTLE_MS = 3_000L
         const val DRAIN_MS = 1_500L
         const val TX_TIMEOUT_MS = 45_000L
         const val DECODE_TIMEOUT_MS = 30_000L

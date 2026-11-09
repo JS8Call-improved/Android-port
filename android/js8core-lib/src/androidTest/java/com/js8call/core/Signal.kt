@@ -48,6 +48,13 @@ internal fun ShortArray.resampled(fromHz: Int, toHz: Int): ShortArray {
     return out
 }
 
+internal fun ShortArray.mixedWith(other: ShortArray, gain: Double): ShortArray =
+    ShortArray(maxOf(size, other.size)) { i ->
+        val a = if (i < size) this[i] * gain else 0.0
+        val b = if (i < other.size) other[i].toDouble() else 0.0
+        (a + b).toInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
+    }
+
 internal fun List<ShortArray>.concatenated(): ShortArray {
     val out = ShortArray(sumOf { it.size })
     var at = 0
