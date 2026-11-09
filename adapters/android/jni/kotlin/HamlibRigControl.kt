@@ -84,8 +84,6 @@ class HamlibRigControl {
         close()
     }
 
-    fun isShutDown(): Boolean = closedForGood
-
     @Synchronized
     fun setFrequency(frequencyHz: Long): Boolean {
         val active = handle

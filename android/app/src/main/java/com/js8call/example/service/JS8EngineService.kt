@@ -1235,8 +1235,9 @@ class JS8EngineService : Service() {
     }
 
     private fun openRtsSerialUsbInternal(deviceId: Int, portIndex: Int, params: SerialParams) {
+        val bridge = usbSerialBridge
         Thread {
-            val ok = usbSerialBridge?.open(
+            val ok = bridge?.open(
                 deviceId,
                 portIndex,
                 params.baudRate,
@@ -1246,6 +1247,7 @@ class JS8EngineService : Service() {
             ) == true
 
             mainHandler.post {
+                if (bridge !== usbSerialBridge) return@post
                 rtsPttConnected = ok
                 rigCtlErrorShown = false
                 if (ok) {
@@ -1281,8 +1283,9 @@ class JS8EngineService : Service() {
             return
         }
 
+        val bridge = bluetoothSerialBridge
         Thread {
-            val ok = bluetoothSerialBridge?.open(
+            val ok = bridge?.open(
                 address,
                 selection.portIndex,
                 params.baudRate,
@@ -1292,6 +1295,7 @@ class JS8EngineService : Service() {
             ) == true
 
             mainHandler.post {
+                if (bridge !== bluetoothSerialBridge) return@post
                 rtsPttConnected = ok
                 rigCtlErrorShown = false
                 if (ok) {
@@ -1429,9 +1433,9 @@ class JS8EngineService : Service() {
                 params.stopBits,
                 params.parity
             ) == true
-            if (!ok && hamlib?.isShutDown() == true) return@Thread
 
             mainHandler.post {
+                if (bridge !== usbSerialBridge) return@post
                 hamlibRigConnected = ok
                 rigCtlErrorShown = false
                 if (ok) {
@@ -1512,9 +1516,9 @@ class JS8EngineService : Service() {
                 params.stopBits,
                 params.parity
             ) == true
-            if (!ok && hamlib?.isShutDown() == true) return@Thread
 
             mainHandler.post {
+                if (bridge !== bluetoothSerialBridge) return@post
                 hamlibRigConnected = ok
                 rigCtlErrorShown = false
                 if (ok) {
