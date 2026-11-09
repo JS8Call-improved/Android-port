@@ -32,6 +32,7 @@ import com.js8call.core.QmxDirectSerial
 import com.js8call.core.TruSdxDirectSerial
 import com.js8call.core.UsbSerialBridge
 import com.js8call.core.UsbSerialPortCatalog
+import com.js8call.core.rxMaskOf
 import com.js8call.example.MainActivity
 import com.js8call.example.model.DecodedMessage
 import com.js8call.example.ui.AudioDevices
@@ -673,7 +674,7 @@ class JS8EngineService : Service() {
             // Create engine
             engine = JS8Engine.create(
                 sampleRateHz = 12000,
-                submodes = configuredRxSubmodes(),
+                submodes = rxMaskOf(SUBMODE_NORMAL, SUBMODE_FAST, SUBMODE_TURBO, SUBMODE_SLOW),
                 callbackHandler = callbackHandler,
                 enableTxAudioTap = rigControlMode == "trusdx_serial" || rigControlMode == "btech_uvpro",
                 useQmxUsbAudio = rigControlMode == "qmx_serial"
@@ -1067,10 +1068,6 @@ class JS8EngineService : Service() {
         val txBoostEnabled = rigControlMode != "qmx_serial" && prefs.getBoolean("tx_boost_enabled", false)
         engine?.setTxBoostEnabled(txBoostEnabled)
         Log.i(TAG, "TX boost: ${if (txBoostEnabled) "enabled (+10 dB)" else "disabled"}${if (rigControlMode == "qmx_serial") " for QMX clean USB audio" else ""}")
-    }
-
-    private fun configuredRxSubmodes(): Int {
-        return RX_SUBMODES_BASE or SUBMODE_TURBO
     }
 
     private fun initializeNetworkRigControl() {
@@ -4249,7 +4246,6 @@ class JS8EngineService : Service() {
         const val SUBMODE_FAST = 1
         const val SUBMODE_TURBO = 2
         const val SUBMODE_SLOW = 4
-        private const val RX_SUBMODES_BASE = SUBMODE_NORMAL or SUBMODE_FAST or SUBMODE_SLOW
 
         // Heartbeat sub-band, matching the desktop app
         private const val HB_SUBBAND_LOW_HZ = 500
