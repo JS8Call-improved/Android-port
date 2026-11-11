@@ -77,6 +77,9 @@ class MainActivity : AppCompatActivity() {
                             val refused = intent.getBooleanExtra(JS8EngineService.EXTRA_TX_REFUSED, false)
                             if (transmitViewModel.transmissionFailed(refused)) processNextTxIfIdle()
                         }
+                        JS8EngineService.TX_STATE_HANDED_BACK -> {
+                            transmitViewModel.handedBack()
+                        }
                         JS8EngineService.TX_STATE_QUEUED -> {
                             transmitViewModel.setQueued()
                         }
@@ -254,6 +257,8 @@ class MainActivity : AppCompatActivity() {
         }
         LocalBroadcastManager.getInstance(this)
             .registerReceiver(monitorReceiver, monitorFilter)
+        // A queue kick sent while stopped was dropped
+        processNextTxIfIdle()
     }
 
     override fun onStop() {

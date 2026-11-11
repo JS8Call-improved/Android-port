@@ -138,6 +138,18 @@ class TransmitViewModelTest {
     }
 
     @Test
+    fun handedBackSendStaysQueuedAfterAnotherSendStarted() {
+        val viewModel = TransmitViewModel(Application())
+        viewModel.queueMessage("FIRST", "K1ABC")
+        viewModel.beginTransmission(viewModel.getNextMessage()!!)
+        viewModel.startTransmitting()
+        viewModel.handedBack()
+        assertFalse(viewModel.hasActiveTransmission())
+        assertEquals(listOf("FIRST"), queuedTexts(viewModel))
+        assertEquals(TransmitState.TRANSMITTING, viewModel.txState.value)
+    }
+
+    @Test
     fun stopClearsTransmittingWithNoSendOfOurs() {
         val viewModel = TransmitViewModel(Application())
         viewModel.startTransmitting()
