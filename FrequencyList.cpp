@@ -34,6 +34,7 @@ namespace
       { 18104000, Modes::JS8, IARURegions::ALL}, // 4 above
       { 21078000, Modes::JS8, IARURegions::ALL}, // 4 above
       { 24922000, Modes::JS8, IARURegions::ALL}, // 9 above
+      { 27245000, Modes::JS8, IARURegions::ALL}, // 4 above
       { 28078000, Modes::JS8, IARURegions::ALL}, // 4 above
       { 50318000, Modes::JS8, IARURegions::ALL}, // 5 above
       {144178000, Modes::JS8, IARURegions::ALL}, // 4 above
