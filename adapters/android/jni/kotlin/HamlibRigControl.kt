@@ -12,6 +12,8 @@ class HamlibRigControl {
 
     @Volatile
     private var handle: Long = 0
+    @Volatile
+    private var closedForGood = false
 
     @Synchronized
     fun open(
@@ -23,6 +25,7 @@ class HamlibRigControl {
         stopBits: Int,
         parity: String
     ): Boolean {
+        if (closedForGood) return false
         close()
         val nativeHandle = nativeOpen(
             rigModel,
@@ -49,6 +52,7 @@ class HamlibRigControl {
         stopBits: Int,
         parity: String
     ): Boolean {
+        if (closedForGood) return false
         close()
         val nativeHandle = nativeOpenWithPath(
             rigModel,
@@ -72,6 +76,12 @@ class HamlibRigControl {
             nativeClose(active)
             handle = 0
         }
+    }
+
+    @Synchronized
+    fun shutdown() {
+        closedForGood = true
+        close()
     }
 
     @Synchronized

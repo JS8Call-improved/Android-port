@@ -46,6 +46,7 @@ class BluetoothSerialBridge(private val context: Context) {
     private var activeStopBits: Int? = null
     private var activeParity: Int? = null
     @Volatile private var lastError: String? = null
+    private var closedForGood = false
 
     private data class SocketAttempt(
         val label: String,
@@ -104,6 +105,10 @@ class BluetoothSerialBridge(private val context: Context) {
     ): Boolean {
         return withWriteLock {
             lastError = null
+            if (closedForGood) {
+                Log.i(TAG, "Bluetooth serial open refused: bridge closed")
+                return@withWriteLock false
+            }
             if (!hasBluetoothPermission()) {
                 lastError = "Bluetooth permissions not granted"
                 Log.w(TAG, lastError ?: "Bluetooth permissions not granted")
@@ -279,6 +284,14 @@ class BluetoothSerialBridge(private val context: Context) {
 
     fun close() {
         withWriteLock {
+            closeLocked()
+        }
+    }
+
+    // Not close(): native hamlib closes through that and must be able to reopen
+    fun shutdown() {
+        withWriteLock {
+            closedForGood = true
             closeLocked()
         }
     }

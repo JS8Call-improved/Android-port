@@ -106,11 +106,11 @@ Java_com_js8call_core_UsbSerialBridge_nativeRegister(JNIEnv* env, jobject thiz) 
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_js8call_core_UsbSerialBridge_nativeUnregister(JNIEnv* env, jobject /*thiz*/) {
+Java_com_js8call_core_UsbSerialBridge_nativeUnregister(JNIEnv* env, jobject thiz) {
   std::lock_guard<std::mutex> lock(g_bridge.mutex);
-  if (g_bridge.bridge) {
-    env->DeleteGlobalRef(g_bridge.bridge);
-  }
+  // A stale bridge must not clear a newer one's registration
+  if (!g_bridge.bridge || !env->IsSameObject(g_bridge.bridge, thiz)) return;
+  env->DeleteGlobalRef(g_bridge.bridge);
   g_bridge.bridge = nullptr;
   g_bridge.open = nullptr;
   g_bridge.read = nullptr;

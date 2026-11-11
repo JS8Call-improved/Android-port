@@ -32,6 +32,7 @@ class UsbSerialBridge(private val context: Context) {
     private var activeDataBits: Int? = null
     private var activeStopBits: Int? = null
     private var activeParity: Int? = null
+    private var closedForGood = false
 
     private inline fun <T> withReadLock(action: () -> T): T {
         val lock = portLock.readLock()
@@ -87,6 +88,10 @@ class UsbSerialBridge(private val context: Context) {
         parity: Int
     ): Boolean {
         return withWriteLock {
+            if (closedForGood) {
+                Log.i(TAG, "USB serial open refused: bridge closed")
+                return@withWriteLock false
+            }
             val existing = port
             if (existing != null &&
                 activeDeviceId == deviceId &&
@@ -245,6 +250,14 @@ class UsbSerialBridge(private val context: Context) {
 
     fun close() {
         withWriteLock {
+            closeLocked()
+        }
+    }
+
+    // Not close(): native hamlib closes through that and must be able to reopen
+    fun shutdown() {
+        withWriteLock {
+            closedForGood = true
             closeLocked()
         }
     }
