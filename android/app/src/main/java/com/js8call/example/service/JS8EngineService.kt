@@ -46,11 +46,8 @@ import com.js8call.example.util.Js8Commands
 import com.js8call.example.util.TxMessageClassifier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import java.util.Calendar
 import java.util.Locale
 import java.util.TimeZone
@@ -94,10 +91,7 @@ internal fun assembleReplyText(header: String, parts: List<String>): String =
  */
 class JS8EngineService : Service() {
 
-    @OptIn(ExperimentalCoroutinesApi::class)
-    private val messageScope = CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(1))
-    // Must stay serial: one sender's notifications share an ID
-    private val persistLock = Mutex()
+    private val messageScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val messageRepository by lazy { MessageRepository.getInstance(applicationContext) }
     private var engine: JS8Engine? = null
     private var audioHelper: JS8AudioHelper? = null
@@ -2991,32 +2985,31 @@ class JS8EngineService : Service() {
         timestamp: Long = System.currentTimeMillis()
     ) {
         messageScope.launch {
-            persistLock.withLock {
-                try {
-                    messageRepository.insertIncomingMessage(
-                        conversationId, from, text, snr, freq, relayPath, incomplete, timestamp, read = !notify
-                    )
-                } catch (t: Throwable) {
-                    Log.e(TAG, "Failed to persist incoming MSG from $from", t)
-                    return@withLock
-                }
+            val messageId = try {
+                messageRepository.insertIncomingMessage(
+                    conversationId, from, text, snr, freq, relayPath, incomplete, timestamp, read = !notify
+                )
+            } catch (t: Throwable) {
+                Log.e(TAG, "Failed to persist incoming MSG from $from", t)
+                return@launch
+            }
 
-                mainHandler.post {
-                    val intent = Intent(ACTION_MESSAGE_RECEIVED).apply {
-                        putExtra(EXTRA_MESSAGE_FROM, from)
-                        putExtra(EXTRA_MESSAGE_TEXT, text)
-                        putExtra(EXTRA_MESSAGE_SNR, snr)
-                        putExtra(EXTRA_MESSAGE_FREQ, freq)
-                        putExtra(EXTRA_MESSAGE_CONVERSATION_ID, conversationId)
-                        relayPath?.let { putExtra(EXTRA_MESSAGE_RELAY_PATH, it) }
-                    }
-                    LocalBroadcastManager.getInstance(this@JS8EngineService).sendBroadcast(intent)
-                    if (notify) {
-                        showMessageNotification(
-                            from,
-                            if (incomplete) getString(R.string.notification_message_incomplete, text) else text
-                        )
-                    }
+            mainHandler.post {
+                val intent = Intent(ACTION_MESSAGE_RECEIVED).apply {
+                    putExtra(EXTRA_MESSAGE_FROM, from)
+                    putExtra(EXTRA_MESSAGE_TEXT, text)
+                    putExtra(EXTRA_MESSAGE_SNR, snr)
+                    putExtra(EXTRA_MESSAGE_FREQ, freq)
+                    putExtra(EXTRA_MESSAGE_CONVERSATION_ID, conversationId)
+                    relayPath?.let { putExtra(EXTRA_MESSAGE_RELAY_PATH, it) }
+                }
+                LocalBroadcastManager.getInstance(this@JS8EngineService).sendBroadcast(intent)
+                if (notify) {
+                    showMessageNotification(
+                        messageId,
+                        from,
+                        if (incomplete) getString(R.string.notification_message_incomplete, text) else text
+                    )
                 }
             }
         }
@@ -3037,7 +3030,7 @@ class JS8EngineService : Service() {
         return delivered
     }
 
-    private fun showMessageNotification(from: String, text: String) {
+    private fun showMessageNotification(messageId: Long, from: String, text: String) {
         val notificationManager = getSystemService(NotificationManager::class.java)
         
         // Create message notification channel if it doesn't exist
@@ -3073,7 +3066,7 @@ class JS8EngineService : Service() {
             .setAutoCancel(true)
             .build()
         
-        notificationManager.notify(NOTIFICATION_ID_MESSAGE_BASE + from.hashCode(), notification)
+        notificationManager.notify(NOTIFICATION_ID_MESSAGE_BASE + messageId.toInt(), notification)
     }
 
     private fun startTxMonitor() {
@@ -3291,6 +3284,7 @@ class JS8EngineService : Service() {
                 Log.d(TAG, "maybeHandleIncomingMessage: MSG not for me ($callsign) or my groups, skipping")
                 return
             }
+            val conversationId = if (isForMyGroup) directed.to else directed.from
             
             val initialPayload = directed.payload
             
@@ -3298,7 +3292,6 @@ class JS8EngineService : Service() {
             
             // If this is the last frame and we have payload, deliver immediately
             if (isLastFrame(type) && initialPayload.isNotBlank()) {
-                val conversationId = if (isForMyGroup) directed.to else directed.from
                 // Strip checksum (3 uppercase alphanumeric chars at end, preceded by space)
                 val cleanPayload = initialPayload.trim()
                     .replace(Regex("\\s*[▪■]+\\s*$"), "")
@@ -3320,6 +3313,7 @@ class JS8EngineService : Service() {
             val buffer = MsgBuffer(
                 from = directed.from.trim().uppercase(),
                 to = directed.to.trim().uppercase(),
+                conversationId = conversationId,
                 snr = snr,
                 frequency = freq,
                 lastUpdated = now,
@@ -3368,6 +3362,7 @@ class JS8EngineService : Service() {
     private data class MsgBuffer(
         val from: String,
         val to: String,
+        val conversationId: String,
         val snr: Int,
         val frequency: Float,
         var lastUpdated: Long,
@@ -3411,12 +3406,13 @@ class JS8EngineService : Service() {
         val isForMyGroup = isSubscribedGroup(directed.to)
         if (!isForMyGroup && !isSelfCallsign(callsign, directed.to)) return
         val header = replyHeaderText(directed.command, directed.payload) ?: return
+        val conversationId = if (isForMyGroup) directed.to else from
+        val notify = !autoAnswered && directed.command.trim().uppercase() != Js8Commands.CMD_ACK
 
         if (isLastFrame(type)) {
             if (header.isEmpty()) return
-            val conversationId = if (isForMyGroup) directed.to else from
             Log.i(TAG, "Reply received (single frame): from=$from to=${directed.to} text='$header'")
-            persistIncomingMessage(from, header, snr, freq, null, conversationId, notify = !autoAnswered)
+            persistIncomingMessage(from, header, snr, freq, null, conversationId, notify = notify)
             return
         }
 
@@ -3424,12 +3420,13 @@ class JS8EngineService : Service() {
         putMsgBuffer(key, MsgBuffer(
             from = from,
             to = directed.to.trim().uppercase(),
+            conversationId = conversationId,
             snr = snr,
             frequency = freq,
             lastUpdated = now,
             timeoutMs = 4 * framePeriodMs(submode),
             replyHeader = header,
-            notify = !autoAnswered
+            notify = notify
         ))
     }
     
@@ -3453,11 +3450,10 @@ class JS8EngineService : Service() {
         val header = buffer.replyHeader ?: return
         val text = assembleReplyText(header, buffer.parts)
         if (text.isEmpty()) return
-        val conversationId = if (isSubscribedGroup(buffer.to)) buffer.to else buffer.from
         Log.i(TAG, "Reply received (multi-frame, incomplete=$incomplete): from=${buffer.from} to=${buffer.to} text='$text'")
         // Must sort before the next transmission on its tone
         persistIncomingMessage(
-            buffer.from, text, buffer.snr, buffer.frequency, null, conversationId,
+            buffer.from, text, buffer.snr, buffer.frequency, null, buffer.conversationId,
             notify = buffer.notify, incomplete = incomplete, timestamp = buffer.lastUpdated
         )
     }
@@ -3488,11 +3484,8 @@ class JS8EngineService : Service() {
             return
         }
         
-        val isForMyGroup = isSubscribedGroup(buffer.to)
-        val conversationId = if (isForMyGroup) buffer.to else buffer.from
-        
-        Log.i(TAG, "MSG received (multi-frame): from=${buffer.from} to=${buffer.to} text='$cleanText' conversationId=$conversationId")
-        persistIncomingMessage(buffer.from, cleanText, buffer.snr, buffer.frequency, null, conversationId)
+        Log.i(TAG, "MSG received (multi-frame): from=${buffer.from} to=${buffer.to} text='$cleanText' conversationId=${buffer.conversationId}")
+        persistIncomingMessage(buffer.from, cleanText, buffer.snr, buffer.frequency, null, buffer.conversationId)
         
         // Queue auto-ACK now that full message is received (if autoreply enabled)
         if (isAutoreplyEnabled()) {
