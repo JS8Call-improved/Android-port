@@ -57,6 +57,9 @@ class MessageRepository(context: Context) {
      * @param snr Signal-to-noise ratio
      * @param frequency Frequency offset
      * @param relayPath Relay path if relayed
+     * @param incomplete Part of the message never arrived
+     * @param timestamp When the last frame arrived
+     * @param read Adds nothing to the unread count
      */
     suspend fun insertIncomingMessage(
         conversationId: String,
@@ -64,18 +67,21 @@ class MessageRepository(context: Context) {
         text: String,
         snr: Int?,
         frequency: Float?,
-        relayPath: String? = null
+        relayPath: String? = null,
+        incomplete: Boolean = false,
+        timestamp: Long = System.currentTimeMillis(),
+        read: Boolean = false
     ): Long {
         val message = MessageEntity(
             conversationId = if (conversationId.startsWith("@")) conversationId.uppercase() else normalizeCallsign(conversationId),
             direction = MessageEntity.DIRECTION_INCOMING,
             senderCallsign = normalizeCallsign(from),
             text = text,
-            timestamp = System.currentTimeMillis(),
+            timestamp = timestamp,
             snr = snr,
             frequency = frequency,
-            status = MessageEntity.STATUS_SENT,
-            isRead = false,
+            status = if (incomplete) MessageEntity.STATUS_INCOMPLETE else MessageEntity.STATUS_SENT,
+            isRead = read,
             relayPath = relayPath
         )
         return insertMessage(message)

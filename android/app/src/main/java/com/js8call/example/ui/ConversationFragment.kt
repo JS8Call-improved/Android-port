@@ -99,16 +99,10 @@ class ConversationFragment : Fragment() {
                 emptyState.visibility = View.GONE
                 recyclerView.visibility = View.VISIBLE
             }
+
+            // Messages can arrive while the thread is open
+            viewModel.markConversationAsRead(callsign)
         }
-
-        // Mark conversation as read when viewing
-        viewModel.markConversationAsRead(callsign)
-    }
-
-    override fun onResume() {
-        super.onResume()
-        // Mark as read again in case new messages arrived
-        viewModel.markConversationAsRead(callsign)
     }
 
     private fun sendMessage(text: String): Boolean {

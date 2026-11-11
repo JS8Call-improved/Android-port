@@ -254,6 +254,7 @@
     <string name="messages_sent">Sent</string>
     <string name="messages_acked">Acknowledged</string>
     <string name="messages_failed">Failed to send</string>
+    <string name="messages_incomplete">Incomplete</string>
     <string name="messages_retry">Retry</string>
     <string name="messages_cancel_send">Cancel send</string>
     <string name="messages_delete">Delete</string>
@@ -274,6 +275,7 @@
     <!-- Message notifications -->
     <string name="notification_message_channel_name">Messages</string>
     <string name="notification_message_channel_desc">JS8 directed message notifications</string>
+    <string name="notification_message_incomplete">%1$s (incomplete)</string>
     <string name="notification_new_message_title">New message from %s</string>
     <string name="notification_new_message_group">%d new messages</string>
 </resources>
