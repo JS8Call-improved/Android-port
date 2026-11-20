@@ -15,6 +15,11 @@ class JS8Engine private constructor(
 
     private val lifecycleLock = ReentrantReadWriteLock(true)
 
+    /** Receive fallback mode, fixed for the lifetime of an engine. */
+    enum class SymbolTracking(internal val nativeValue: Int) {
+        DISABLED(0), FREQUENCY(1), TIMING(2), BOTH(3)
+    }
+
     companion object {
         init {
             System.loadLibrary("js8core-jni")
@@ -26,20 +31,40 @@ class JS8Engine private constructor(
          * @param sampleRateHz Audio sample rate (typically 12000 or 48000)
          * @param submodes Bitmask of enabled submodes
          * @param callbackHandler Handler for engine events
+         * @param symbolTracking Experimental RX fallback; disabled until device validation
+         * @param trackedSic Guarded cancellation; only active with BOTH tracking
+         * @param optionalDecodeBudgetMs Optional work allowance, including queue wait.
+         * Zero disables optional work, not mandatory decoding. Valid range: 0..10000.
+         * Receive settings require recreating the engine to change them.
          */
         fun create(
             sampleRateHz: Int = 12000,
             submodes: Int = 0x1F, // default to A/B/C/E/I like desktop
             callbackHandler: CallbackHandler,
             enableTxAudioTap: Boolean = false,
-            useQmxUsbAudio: Boolean = false
+            useQmxUsbAudio: Boolean = false,
+            symbolTracking: SymbolTracking = SymbolTracking.DISABLED,
+            trackedSic: Boolean = false,
+            optionalDecodeBudgetMs: Int = 250
         ): JS8Engine {
-            val handle = nativeCreate(callbackHandler, sampleRateHz, submodes, enableTxAudioTap, useQmxUsbAudio)
+            require(optionalDecodeBudgetMs in 0..10000) {
+                "optionalDecodeBudgetMs must be in 0..10000"
+            }
+            val handle = nativeCreate(
+                callbackHandler, sampleRateHz, submodes, enableTxAudioTap, useQmxUsbAudio,
+                symbolTracking.nativeValue, trackedSic, optionalDecodeBudgetMs
+            )
             if (handle == 0L) {
                 throw RuntimeException("Failed to create native JS8 engine")
             }
             return JS8Engine(handle, callbackHandler)
         }
+
+        /** Linked core release version; use the repository's core gitlink for exact provenance. */
+        fun coreVersion(): String = nativeCoreVersion()
+
+        @JvmStatic
+        private external fun nativeCoreVersion(): String
 
         @JvmStatic
         private external fun nativeCreate(
@@ -47,7 +72,10 @@ class JS8Engine private constructor(
             sampleRateHz: Int,
             submodes: Int,
             enableTxAudioTap: Boolean,
-            useQmxUsbAudio: Boolean
+            useQmxUsbAudio: Boolean,
+            symbolTracking: Int,
+            trackedSic: Boolean,
+            optionalDecodeBudgetMs: Int
         ): Long
     }
 
@@ -351,7 +379,7 @@ class JS8Engine private constructor(
 
     /**
      * Callback interface for engine events.
-     * All callbacks are invoked on a native thread.
+     * All callbacks are invoked on a native thread and must remain nonblocking.
      */
     interface CallbackHandler {
         /**
@@ -404,6 +432,22 @@ class JS8Engine private constructor(
          * Called with TX audio PCM samples when enabled.
          */
         fun onTxAudio(samples: ShortArray, sampleRateHz: Int) {}
+    }
+
+    /**
+     * Opt-in RX diagnostics. Existing CallbackHandler implementations are unchanged.
+     * Diagnostics run immediately before the corresponding legacy callback on the
+     * same native thread. Queue slow work elsewhere. Stale-context events, including
+     * their completions, may be suppressed by the core rather than delivered here.
+     */
+    interface ReceiveDiagnosticsHandler : CallbackHandler {
+        fun onDecodedDiagnostics(trackingUsed: Boolean, afterTrackedSic: Boolean) {}
+        fun onDecodeFinishedDiagnostics(
+            count: Int,
+            trackedCancellations: Int,
+            optionalWorkSkipped: Boolean,
+            canceled: Boolean
+        ) {}
     }
 }
 

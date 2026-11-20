@@ -7,6 +7,18 @@ plugins {
 // repository instead of letting the NDK find-path pick up a host copy.
 val eigenIncludeDir = rootProject.projectDir.parentFile.resolve("vendor")
 
+// Keep upstream attribution with the AAR/APK, including CRC++'s BSD notice.
+val coreNotices by tasks.registering(Sync::class) {
+    from(rootProject.projectDir.parentFile.resolve("core")) {
+        include("LICENSE", "NOTICE")
+        into("licenses/js8core")
+    }
+    from(rootProject.projectDir.parentFile.resolve("core/vendor/CRCpp/CRC.h")) {
+        into("licenses/js8core/CRCpp")
+    }
+    into(layout.buildDirectory.dir("generated/core-notices"))
+}
+
 android {
     namespace = "com.js8call.core"
     compileSdk = 34
@@ -112,6 +124,7 @@ android {
     // Source sets
     sourceSets {
         getByName("main") {
+            assets.srcDir(layout.buildDirectory.dir("generated/core-notices"))
             // Kotlin sources from JNI directory
             java.srcDirs(
                 "../../adapters/android/jni/kotlin",
@@ -124,6 +137,10 @@ android {
             assets.srcDirs("../../media/tests")
         }
     }
+}
+
+tasks.named("preBuild") {
+    dependsOn(coreNotices)
 }
 
 dependencies {

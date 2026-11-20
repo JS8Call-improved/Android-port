@@ -11,6 +11,8 @@
 # Keep callback interface implementations
 -keep interface com.js8call.core.JS8Engine$CallbackHandler { *; }
 -keep class * implements com.js8call.core.JS8Engine$CallbackHandler { *; }
+-keep interface com.js8call.core.JS8Engine$ReceiveDiagnosticsHandler { *; }
+-keep class * implements com.js8call.core.JS8Engine$ReceiveDiagnosticsHandler { *; }
 
 # Keep JNI callback methods that are called from native code
 -keepclassmembers class com.js8call.core.JS8Engine$CallbackHandler {

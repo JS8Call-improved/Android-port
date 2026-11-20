@@ -21,7 +21,7 @@
 
 #include "js8core/protocol/jsc.hpp"
 #include "js8core/protocol/varicode.hpp"
-#include "jsc_data.hpp"  // JSC_SIZE / JSC_MAP
+#include "jsc_data.hpp"  // JSC_SIZE / jsc_word
 
 using namespace js8core::protocol;
 
@@ -94,8 +94,7 @@ int main() {
     // dictionary text for this index (plus a space when the flag is set).
     auto const no_space = jsc::codeword(index, false, kBytes, kS, kC);
     std::string const text = jsc::decompress(no_space);
-    std::string const expected(JSC_MAP[index].str,
-                               static_cast<std::size_t>(JSC_MAP[index].size));
+    std::string const expected(jsc_word(index));
     if (text == expected) {
       ++text_ok;
     } else {

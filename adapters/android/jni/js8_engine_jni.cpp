@@ -23,9 +23,16 @@
 #include "js8core/android/scheduler_android.hpp"
 #include "js8core/android/storage_android.hpp"
 
+// JNI values are shared with JS8Engine.SymbolTracking in Kotlin.
+static_assert(static_cast<int>(js8core::SymbolTracking::Disabled) == 0);
+static_assert(static_cast<int>(js8core::SymbolTracking::Frequency) == 1);
+static_assert(static_cast<int>(js8core::SymbolTracking::Timing) == 2);
+static_assert(static_cast<int>(js8core::SymbolTracking::Both) == 3);
+
 // Forward declarations of JNI methods (defined in js8_jni_methods.cpp)
 extern "C" {
-JNIEXPORT jlong JNICALL Java_com_js8call_core_JS8Engine_00024Companion_nativeCreate(JNIEnv*, jobject, jobject, jint, jint, jboolean, jboolean);
+JNIEXPORT jlong JNICALL Java_com_js8call_core_JS8Engine_00024Companion_nativeCreate(JNIEnv*, jobject, jobject, jint, jint, jboolean, jboolean, jint, jboolean, jint);
+JNIEXPORT jstring JNICALL Java_com_js8call_core_JS8Engine_00024Companion_nativeCoreVersion(JNIEnv*, jobject);
 JNIEXPORT jboolean JNICALL Java_com_js8call_core_JS8Engine_nativeStart(JNIEnv*, jobject, jlong);
 JNIEXPORT void JNICALL Java_com_js8call_core_JS8Engine_nativeStop(JNIEnv*, jobject, jlong);
 JNIEXPORT void JNICALL Java_com_js8call_core_JS8Engine_nativeDestroy(JNIEnv*, jobject, jlong);
@@ -65,6 +72,8 @@ struct JS8Engine_Native {
 
   // Java callback handler (global ref)
   jobject callback_handler = nullptr;
+  jmethodID decoded_diagnostics = nullptr;
+  jmethodID finished_diagnostics = nullptr;
   std::mutex callback_mutex;
 
   struct CompoundCall {
@@ -496,6 +505,15 @@ static void event_callback(JS8Engine_Native* native, js8core::events::Variant co
 
   // Handle different event types
   if (auto* decoded = std::get_if<js8core::events::Decoded>(&event)) {
+    if (native->decoded_diagnostics) {
+      env->CallVoidMethod(native->callback_handler, native->decoded_diagnostics,
+                         static_cast<jboolean>(decoded->tracking_used),
+                         static_cast<jboolean>(decoded->after_tracked_sic));
+      if (env->ExceptionCheck()) {
+        env->DeleteLocalRef(handler_class);
+        return;
+      }
+    }
     int type = 0;
     auto rendered = render_decoded_text(native, *decoded, &type);
     __android_log_print(ANDROID_LOG_INFO, "JS8Engine_Native",
@@ -529,6 +547,17 @@ static void event_callback(JS8Engine_Native* native, js8core::events::Variant co
       env->CallVoidMethod(native->callback_handler, method, decode_started->submodes);
     }
   } else if (auto* decode_finished = std::get_if<js8core::events::DecodeFinished>(&event)) {
+    if (native->finished_diagnostics) {
+      env->CallVoidMethod(native->callback_handler, native->finished_diagnostics,
+                         static_cast<jint>(decode_finished->decoded),
+                         static_cast<jint>(decode_finished->tracked_cancellations),
+                         static_cast<jboolean>(decode_finished->optional_work_skipped),
+                         static_cast<jboolean>(decode_finished->canceled));
+      if (env->ExceptionCheck()) {
+        env->DeleteLocalRef(handler_class);
+        return;
+      }
+    }
     // Call onDecodeFinished(int count)
     jmethodID method = env->GetMethodID(handler_class, "onDecodeFinished", "(I)V");
     if (method) {
@@ -589,13 +618,38 @@ extern "C" {
 JS8Engine_Native* js8_engine_create(JNIEnv* env, jobject callback_handler,
                                      int sample_rate_hz, int submodes,
                                      int enable_tx_audio_tap,
-                                     int use_qmx_usb_audio) {
+                                      int use_qmx_usb_audio,
+                                      int symbol_tracking,
+                                      int tracked_sic,
+                                      int optional_decode_budget_ms) {
   if (!env || !callback_handler) return nullptr;
+  if (symbol_tracking < 0 || symbol_tracking > 3 ||
+      optional_decode_budget_ms < 0 || optional_decode_budget_ms > 10000) return nullptr;
 
   auto native = new JS8Engine_Native();
 
   // Create global reference to callback handler
   native->callback_handler = env->NewGlobalRef(callback_handler);
+  if (!native->callback_handler) {
+    delete native;
+    return nullptr;
+  }
+  jclass diagnostics = env->FindClass("com/js8call/core/JS8Engine$ReceiveDiagnosticsHandler");
+  if (!diagnostics) {
+    env->DeleteGlobalRef(native->callback_handler);
+    delete native;
+    return nullptr;
+  }
+  if (env->IsInstanceOf(callback_handler, diagnostics)) {
+    native->decoded_diagnostics = env->GetMethodID(diagnostics, "onDecodedDiagnostics", "(ZZ)V");
+    native->finished_diagnostics = env->GetMethodID(diagnostics, "onDecodeFinishedDiagnostics", "(IIZZ)V");
+  }
+  env->DeleteLocalRef(diagnostics);
+  if (env->ExceptionCheck()) {
+    env->DeleteGlobalRef(native->callback_handler);
+    delete native;
+    return nullptr;
+  }
 
   // Create adapters
   native->logger = std::make_unique<js8core::android::AndroidLogger>("JS8Call");
@@ -638,6 +692,11 @@ JS8Engine_Native* js8_engine_create(JNIEnv* env, jobject callback_handler,
 
   // Configure engine
   js8core::EngineConfig config;
+  // Keep historical Android RX behavior unless the host explicitly opts in.
+  // Upstream now enables tracking/SIC by default; do not inherit that policy.
+  config.symbol_tracking = static_cast<js8core::SymbolTracking>(symbol_tracking);
+  config.tracked_sic = tracked_sic != 0;
+  config.optional_decode_budget_ms = optional_decode_budget_ms;
   config.sample_rate_hz = sample_rate_hz;
   config.submodes = (submodes == 0) ? 0x1F : submodes;  // default to all standard submodes
   config.tx_output_rate_hz = (enable_tx_audio_tap != 0) ? 11520 : 0;
@@ -1021,8 +1080,10 @@ int js8_register_natives(JavaVM* vm, JNIEnv* env) {
 
   // Map Kotlin Companion method to static method
   JNINativeMethod methods[] = {
-    {"nativeCreate", "(Lcom/js8call/core/JS8Engine$CallbackHandler;IIZZ)J",
+    {"nativeCreate", "(Lcom/js8call/core/JS8Engine$CallbackHandler;IIZZIZI)J",
      (void*)Java_com_js8call_core_JS8Engine_00024Companion_nativeCreate},
+    {"nativeCoreVersion", "()Ljava/lang/String;",
+     (void*)Java_com_js8call_core_JS8Engine_00024Companion_nativeCoreVersion},
     {"nativeStart", "(J)Z", (void*)Java_com_js8call_core_JS8Engine_nativeStart},
     {"nativeStop", "(J)V", (void*)Java_com_js8call_core_JS8Engine_nativeStop},
     {"nativeDestroy", "(J)V", (void*)Java_com_js8call_core_JS8Engine_nativeDestroy},
@@ -1077,7 +1138,9 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
     return JNI_ERR;
   }
 
-  js8_register_natives(vm, env);
+  if (!js8_register_natives(vm, env)) {
+    return JNI_ERR;
+  }
 
   return JNI_VERSION_1_6;
 }

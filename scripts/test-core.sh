@@ -26,6 +26,7 @@ cmake -S "$CORE" -B "$BUILD" \
 echo "==> building core and tests"
 cmake --build "$BUILD" --parallel 2 --target \
   js8core \
+  js8core-version-test \
   js8core-crc-test \
   js8core-varicode-test \
   js8core-policy-test \
@@ -34,6 +35,14 @@ cmake --build "$BUILD" --parallel 2 --target \
   js8core-fractional-rx-test \
   js8core-clock-math-test \
   js8core-decoder-roundtrip-test \
+  js8core-tracking-waveform-test \
+  js8core-symbol-tracking-test \
+  js8core-tracked-extraction-test \
+  js8core-tracked-reference-test \
+  js8core-tracking-baseline \
+  js8core-engine-tracking-test \
+  js8core-decode-control-test \
+  js8core-wav-decode-test \
   js8core-engine-smoke-test \
   js8core-rig-test \
   js8core-callback-reentrancy-test \

@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# Initialize or update the core/ submodule from https://github.com/JS8Call-improved/JS8Core
+# Initialize core/ at the revision pinned by this repository.
 #
 # Usage: scripts/sync-core.sh [path-to-js8core-source]
 #
 # What it does:
-#   1. Updates the git submodule at core/ (or copies from an explicit override path).
+#   1. Checks out the pinned submodule revision (or copies an override source).
 #   2. Records the upstream revision in core/UPSTREAM.
+#
+# This does not upgrade to upstream HEAD. To upgrade, fetch the desired commit
+# in core/, check it out explicitly, test it, and commit the parent gitlink.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -22,9 +25,8 @@ if [ -n "$SRC" ]; then
   mkdir -p "$DST"
   rsync -a --exclude='.git' --exclude='build' --exclude='build-*' --exclude='build_*' "$SRC"/ "$DST"/
 else
-  echo "==> initializing and updating core/ submodule"
+  echo "==> initializing core/ at the pinned revision"
   git -C "$ROOT" submodule update --init --recursive
-  rm -rf "$DST/build" "$DST/build-review"
 fi
 
 echo "==> recording upstream revision"

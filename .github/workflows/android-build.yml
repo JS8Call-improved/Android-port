@@ -5,6 +5,7 @@ on:
     branches: [ master, develop ]
     paths:
       - 'android/**'
+      - 'core'
       - 'core/**'
       - 'adapters/android/**'
       - 'scripts/**'
@@ -14,10 +15,12 @@ on:
     branches: [ master, develop ]
     paths:
       - 'android/**'
+      - 'core'
       - 'core/**'
       - 'adapters/android/**'
       - 'scripts/**'
       - 'tools/**'
+      - '.github/workflows/android-build.yml'
   workflow_dispatch:
     inputs:
       build_type:
@@ -161,6 +164,10 @@ jobs:
     - name: Run tests
       working-directory: android
       run: ./gradlew test
+
+    - name: Compile engine instrumentation tests
+      working-directory: android
+      run: ./gradlew :js8core-lib:assembleDebugAndroidTest
 
     - name: Upload APK
       uses: actions/upload-artifact@v4

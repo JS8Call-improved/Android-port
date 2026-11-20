@@ -12,7 +12,7 @@ extern "C" {
 typedef struct JS8Engine_Native JS8Engine_Native;
 
 // Engine creation and lifecycle
-JS8Engine_Native* js8_engine_create(JNIEnv* env, jobject callback_handler, int sample_rate_hz, int submodes, int enable_tx_audio_tap, int use_qmx_usb_audio);
+JS8Engine_Native* js8_engine_create(JNIEnv* env, jobject callback_handler, int sample_rate_hz, int submodes, int enable_tx_audio_tap, int use_qmx_usb_audio, int symbol_tracking, int tracked_sic, int optional_decode_budget_ms);
 void js8_engine_destroy(JS8Engine_Native* engine);
 int js8_engine_start(JS8Engine_Native* engine);
 void js8_engine_stop(JS8Engine_Native* engine);

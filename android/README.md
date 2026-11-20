@@ -8,7 +8,7 @@ This directory contains the Android Gradle project for JS8Android.
 - Android SDK + NDK (26.1.10909125 recommended)
 - Java 17
 
-The cleanroom js8core uses vendored header-only Eigen and pocketfft, so the
+JS8Core uses vendored header-only Eigen and pocketfft, so the
 Android native build no longer needs FFTW3 or Boost. Eigen is picked up from
 `vendor/Eigen` by the Gradle build.
 
@@ -50,6 +50,13 @@ JAVA_HOME=/opt/homebrew/opt/openjdk ANDROID_HOME=~/Library/Android/sdk ./gradlew
 ```
 
 Report: `android/js8core-lib/build/reports/androidTests/connected/`
+
+### JS8Core upstream compatibility
+
+The `core/` submodule pins the exact upstream revision. `scripts/sync-core.sh`
+initializes that pin; it does **not** upgrade to upstream HEAD or clean builds.
+See [the compatibility notes](../docs/js8core-upstream-compatibility.md) for the
+reviewed revision, receive policy, validation commands, and remaining device gates.
 
 To run one class:
 
