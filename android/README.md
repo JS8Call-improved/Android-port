@@ -51,6 +51,21 @@ JAVA_HOME=/opt/homebrew/opt/openjdk ANDROID_HOME=~/Library/Android/sdk ./gradlew
 
 Report: `android/js8core-lib/build/reports/androidTests/connected/`
 
+### Speeds 40 and 60
+
+The speed picker uses the desktop names **40** and **60**. The existing 40 mode
+keeps TX ID `2` and a six-second period; 60 uses TX ID `8` and a four-second period.
+Reception enables all five speeds regardless of the selected TX speed. Existing
+saved TX preferences and the default Normal speed are unchanged.
+
+Focused modem checks are `JS8EngineTurboLoopbackTest` (40, retaining its legacy
+test name) and `JS8Engine60LoopbackTest` (60, including consecutive frames with
+all-mode reception). User-facing labels are checked by the app's `SpeedLabelsTest`.
+Run these on a device before validating exchanges with JS8Desktop in both
+directions, multipart messages, heartbeat placement, and CAT/PTT or VOX starts
+and cancellation at four-second cadence. Self-loopback is not an interoperability
+test.
+
 ### JS8Core upstream compatibility
 
 The `core/` submodule pins the exact upstream revision. `scripts/sync-core.sh`
@@ -78,7 +93,7 @@ Optional extras:
 
 - `--ei snr -12` (default -10)
 - `--ef freq 1450` audio offset in Hz (default 1500)
-- `--ei mode 2` submode: 0 Normal, 1 Fast, 2 Turbo, 4 Slow (default 0)
+- `--ei mode 2` submode: 0 Normal, 1 Fast, 2 mode 40, 4 Slow, 8 mode 60 (default 0)
 - `--ei type 1` frame flags, added together: 1 first, 2 last, 4 data (default 3, a single frame)
 
 A multi-frame message is one broadcast per frame, back to back, at the same `freq`. The frames after a `MSG` header are data frames: 4 in the middle, 6 last.

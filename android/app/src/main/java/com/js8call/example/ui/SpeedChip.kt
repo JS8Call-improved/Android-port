@@ -1,11 +1,10 @@
 package com.js8call.example.ui
 
 import android.widget.PopupMenu
-import androidx.annotation.StringRes
 import androidx.preference.PreferenceManager
 import com.google.android.material.button.MaterialButton
-import com.js8call.example.R
 import com.js8call.example.service.JS8EngineService
+import com.js8call.example.util.Js8Speed
 
 /**
  * Toolbar chip showing the current TX speed; tapping opens the picker.
@@ -13,14 +12,7 @@ import com.js8call.example.service.JS8EngineService
  */
 object SpeedChip {
 
-    private class Speed(val submode: Int, @StringRes val label: Int)
-
-    private val speeds = listOf(
-        Speed(JS8EngineService.SUBMODE_SLOW, R.string.tx_speed_slow),
-        Speed(JS8EngineService.SUBMODE_NORMAL, R.string.tx_speed_normal),
-        Speed(JS8EngineService.SUBMODE_FAST, R.string.tx_speed_fast),
-        Speed(JS8EngineService.SUBMODE_TURBO, R.string.tx_speed_turbo)
-    )
+    private val speeds = Js8Speed.entries
 
     fun bind(chip: MaterialButton) {
         chip.setText(current(chip).label)
@@ -45,10 +37,9 @@ object SpeedChip {
         popup.show()
     }
 
-    private fun current(chip: MaterialButton): Speed {
+    private fun current(chip: MaterialButton): Js8Speed {
         val submode = PreferenceManager.getDefaultSharedPreferences(chip.context)
             .getInt(JS8EngineService.PREF_TX_SUBMODE, JS8EngineService.SUBMODE_NORMAL)
-        return speeds.firstOrNull { it.submode == submode }
-            ?: speeds.first { it.submode == JS8EngineService.SUBMODE_NORMAL }
+        return Js8Speed.fromSubmode(submode)
     }
 }

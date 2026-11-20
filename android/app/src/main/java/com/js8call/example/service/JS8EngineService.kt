@@ -32,7 +32,6 @@ import com.js8call.core.QmxDirectSerial
 import com.js8call.core.TruSdxDirectSerial
 import com.js8call.core.UsbSerialBridge
 import com.js8call.core.UsbSerialPortCatalog
-import com.js8call.core.rxMaskOf
 import com.js8call.example.MainActivity
 import com.js8call.example.model.DecodedMessage
 import com.js8call.example.ui.AudioDevices
@@ -43,6 +42,7 @@ import com.js8call.example.data.MessageRepository
 import com.js8call.example.network.PskReporterClient
 import com.js8call.example.util.CallsignValidator
 import com.js8call.example.util.Js8Commands
+import com.js8call.example.util.Js8Speed
 import com.js8call.example.util.TxMessageClassifier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -679,7 +679,7 @@ class JS8EngineService : Service() {
             // Create engine
             engine = JS8Engine.create(
                 sampleRateHz = 12000,
-                submodes = rxMaskOf(SUBMODE_NORMAL, SUBMODE_FAST, SUBMODE_TURBO, SUBMODE_SLOW),
+                submodes = Js8Speed.receiveMask(),
                 callbackHandler = callbackHandler,
                 enableTxAudioTap = rigControlMode == "trusdx_serial" || rigControlMode == "btech_uvpro",
                 useQmxUsbAudio = rigControlMode == "qmx_serial"
@@ -2671,13 +2671,7 @@ class JS8EngineService : Service() {
     }
 
     private fun framePeriodMs(submode: Int): Long {
-        return when (submode) {
-            SUBMODE_SLOW -> 30000L
-            SUBMODE_NORMAL -> 15000L
-            SUBMODE_FAST -> 10000L
-            SUBMODE_TURBO -> 6000L
-            else -> 15000L
-        }
+        return Js8Speed.fromSubmode(submode).periodMs
     }
 
     /**
@@ -2694,14 +2688,7 @@ class JS8EngineService : Service() {
      * off by the submode bandwidth so the whole signal stays under 1000 Hz.
      */
     private fun heartbeatOffsetHz(submode: Int): Float {
-        val bandwidthHz = when (submode) {
-            SUBMODE_SLOW -> 25
-            SUBMODE_FAST -> 80
-            SUBMODE_TURBO -> 160
-            else -> 50
-        }
-        val high = HB_SUBBAND_HIGH_HZ - bandwidthHz
-        return (HB_SUBBAND_LOW_HZ + Math.random() * (high - HB_SUBBAND_LOW_HZ)).toFloat()
+        return Js8Speed.fromSubmode(submode).heartbeatOffsetHz(Math.random())
     }
 
     private fun sendHeartbeat() {
@@ -2817,11 +2804,12 @@ class JS8EngineService : Service() {
         val grid = prefs.getString("grid", "")?.trim().orEmpty().uppercase()
 
         val directed = intent.getStringExtra(EXTRA_TX_DIRECTED)?.trim().orEmpty()
-        val submode = if (intent.hasExtra(EXTRA_TX_SUBMODE)) {
+        val requestedSubmode = if (intent.hasExtra(EXTRA_TX_SUBMODE)) {
             intent.getIntExtra(EXTRA_TX_SUBMODE, SUBMODE_NORMAL)
         } else {
             prefs.getInt(PREF_TX_SUBMODE, SUBMODE_NORMAL)
         }
+        val submode = Js8Speed.fromSubmode(requestedSubmode).submode
         // Heartbeat traffic belongs in the 500-1000 Hz sub-band, away from QSOs.
         // This covers manual HB sends and auto HB ACKs; the scheduled heartbeat
         // picks its own offset in sendHeartbeat().
@@ -3616,13 +3604,7 @@ class JS8EngineService : Service() {
     private fun getPreferredTxSubmode(): Int {
         val prefs = PreferenceManager.getDefaultSharedPreferences(this)
         val submode = prefs.getInt(PREF_TX_SUBMODE, SUBMODE_NORMAL)
-        return when (submode) {
-            SUBMODE_NORMAL,
-            SUBMODE_FAST,
-            SUBMODE_TURBO,
-            SUBMODE_SLOW -> submode
-            else -> SUBMODE_NORMAL
-        }
+        return Js8Speed.fromSubmode(submode).submode
     }
 
     private fun getConfiguredCallsign(): String? {
@@ -4252,12 +4234,10 @@ class JS8EngineService : Service() {
         private const val RELAY_EOM_MARKER = "\u2662"
         const val SUBMODE_NORMAL = 0
         const val SUBMODE_FAST = 1
-        const val SUBMODE_TURBO = 2
+        const val SUBMODE_40 = 2
+        const val SUBMODE_TURBO = SUBMODE_40 // Legacy source compatibility.
         const val SUBMODE_SLOW = 4
-
-        // Heartbeat sub-band, matching the desktop app
-        private const val HB_SUBBAND_LOW_HZ = 500
-        private const val HB_SUBBAND_HIGH_HZ = 1000
+        const val SUBMODE_60 = 8
 
         // Outgoing HB ACK: "MYCALL: TARGET HEARTBEAT SNR +NN"
         private val heartbeatAckTxRegex =

@@ -6,8 +6,8 @@ import org.junit.Assert.assertTrue
 import java.util.concurrent.CopyOnWriteArrayList
 
 /** One decode as the engine reported it. */
-internal data class Decode(val text: String, val snr: Int, val dt: Float, val freq: Float, val type: Int) {
-    override fun toString() = String.format("'%s' dt=%+.2f f=%.0f snr=%d type=0x%X", text, dt, freq, snr, type)
+internal data class Decode(val text: String, val snr: Int, val dt: Float, val freq: Float, val type: Int, val mode: Int = 0) {
+    override fun toString() = String.format("'%s' dt=%+.2f f=%.0f snr=%d type=0x%X mode=%d", text, dt, freq, snr, type, mode)
 }
 
 /**
@@ -15,7 +15,10 @@ internal data class Decode(val text: String, val snr: Int, val dt: Float, val fr
  * submode runs at the engine's own rate with the TX tap on. Each job shifts the clock first,
  * because the ring phase and the modulator both follow the wall clock.
  */
-internal class TestEngine(private val submode: Int = SUBMODE_NORMAL) : AutoCloseable {
+internal class TestEngine(
+    private val submode: Int = SUBMODE_NORMAL,
+    receiveMask: Int = rxMaskOf(submode)
+) : AutoCloseable {
     private val decodes = CopyOnWriteArrayList<Decode>()
     private val tapped = ArrayList<ShortArray>()
     private var tapRate = SAMPLE_RATE
@@ -24,14 +27,14 @@ internal class TestEngine(private val submode: Int = SUBMODE_NORMAL) : AutoClose
 
     private val engine = JS8Engine.create(
         sampleRateHz = SAMPLE_RATE,
-        submodes = rxMaskOf(submode),
+        submodes = receiveMask,
         enableTxAudioTap = true,
         callbackHandler = object : JS8Engine.CallbackHandler {
             override fun onDecoded(
                 utc: Int, snr: Int, dt: Float, freq: Float, text: String,
                 type: Int, quality: Float, mode: Int, driftMs: Int
             ) {
-                decodes.add(Decode(text, snr, dt, freq, type))
+                decodes.add(Decode(text, snr, dt, freq, type, mode))
             }
 
             override fun onDecodeFinished(count: Int) {
@@ -147,6 +150,7 @@ internal class TestEngine(private val submode: Int = SUBMODE_NORMAL) : AutoClose
         const val SUBMODE_NORMAL = 0
         const val SUBMODE_TURBO = 2
         const val SUBMODE_SLOW = 4
+        const val SUBMODE_60 = 8
         const val MINUTE_MS = 60_000L
         const val CHUNK = 4_096
         const val POLL_MS = 50L
@@ -160,6 +164,7 @@ internal class TestEngine(private val submode: Int = SUBMODE_NORMAL) : AutoClose
             SUBMODE_NORMAL -> 15_000L
             SUBMODE_TURBO -> 6_000L
             SUBMODE_SLOW -> 30_000L
+            SUBMODE_60 -> 4_000L
             else -> error("unsupported test submode $submode")
         }
     }

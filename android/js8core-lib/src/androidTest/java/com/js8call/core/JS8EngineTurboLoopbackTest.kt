@@ -19,7 +19,8 @@ class JS8EngineTurboLoopbackTest {
             .withNoise(rms = 300.0, seed = 2)
         val decoded = TestEngine(SUBMODE_TURBO).use { it.decode(period) }
 
-        assertTrue("own Turbo transmission did not decode: $decoded", decoded.any { "CQ" in it.text })
+        assertTrue("own 40 transmission did not decode with mode 2: $decoded",
+            decoded.any { "CQ" in it.text && it.mode == SUBMODE_TURBO })
     }
 
     private companion object {

@@ -76,7 +76,8 @@
     <string name="tx_speed_slow">Slow</string>
     <string name="tx_speed_normal">Normal</string>
     <string name="tx_speed_fast">Fast</string>
-    <string name="tx_speed_turbo">Turbo</string>
+    <string name="tx_speed_40">40</string>
+    <string name="tx_speed_60">60</string>
 
     <!-- Settings -->
     <string name="settings_title">Settings</string>
